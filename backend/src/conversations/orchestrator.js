@@ -6,6 +6,24 @@ import { sendEmail, isEmailEnabled } from '../lib/notifications/email.js'
 import { sendInstagramDM, replyToInstagramComment, isInstagramEnabled } from '../lib/notifications/instagram.js'
 import { replyToTikTokComment, sendTikTokDM, isTikTokEnabled } from '../lib/notifications/tiktok.js'
 import { sendXDM, replyToXMention, isXEnabled } from '../lib/notifications/x.js'
+import { sendFacebookMessengerDM, replyToFacebookComment, isFacebookEnabled } from '../lib/notifications/facebook.js'
+import { replyToLinkedInComment, isLinkedInEnabled } from '../lib/notifications/linkedin.js'
+import { resolveConnectionCredentials } from '../lib/credentials.js'
+
+/**
+ * Resolve the acting agent's per-platform credentials (enterprise targets +
+ * OAuth tokens). Returns null if the agent has no connection for that platform;
+ * the caller decides whether to fall back to env-only or fail.
+ */
+async function resolveAgentPlatformCreds(agentId, platform) {
+  if (!agentId || !platform) return null
+  const conn = await findOne(
+    'marketplace_connections',
+    (c) => c.agent_id === agentId && c.platform === platform,
+  )
+  if (!conn || conn.status !== 'connected') return null
+  return resolveConnectionCredentials(conn)
+}
 
 function normalizePhone(phone) {
   return String(phone || '').replace(/\D/g, '')
@@ -305,7 +323,13 @@ export async function sendOutboundMessage({ conversationId, content, contentType
         dispatch = { ok: false, status: 'failed', provider: 'instagram', provider_message_id: null, error: 'No Instagram DM recipient found on this thread' }
       } else {
         try {
-          const response = await sendInstagramDM({ recipientId, text: content })
+          const creds = await resolveAgentPlatformCreds(sentByAgentId, 'instagram')
+          const response = await sendInstagramDM({
+            recipientId,
+            text: content,
+            businessAccountId: creds?.ig_business_account_id || undefined,
+            accessToken: creds?.ig_page_access_token_override || undefined,
+          })
           dispatch = {
             ok: response.ok,
             status: response.ok ? 'sent' : 'failed',
@@ -330,7 +354,12 @@ export async function sendOutboundMessage({ conversationId, content, contentType
         dispatch = { ok: false, status: 'failed', provider: 'instagram', provider_message_id: null, error: 'No Instagram comment ID found on this thread' }
       } else {
         try {
-          const response = await replyToInstagramComment({ commentId, text: content })
+          const creds = await resolveAgentPlatformCreds(sentByAgentId, 'instagram')
+          const response = await replyToInstagramComment({
+            commentId,
+            text: content,
+            accessToken: creds?.ig_page_access_token_override || undefined,
+          })
           dispatch = {
             ok: response.ok,
             status: response.ok ? 'sent' : 'failed',
@@ -355,7 +384,12 @@ export async function sendOutboundMessage({ conversationId, content, contentType
         dispatch = { ok: false, status: 'failed', provider: 'tiktok', provider_message_id: null, error: 'No TikTok comment ID found on this thread' }
       } else {
         try {
-          const response = await replyToTikTokComment({ commentId, text: content })
+          const creds = await resolveAgentPlatformCreds(sentByAgentId, 'tiktok')
+          const response = await replyToTikTokComment({
+            commentId,
+            text: content,
+            accessToken: creds?.oauth_access_token || undefined,
+          })
           dispatch = {
             ok: response.ok,
             status: response.ok ? 'sent' : 'failed',
@@ -380,7 +414,12 @@ export async function sendOutboundMessage({ conversationId, content, contentType
         dispatch = { ok: false, status: 'failed', provider: 'tiktok', provider_message_id: null, error: 'No TikTok user ID found on this thread' }
       } else {
         try {
-          const response = await sendTikTokDM({ userId, text: content })
+          const creds = await resolveAgentPlatformCreds(sentByAgentId, 'tiktok')
+          const response = await sendTikTokDM({
+            userId,
+            text: content,
+            accessToken: creds?.oauth_access_token || undefined,
+          })
           dispatch = {
             ok: response.ok,
             status: response.ok ? 'sent' : 'failed',
@@ -405,7 +444,12 @@ export async function sendOutboundMessage({ conversationId, content, contentType
         dispatch = { ok: false, status: 'failed', provider: 'x', provider_message_id: null, error: 'No X participant ID found on this thread' }
       } else {
         try {
-          const response = await sendXDM({ participantId, text: content })
+          const creds = await resolveAgentPlatformCreds(sentByAgentId, 'x')
+          const response = await sendXDM({
+            participantId,
+            text: content,
+            bearerToken: creds?.oauth_access_token || undefined,
+          })
           dispatch = {
             ok: response.ok,
             status: response.ok ? 'sent' : 'failed',
@@ -430,7 +474,12 @@ export async function sendOutboundMessage({ conversationId, content, contentType
         dispatch = { ok: false, status: 'failed', provider: 'x', provider_message_id: null, error: 'No X tweet ID found on this thread' }
       } else {
         try {
-          const response = await replyToXMention({ tweetId, text: content })
+          const creds = await resolveAgentPlatformCreds(sentByAgentId, 'x')
+          const response = await replyToXMention({
+            tweetId,
+            text: content,
+            bearerToken: creds?.oauth_access_token || undefined,
+          })
           dispatch = {
             ok: response.ok,
             status: response.ok ? 'sent' : 'failed',

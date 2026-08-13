@@ -41,8 +41,9 @@ function xApiBase() {
 /**
  * Send an X DM (direct message). Live path requires X API v2 DM endpoints.
  */
-export async function sendXDM({ participantId, text }) {
+export async function sendXDM({ participantId, text, bearerToken }) {
   const cfg = getXConfig()
+  const token = bearerToken || cfg.bearerToken
   if (!participantId) throw Object.assign(new Error('participantId is required for X DM'), { code: 'MISSING_RECIPIENT' })
   if (!text?.trim()) throw Object.assign(new Error('text is required'), { code: 'MISSING_CONTENT' })
 
@@ -65,7 +66,7 @@ export async function sendXDM({ participantId, text }) {
   const conversationRes = await fetch(`${xApiBase()}/dm_conversations`, {
     method: 'POST',
     headers: {
-      Authorization: `Bearer ${cfg.bearerToken}`,
+      Authorization: `Bearer ${token}`,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
@@ -96,8 +97,9 @@ export async function sendXDM({ participantId, text }) {
  * Reply to an X mention or public post. Public replies should never contain PII;
  * we encourage the user to move to DM.
  */
-export async function replyToXMention({ tweetId, text }) {
+export async function replyToXMention({ tweetId, text, bearerToken }) {
   const cfg = getXConfig()
+  const token = bearerToken || cfg.bearerToken
   if (!tweetId) throw Object.assign(new Error('tweetId is required'), { code: 'MISSING_TWEET_ID' })
   if (!text?.trim()) throw Object.assign(new Error('reply text is required'), { code: 'MISSING_CONTENT' })
 
@@ -118,7 +120,7 @@ export async function replyToXMention({ tweetId, text }) {
   const res = await fetch(`${xApiBase()}/tweets`, {
     method: 'POST',
     headers: {
-      Authorization: `Bearer ${cfg.bearerToken}`,
+      Authorization: `Bearer ${token}`,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({ text: text.trim(), reply: { in_reply_to_tweet_id: tweetId } }),

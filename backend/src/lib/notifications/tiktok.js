@@ -32,8 +32,10 @@ export function isTikTokEnabled() {
  * Reply to a TikTok comment. Public replies must not contain PII.
  * Live path requires TikTok Research / Content API access which is restricted.
  */
-export async function replyToTikTokComment({ commentId, text }) {
+export async function replyToTikTokComment({ commentId, text, accessToken }) {
   const cfg = getTikTokConfig()
+  const token = accessToken || cfg.accessToken
+  void token
   if (!commentId) throw Object.assign(new Error('commentId is required'), { code: 'MISSING_COMMENT_ID' })
   if (!text?.trim()) throw Object.assign(new Error('reply text is required'), { code: 'MISSING_CONTENT' })
 
@@ -60,8 +62,10 @@ export async function replyToTikTokComment({ commentId, text }) {
 /**
  * Send a TikTok DM. Live path is not generally available to third-party apps.
  */
-export async function sendTikTokDM({ userId, text }) {
+export async function sendTikTokDM({ userId, text, accessToken }) {
   const cfg = getTikTokConfig()
+  const token = accessToken || cfg.accessToken
+  void token
   if (!userId) throw Object.assign(new Error('userId is required'), { code: 'MISSING_RECIPIENT' })
   if (!text?.trim()) throw Object.assign(new Error('text is required'), { code: 'MISSING_CONTENT' })
 

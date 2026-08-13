@@ -155,9 +155,10 @@ export async function publishLinkedInPost({
  *
  *   POST /v2/socialActions/{shareUrn}/comments  {actor, message: {text}}
  */
-export async function replyToLinkedInComment({ postUrn, parentCommentUrn, text, actorUrn }) {
+export async function replyToLinkedInComment({ postUrn, parentCommentUrn, text, actorUrn, accessToken }) {
   const cfg = getLinkedInConfig()
   const actor = actorUrn || cfg.authorUrn
+  const token = accessToken || cfg.accessToken
   if (!postUrn) throw Object.assign(new Error('postUrn is required'), { code: 'MISSING_POST' })
   if (!text?.trim()) throw Object.assign(new Error('reply text is required'), { code: 'MISSING_CONTENT' })
 
@@ -184,7 +185,7 @@ export async function replyToLinkedInComment({ postUrn, parentCommentUrn, text, 
   const res = await fetch(`${UGC_BASE}/socialActions/${encodeURIComponent(postUrn)}/comments`, {
     method: 'POST',
     headers: {
-      Authorization: `Bearer ${cfg.accessToken}`,
+      Authorization: `Bearer ${token}`,
       'Content-Type': 'application/json',
       'LinkedIn-Version': cfg.apiVersion,
       'X-Restli-Protocol-Version': '2.0.0',

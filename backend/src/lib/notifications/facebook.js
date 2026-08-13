@@ -138,8 +138,9 @@ export async function publishFacebookPagePhoto({ pageId, imageUrl, caption, acce
  * Reply to a Facebook Page comment.
  *   POST /{comment-id}/comments  {message}
  */
-export async function replyToFacebookComment({ commentId, text }) {
+export async function replyToFacebookComment({ commentId, text, accessToken }) {
   const cfg = getFacebookConfig()
+  const token = accessToken || cfg.pageAccessToken
   if (!commentId) throw Object.assign(new Error('commentId is required'), { code: 'MISSING_COMMENT_ID' })
   if (!text?.trim()) throw Object.assign(new Error('reply text is required'), { code: 'MISSING_CONTENT' })
 
@@ -159,7 +160,7 @@ export async function replyToFacebookComment({ commentId, text }) {
 
   const body = new URLSearchParams()
   body.set('message', text.trim())
-  body.set('access_token', cfg.pageAccessToken)
+  body.set('access_token', token)
 
   const res = await fetch(`${GRAPH_BASE}/${commentId}/comments`, { method: 'POST', body })
   const payload = await res.json().catch(() => ({}))
@@ -181,8 +182,9 @@ export async function replyToFacebookComment({ commentId, text }) {
  * Send a Facebook Messenger DM to a page follower.
  *   POST /me/messages  {recipient: {id}, message: {text}}
  */
-export async function sendFacebookMessengerDM({ recipientId, text }) {
+export async function sendFacebookMessengerDM({ recipientId, text, accessToken }) {
   const cfg = getFacebookConfig()
+  const token = accessToken || cfg.pageAccessToken
   if (!recipientId) throw Object.assign(new Error('recipientId is required'), { code: 'MISSING_RECIPIENT' })
   if (!text?.trim()) throw Object.assign(new Error('text is required'), { code: 'MISSING_CONTENT' })
 
@@ -200,7 +202,7 @@ export async function sendFacebookMessengerDM({ recipientId, text }) {
     throw Object.assign(new Error('Facebook dev mode configured to fail'), { code: 'DEV_FAILURE' })
   }
 
-  const res = await fetch(`${GRAPH_BASE}/me/messages?access_token=${cfg.pageAccessToken}`, {
+  const res = await fetch(`${GRAPH_BASE}/me/messages?access_token=${token}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
