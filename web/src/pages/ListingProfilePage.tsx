@@ -1324,28 +1324,57 @@ function formatMetricSummary(t: { impressions: number; likes: number; comments: 
   return parts.length ? parts.join(' · ') : 'no metrics yet'
 }
 
+const CATEGORY_COLORS: Record<string, string> = {
+  hot_lead:    'bg-red-100 text-red-800 border-red-200',
+  interest:    'bg-blue-100 text-blue-800 border-blue-200',
+  investor:    'bg-indigo-100 text-indigo-800 border-indigo-200',
+  question:    'bg-amber-100 text-amber-800 border-amber-200',
+  objection:   'bg-orange-100 text-orange-800 border-orange-200',
+  complaint:   'bg-rose-100 text-rose-800 border-rose-200',
+  testimonial: 'bg-emerald-100 text-emerald-800 border-emerald-200',
+  reaction:    'bg-slate-100 text-slate-700 border-slate-200',
+  referral:    'bg-purple-100 text-purple-800 border-purple-200',
+  spam:        'bg-zinc-100 text-zinc-500 border-zinc-200 line-through',
+  general:     'bg-slate-100 text-slate-600 border-slate-200',
+}
+
+const SENTIMENT_DOT: Record<string, string> = {
+  positive: 'bg-emerald-500',
+  neutral:  'bg-slate-400',
+  negative: 'bg-rose-500',
+}
+
 function CommentsSection({ listingId }: { listingId: string }) {
   const { addToast } = useToast()
-  type ThreadT = Awaited<ReturnType<typeof api.getListingComments>>['threads'][number]
+  type Resp = Awaited<ReturnType<typeof api.getListingComments>>
+  type ThreadT = Resp['threads'][number]
+  type MessageT = ThreadT['messages'][number]
   const [threads, setThreads] = useState<ThreadT[]>([])
   const [publishedPosts, setPublishedPosts] = useState(0)
+  const [summary, setSummary] = useState<Record<string, number>>({})
+  const [categoryMeta, setCategoryMeta] = useState<Resp['category_meta']>({})
   const [loading, setLoading] = useState(true)
   const [replyOpenFor, setReplyOpenFor] = useState<string | null>(null)
   const [replyText, setReplyText] = useState('')
   const [replyBusy, setReplyBusy] = useState(false)
+  const [categoryFilter, setCategoryFilter] = useState<Set<string>>(new Set())
+  const [reclassifyOpenFor, setReclassifyOpenFor] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const r = await api.getListingComments(listingId)
+      const opts = categoryFilter.size > 0 ? { category: Array.from(categoryFilter) } : undefined
+      const r = await api.getListingComments(listingId, opts)
       setThreads(r.threads)
       setPublishedPosts(r.published_posts)
+      setSummary(r.summary || {})
+      setCategoryMeta(r.category_meta || {})
     } catch (err: any) {
       addToast({ title: 'Could not load comments', description: err?.message, variant: 'error' })
     } finally {
       setLoading(false)
     }
-  }, [listingId, addToast])
+  }, [listingId, addToast, categoryFilter])
 
   useEffect(() => { load() }, [load])
 
@@ -1365,6 +1394,26 @@ function CommentsSection({ listingId }: { listingId: string }) {
     }
   }
 
+  async function reclassify(messageId: string, category: string, sentiment?: string) {
+    try {
+      await api.reclassifyComment(messageId, category, sentiment)
+      addToast({ title: 'Reclassified', variant: 'success' })
+      setReclassifyOpenFor(null)
+      load()
+    } catch (err: any) {
+      addToast({ title: 'Reclassify failed', description: err?.message, variant: 'error' })
+    }
+  }
+
+  function toggleCategoryFilter(cat: string) {
+    setCategoryFilter((prev) => {
+      const next = new Set(prev)
+      if (next.has(cat)) next.delete(cat)
+      else next.add(cat)
+      return next
+    })
+  }
+
   const channelLabel: Record<string, string> = {
     instagram_comment: 'Instagram',
     facebook_comment: 'Facebook',
@@ -1372,6 +1421,9 @@ function CommentsSection({ listingId }: { listingId: string }) {
     x_mention: 'X',
     linkedin_comment: 'LinkedIn',
   }
+
+  // Ordered list of categories for the filter bar (mirrors backend priority).
+  const filterOrder = ['hot_lead', 'interest', 'investor', 'question', 'objection', 'complaint', 'testimonial', 'reaction', 'referral', 'general', 'spam']
 
   return (
     <Card>
@@ -1388,25 +1440,75 @@ function CommentsSection({ listingId }: { listingId: string }) {
           Refresh
         </Button>
       </CardHeader>
-      <CardContent>
+      <CardContent className="space-y-3">
+        {/* Filter chips */}
+        {Object.keys(categoryMeta).length > 0 && (
+          <div className="flex flex-wrap gap-1.5">
+            <button
+              type="button"
+              onClick={() => setCategoryFilter(new Set())}
+              className={`rounded-full border px-2.5 py-0.5 text-xs font-medium transition-colors ${
+                categoryFilter.size === 0
+                  ? 'bg-slate-900 text-white border-slate-900'
+                  : 'bg-white text-muted-foreground hover:bg-muted'
+              }`}
+            >
+              All ({Object.values(summary).reduce((s, n) => s + (n || 0), 0)})
+            </button>
+            {filterOrder.map((cat) => {
+              const meta = categoryMeta[cat]
+              if (!meta) return null
+              const count = summary[cat] || 0
+              if (count === 0 && !categoryFilter.has(cat)) return null
+              const active = categoryFilter.has(cat)
+              return (
+                <button
+                  key={cat}
+                  type="button"
+                  onClick={() => toggleCategoryFilter(cat)}
+                  className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-xs font-medium transition-colors ${
+                    active ? 'ring-2 ring-offset-1 ring-slate-900' : ''
+                  } ${CATEGORY_COLORS[cat] || CATEGORY_COLORS.general}`}
+                  title={meta.description}
+                >
+                  <span>{meta.emoji}</span>
+                  <span>{meta.label}</span>
+                  <span className="opacity-70">({count})</span>
+                </button>
+              )
+            })}
+          </div>
+        )}
+
         {loading ? (
           <div className="flex items-center justify-center py-6">
             <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
           </div>
         ) : threads.length === 0 ? (
           <p className="rounded-md border border-dashed bg-slate-50 p-4 text-sm text-muted-foreground">
-            No comments yet. Once your published posts start getting engagement, comment threads will
-            appear here — reply inline without leaving ListingClarion.
+            {categoryFilter.size > 0
+              ? 'No comments match the current filter. Clear filters to see everything.'
+              : 'No comments yet. Once your published posts start getting engagement, comment threads will appear here — reply inline without leaving ListingClarion.'}
           </p>
         ) : (
           <ul className="space-y-4">
             {threads.map((t) => {
               const displayName = t.contact?.name || t.messages[0]?.author_name || 'Someone'
+              const topCat = t.top_category
+              const topMeta = topCat ? categoryMeta[topCat] : null
               return (
                 <li key={t.conversation_id} className="rounded-lg border bg-white p-3">
                   <div className="flex items-center justify-between gap-2 pb-2">
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                       <Badge variant="outline">{channelLabel[t.channel] || t.channel}</Badge>
+                      {topMeta && (
+                        <span
+                          className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-medium ${CATEGORY_COLORS[topCat!] || CATEGORY_COLORS.general}`}
+                          title={topMeta.description}
+                        >
+                          {topMeta.emoji} {topMeta.label}
+                        </span>
+                      )}
                       <span className="text-sm font-medium">{displayName}</span>
                     </div>
                     {t.distribution_url && (
@@ -1423,20 +1525,14 @@ function CommentsSection({ listingId }: { listingId: string }) {
                   </div>
                   <ul className="space-y-1.5 border-t pt-2">
                     {t.messages.map((m) => (
-                      <li
+                      <MessageRow
                         key={m.id}
-                        className={
-                          m.direction === 'inbound'
-                            ? 'rounded-md bg-slate-50 px-2.5 py-1.5 text-sm'
-                            : 'ml-8 rounded-md bg-slate-900 px-2.5 py-1.5 text-sm text-white'
-                        }
-                      >
-                        <div className="whitespace-pre-wrap">{m.content}</div>
-                        <div className={`mt-0.5 text-[10px] ${m.direction === 'inbound' ? 'text-muted-foreground' : 'text-white/70'}`}>
-                          {new Date(m.created_at).toLocaleString()}
-                          {m.direction === 'outbound' && ` · ${m.status}`}
-                        </div>
-                      </li>
+                        message={m}
+                        categoryMeta={categoryMeta}
+                        reclassifyOpen={reclassifyOpenFor === m.id}
+                        onOpenReclassify={() => setReclassifyOpenFor(reclassifyOpenFor === m.id ? null : m.id)}
+                        onReclassify={(cat, sent) => reclassify(m.id, cat, sent)}
+                      />
                     ))}
                   </ul>
                   {replyOpenFor === t.conversation_id ? (
@@ -1474,6 +1570,82 @@ function CommentsSection({ listingId }: { listingId: string }) {
         )}
       </CardContent>
     </Card>
+  )
+}
+
+function MessageRow({
+  message: m,
+  categoryMeta,
+  reclassifyOpen,
+  onOpenReclassify,
+  onReclassify,
+}: {
+  message: {
+    id: string
+    direction: 'inbound' | 'outbound'
+    content: string
+    created_at: string
+    author_name: string | null
+    status: string
+    category: string | null
+    sentiment: 'positive' | 'neutral' | 'negative' | null
+    category_confidence: number | null
+    category_source: 'rules' | 'ai' | 'manual' | null
+  }
+  categoryMeta: Record<string, { label: string; emoji: string; description: string; route: string }>
+  reclassifyOpen: boolean
+  onOpenReclassify: () => void
+  onReclassify: (category: string, sentiment?: string) => void
+}) {
+  const meta = m.category ? categoryMeta[m.category] : null
+  const bubbleClass = m.direction === 'inbound'
+    ? 'rounded-md bg-slate-50 px-2.5 py-1.5 text-sm'
+    : 'ml-8 rounded-md bg-slate-900 px-2.5 py-1.5 text-sm text-white'
+  const sourceLabel = m.category_source
+    ? m.category_source === 'manual' ? '· manual' : m.category_source === 'ai' ? '· AI' : '· rules'
+    : ''
+  return (
+    <li className={bubbleClass}>
+      <div className="whitespace-pre-wrap">{m.content}</div>
+      <div className={`mt-0.5 flex items-center gap-2 text-[10px] ${m.direction === 'inbound' ? 'text-muted-foreground' : 'text-white/70'}`}>
+        <span>{new Date(m.created_at).toLocaleString()}</span>
+        {m.direction === 'outbound' && <span>· {m.status}</span>}
+        {m.direction === 'inbound' && meta && (
+          <span className="inline-flex items-center gap-1">
+            <span className={`inline-flex items-center gap-1 rounded-full border px-1.5 py-0 text-[10px] font-medium ${CATEGORY_COLORS[m.category!] || CATEGORY_COLORS.general}`}>
+              {meta.emoji} {meta.label}
+            </span>
+            {m.sentiment && (
+              <span title={`sentiment: ${m.sentiment}`} className={`inline-block h-1.5 w-1.5 rounded-full ${SENTIMENT_DOT[m.sentiment] || SENTIMENT_DOT.neutral}`} />
+            )}
+            <span className="opacity-70">{sourceLabel}</span>
+          </span>
+        )}
+        {m.direction === 'inbound' && (
+          <button
+            type="button"
+            onClick={onOpenReclassify}
+            className="ml-auto text-[10px] text-slate-500 hover:text-slate-800 hover:underline"
+          >
+            {reclassifyOpen ? 'cancel' : 'reclassify'}
+          </button>
+        )}
+      </div>
+      {reclassifyOpen && (
+        <div className="mt-1.5 flex flex-wrap gap-1 rounded border border-dashed bg-white p-1.5">
+          {Object.entries(categoryMeta).map(([cat, cm]) => (
+            <button
+              key={cat}
+              type="button"
+              onClick={() => onReclassify(cat)}
+              className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] hover:ring-1 hover:ring-slate-900 ${CATEGORY_COLORS[cat] || CATEGORY_COLORS.general}`}
+            >
+              {cm.emoji} {cm.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </li>
   )
 }
 

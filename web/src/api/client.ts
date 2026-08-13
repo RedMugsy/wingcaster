@@ -455,13 +455,17 @@ export const api = {
   sendConversationMessage: (id: string, content: string, options?: { content_type?: string; image_url?: string; subject?: string }) =>
     fetchJson(`/conversations/${id}/messages`, { method: 'POST', body: JSON.stringify({ content, ...(options || {}) }) }),
 
-  getListingComments: (listingId: string): Promise<{
+  getListingComments: (
+    listingId: string,
+    options?: { category?: string | string[] },
+  ): Promise<{
     threads: Array<{
       conversation_id: string
       platform: string | null
       channel: string
       external_post_id: string | null
       distribution_url: string | null
+      top_category: string | null
       contact: { id: string; name: string; avatar: string | null } | null
       messages: Array<{
         id: string
@@ -470,11 +474,35 @@ export const api = {
         created_at: string
         author_name: string | null
         status: string
+        category: string | null
+        sentiment: 'positive' | 'neutral' | 'negative' | null
+        category_confidence: number | null
+        category_source: 'rules' | 'ai' | 'manual' | null
       }>
       last_activity_at: string | null
     }>
     published_posts: number
-  }> => fetchJson(`/listings/${listingId}/comments`),
+    summary: Record<string, number>
+    category_meta: Record<string, { label: string; emoji: string; description: string; route: string }>
+  }> => {
+    const cat = options?.category
+    const qs = cat
+      ? '?category=' + encodeURIComponent(Array.isArray(cat) ? cat.join(',') : String(cat))
+      : ''
+    return fetchJson(`/listings/${listingId}/comments${qs}`)
+  },
+  getCommentClassifierConfig: (): Promise<{
+    categories: string[]
+    sentiments: string[]
+    meta: Record<string, { label: string; emoji: string; description: string; route: string }>
+  }> => fetchJson('/comment-classifier/config'),
+  reclassifyComment: (messageId: string, category: string, sentiment?: string) =>
+    fetchJson(`/comments/${messageId}/reclassify`, {
+      method: 'POST',
+      body: JSON.stringify({ category, sentiment }),
+    }),
+  backfillCommentCategories: (listingId: string) =>
+    fetchJson(`/listings/${listingId}/comments/backfill-categories`, { method: 'POST', body: '{}' }),
   assignConversation: (id: string, agentId?: string) =>
     fetchJson(`/conversations/${id}/assign`, { method: 'POST', body: JSON.stringify({ agent_id: agentId }) }),
   updateConversation: (id: string, data: Record<string, unknown>) =>

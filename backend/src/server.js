@@ -146,6 +146,12 @@ import {
   createModule as createListingsAiModule,
 } from './modules/listings-ai/index.js'
 import {
+  COMMENT_CATEGORIES,
+  COMMENT_SENTIMENTS,
+  CATEGORY_META,
+  classifyByRules,
+} from './lib/comment-classifier.js'
+import {
   isXEnabled,
   parseIncomingXWebhook,
   publishXTweet,
@@ -478,6 +484,76 @@ const listingsAiModule = createListingsAiModule()
 if (listingsAiModule.enabled) {
   listingsAiModule.registerRoutes(app, { authMiddleware })
 }
+
+/* ============================================================================
+ * Comment classifier — AI reclassification worker
+ *
+ * Periodically picks up public-comment messages whose rules-stage
+ * classification landed on `general` or was low-confidence, batches them
+ * to the multi-provider AI adapter, and updates rows with the improved
+ * classification. Never touches `category_source === 'manual'` rows.
+ *
+ * Opt-in via COMMENT_CLASSIFIER_AI_ENABLED (default: on when the
+ * listings-ai module is enabled).
+ * ========================================================================== */
+
+const COMMENT_CLASSIFIER_AI_ENABLED = process.env.COMMENT_CLASSIFIER_AI_ENABLED !== 'false' && listingsAiModule.enabled
+const COMMENT_CLASSIFIER_INTERVAL_MS = Math.max(30_000, Number(process.env.COMMENT_CLASSIFIER_INTERVAL_MS || 300_000))
+const COMMENT_CLASSIFIER_BATCH_SIZE = Math.max(1, Math.min(50, Number(process.env.COMMENT_CLASSIFIER_BATCH_SIZE || 10)))
+let commentClassifierTimer = null
+
+async function runCommentClassifierBatch() {
+  if (!listingsAiModule.enabled) return { skipped: 'ai_module_disabled' }
+  const publicChannels = new Set(['instagram_comment', 'facebook_comment', 'tiktok_comment', 'x_mention', 'linkedin_comment'])
+  const rows = await findAll('conversation_messages', (m) => {
+    if (m.direction !== 'inbound') return false
+    if (m.category_source === 'manual') return false
+    if (m.category_source === 'ai') return false // already handled
+    if (!publicChannels.has(m.channel)) return false
+    if (!m.content) return false
+    // Rules stage left us at general OR sub-threshold confidence.
+    return m.category === 'general' || (typeof m.category_confidence === 'number' && m.category_confidence < 0.6)
+  })
+
+  if (!rows.length) return { batched: 0, updated: 0 }
+
+  const batch = rows.slice(0, COMMENT_CLASSIFIER_BATCH_SIZE)
+  const items = batch.map((m) => ({ id: m.id, text: m.content }))
+  const { classifyBatchByAi } = await import('./lib/comment-classifier.js')
+  let classifications = []
+  try {
+    classifications = await classifyBatchByAi({
+      items,
+      aiAdapter: listingsAiModule.aiAdapter,
+      provider: listingsAiModule.config?.aiProvider,
+    })
+  } catch (err) {
+    logger.warn({ err: err.message }, 'Comment classifier AI batch failed')
+    return { batched: items.length, updated: 0, error: err.message }
+  }
+
+  let updated = 0
+  for (const c of classifications) {
+    if (!c?.id) continue
+    await update('conversation_messages', (m) => m.id === c.id, (m) => ({
+      ...m,
+      category: c.category,
+      sentiment: c.sentiment,
+      category_confidence: c.confidence,
+      category_source: 'ai',
+      category_matched_rule: c.reasoning || null,
+      category_updated_at: new Date().toISOString(),
+    }))
+    updated++
+  }
+  return { batched: items.length, updated }
+}
+
+app.post('/api/admin/comment-classifier/run', authMiddleware, async (req, res) => {
+  if (!await isPlatformAdmin(req.user.id)) return res.status(403).json({ error: 'Admin only' })
+  const result = await runCommentClassifierBatch()
+  res.json(result)
+})
 
 app.post('/api/uploads', authMiddleware, (req, res) => {
   upload.array('files', 15)(req, res, (err) => {
@@ -5560,7 +5636,11 @@ app.get('/api/listings/:id/comments', authMiddleware, async (req, res) => {
     'distributions',
     (d) => d.property_id === listingId && d.status === 'published' && d.external_id,
   )
-  if (!dists.length) return res.json({ threads: [], published_posts: 0 })
+  if (!dists.length) {
+    const empty = {}
+    for (const c of COMMENT_CATEGORIES) empty[c] = 0
+    return res.json({ threads: [], published_posts: 0, summary: empty })
+  }
 
   // Map every external id to its distribution so we can label threads.
   const distByExternalId = new Map()
@@ -5574,6 +5654,12 @@ app.get('/api/listings/:id/comments', authMiddleware, async (req, res) => {
     'linkedin_comment',
   ])
 
+  // Optional filter: ?category=hot_lead,interest,investor
+  const categoryFilter = String(req.query.category || '').trim()
+  const wantedCategories = categoryFilter
+    ? new Set(categoryFilter.split(',').map((s) => s.trim()).filter(Boolean))
+    : null
+
   const messages = await findAll('conversation_messages', (m) => {
     if (!publicChannels.has(m.channel)) return false
     const raw = m.metadata?.raw_payload || {}
@@ -5584,9 +5670,24 @@ app.get('/api/listings/:id/comments', authMiddleware, async (req, res) => {
     return candidates.some((c) => distByExternalId.has(c))
   })
 
+  // Roll-up summary across ALL messages (before the category filter so the
+  // filter chips can still show counts for categories that would be hidden).
+  const summary = {}
+  for (const c of COMMENT_CATEGORIES) summary[c] = 0
+  for (const m of messages) {
+    if (m.direction !== 'inbound') continue
+    const cat = m.category && COMMENT_CATEGORIES.includes(m.category) ? m.category : 'general'
+    summary[cat] = (summary[cat] || 0) + 1
+  }
+
   // Group by conversation and attach the associated distribution.
   const threads = new Map()
   for (const m of messages) {
+    // Apply category filter here (after summary, before thread build).
+    if (wantedCategories && m.direction === 'inbound') {
+      const cat = m.category || 'general'
+      if (!wantedCategories.has(cat)) continue
+    }
     const raw = m.metadata?.raw_payload || {}
     const externalId = [
       raw.media_id, raw.post_id, raw.post_urn, raw.tweet_id, raw.video_id,
@@ -5604,6 +5705,9 @@ app.get('/api/listings/:id/comments', authMiddleware, async (req, res) => {
         channel: m.channel,
         external_post_id: externalId || null,
         distribution_url: dist?.landing_page || dist?.post_url || null,
+        // Thread-level top category = most severe / highest-signal category
+        // across inbound messages in the thread. Set below after sort.
+        top_category: null,
         messages: [],
       })
     }
@@ -5614,18 +5718,132 @@ app.get('/api/listings/:id/comments', authMiddleware, async (req, res) => {
       created_at: m.created_at,
       author_name: m.metadata?.raw_payload?.from_username || null,
       status: m.status,
+      category: m.category || null,
+      sentiment: m.sentiment || null,
+      category_confidence: m.category_confidence ?? null,
+      category_source: m.category_source || null,
     })
   }
 
-  // Return threads sorted by most-recent activity first.
+  // Category priority order for picking a thread's top category — matches
+  // the routing importance (Complaint outranks Objection, etc.).
+  const priorityOrder = ['complaint', 'hot_lead', 'objection', 'investor', 'interest', 'question', 'testimonial', 'referral', 'reaction', 'general', 'spam']
+
   const out = Array.from(threads.values()).map((t) => {
     t.messages.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
     t.last_activity_at = t.messages.at(-1)?.created_at || t.conversation?.updated_at || null
+    const cats = t.messages.filter((m) => m.direction === 'inbound' && m.category).map((m) => m.category)
+    for (const p of priorityOrder) {
+      if (cats.includes(p)) { t.top_category = p; break }
+    }
     return t
   })
   out.sort((a, b) => new Date(b.last_activity_at || 0).getTime() - new Date(a.last_activity_at || 0).getTime())
 
-  res.json({ threads: out, published_posts: dists.length })
+  res.json({
+    threads: out,
+    published_posts: dists.length,
+    summary,
+    category_meta: CATEGORY_META,
+  })
+})
+
+/**
+ * Manually re-classify a single conversation message (agent override). Locks
+ * category_source to 'manual' so the background AI worker won't overwrite it.
+ */
+app.post('/api/comments/:id/reclassify', authMiddleware, async (req, res) => {
+  const row = await findOne('conversation_messages', (m) => m.id === req.params.id)
+  if (!row) return res.status(404).json({ error: 'Message not found' })
+
+  // Owner check via conversation → contact → listing distribution.
+  const conv = await findOne('conversations', (c) => c.id === row.conversation_id)
+  if (!conv) return res.status(404).json({ error: 'Conversation not found' })
+  const contact = await findOne('contacts', (c) => c.id === conv.contact_id)
+  const isOwner = contact?.assigned_agent_id === req.user.id
+  if (!isOwner) {
+    // Fall back: allow if the user is the owner of a distribution referenced
+    // in this message's raw_payload.
+    const raw = row.metadata?.raw_payload || {}
+    const candidates = [raw.media_id, raw.post_id, raw.post_urn, raw.tweet_id, raw.video_id].filter(Boolean).map(String)
+    const dist = candidates.length
+      ? await findOne('distributions', (d) => candidates.includes(String(d.external_id)))
+      : null
+    if (!dist || dist.agent_id !== req.user.id) {
+      return res.status(403).json({ error: 'Only the listing owner can re-classify comments on their post' })
+    }
+  }
+
+  const { category, sentiment } = req.body || {}
+  if (!COMMENT_CATEGORIES.includes(category)) {
+    return res.status(400).json({ error: `Invalid category. One of: ${COMMENT_CATEGORIES.join(', ')}` })
+  }
+  const nextSentiment = sentiment && COMMENT_SENTIMENTS.includes(sentiment) ? sentiment : (row.sentiment || 'neutral')
+
+  await update('conversation_messages', (m) => m.id === row.id, (m) => ({
+    ...m,
+    category,
+    sentiment: nextSentiment,
+    category_confidence: 1,
+    category_source: 'manual',
+    category_matched_rule: 'manual_override',
+    category_updated_at: new Date().toISOString(),
+  }))
+  const updated = await findOne('conversation_messages', (m) => m.id === row.id)
+  await logActivity({
+    type: 'comment_manually_reclassified',
+    agent_id: req.user.id,
+    meta: { message_id: row.id, category, sentiment: nextSentiment },
+  })
+  res.json({ message: updated })
+})
+
+app.get('/api/comment-classifier/config', authMiddleware, (_req, res) => {
+  res.json({ categories: COMMENT_CATEGORIES, sentiments: COMMENT_SENTIMENTS, meta: CATEGORY_META })
+})
+
+/**
+ * Retro-classify: run the rules stage over every previously-ingested public
+ * comment for this listing that has no category yet. One-shot backfill for
+ * tenants who had comments landing before the classifier shipped.
+ */
+app.post('/api/listings/:id/comments/backfill-categories', authMiddleware, async (req, res) => {
+  const property = await findOne('properties', (p) => p.id === req.params.id)
+  if (!property || property.agent_id !== req.user.id) {
+    return res.status(403).json({ error: 'Not authorised' })
+  }
+  const dists = await findAll(
+    'distributions',
+    (d) => d.property_id === property.id && d.status === 'published' && d.external_id,
+  )
+  const distExternalIds = new Set(dists.map((d) => String(d.external_id)))
+  const publicChannels = new Set(['instagram_comment', 'facebook_comment', 'tiktok_comment', 'x_mention', 'linkedin_comment'])
+
+  const messages = await findAll('conversation_messages', (m) => {
+    if (!publicChannels.has(m.channel)) return false
+    if (m.category_source === 'manual') return false // never overwrite manual
+    if (m.category) return false                     // already classified
+    const raw = m.metadata?.raw_payload || {}
+    const candidates = [raw.media_id, raw.post_id, raw.post_urn, raw.tweet_id, raw.video_id].filter(Boolean).map(String)
+    return candidates.some((c) => distExternalIds.has(c))
+  })
+
+  let classified = 0
+  for (const m of messages) {
+    if (m.direction !== 'inbound' || !m.content) continue
+    const r = classifyByRules(m.content)
+    await update('conversation_messages', (row) => row.id === m.id, (row) => ({
+      ...row,
+      category: r.category,
+      sentiment: r.sentiment,
+      category_confidence: r.confidence,
+      category_source: r.source,
+      category_matched_rule: r.matched_rule,
+      category_updated_at: new Date().toISOString(),
+    }))
+    classified++
+  }
+  res.json({ scanned: messages.length, classified })
 })
 
 /**
@@ -6925,6 +7143,22 @@ const startServer = async () => {
 
       if (typeof campaignSchedulerTimer.unref === 'function') {
         campaignSchedulerTimer.unref()
+      }
+    }
+
+    if (COMMENT_CLASSIFIER_AI_ENABLED) {
+      commentClassifierTimer = setInterval(async () => {
+        try {
+          const r = await runCommentClassifierBatch()
+          if (r?.updated) {
+            logger.info(r, 'Comment classifier AI batch updated rows')
+          }
+        } catch (err) {
+          logger.error({ err: err.message || String(err) }, 'Comment classifier worker failed')
+        }
+      }, COMMENT_CLASSIFIER_INTERVAL_MS)
+      if (typeof commentClassifierTimer.unref === 'function') {
+        commentClassifierTimer.unref()
       }
     }
   })

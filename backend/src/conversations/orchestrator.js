@@ -9,6 +9,18 @@ import { sendXDM, replyToXMention, isXEnabled } from '../lib/notifications/x.js'
 import { sendFacebookMessengerDM, replyToFacebookComment, isFacebookEnabled } from '../lib/notifications/facebook.js'
 import { replyToLinkedInComment, isLinkedInEnabled } from '../lib/notifications/linkedin.js'
 import { resolveConnectionCredentials } from '../lib/credentials.js'
+import { classifyByRules } from '../lib/comment-classifier.js'
+
+// Public comment channels that get classified on ingest. DM channels
+// (whatsapp, sms, email, *_dm) skip classification because they're
+// already private conversations owned by a specific contact.
+const CLASSIFIABLE_CHANNELS = new Set([
+  'instagram_comment',
+  'facebook_comment',
+  'tiktok_comment',
+  'x_mention',
+  'linkedin_comment',
+])
 
 /**
  * Resolve the acting agent's per-platform credentials (enterprise targets +
@@ -145,6 +157,14 @@ export async function ingestInboundMessage({ channel, provider, providerMessageI
     visibility,
   })
 
+  // Classify public comment channels on ingest so downstream UX (filter
+  // chips, roll-ups, process router) has data immediately without waiting
+  // on the AI worker.
+  let classification = null
+  if (CLASSIFIABLE_CHANNELS.has(channel) && content) {
+    classification = classifyByRules(content)
+  }
+
   const message = {
     id: uuidv4(),
     conversation_id: conversation.id,
@@ -160,6 +180,12 @@ export async function ingestInboundMessage({ channel, provider, providerMessageI
     read_at: null,
     failed_reason: null,
     metadata: { raw_payload: rawPayload, to },
+    category: classification?.category || null,
+    sentiment: classification?.sentiment || null,
+    category_confidence: classification?.confidence ?? null,
+    category_source: classification?.source || null,
+    category_matched_rule: classification?.matched_rule || null,
+    category_updated_at: classification ? new Date().toISOString() : null,
     created_by_agent_id: null,
     created_at: new Date().toISOString(),
   }
