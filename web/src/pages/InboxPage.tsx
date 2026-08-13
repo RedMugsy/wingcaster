@@ -81,12 +81,24 @@ const CHANNEL_LABELS: Record<string, string> = {
   instagram_comment: 'Instagram Comment',
   instagram: 'Instagram',
   tiktok: 'TikTok',
+  tiktok_dm: 'TikTok DM',
+  tiktok_comment: 'TikTok Comment',
   x: 'X',
+  x_dm: 'X DM',
+  x_mention: 'X Mention',
+  facebook_messenger: 'Facebook Messenger',
+  facebook_comment: 'Facebook Comment',
+  linkedin: 'LinkedIn',
+  linkedin_comment: 'LinkedIn Comment',
 }
 
 const CHANNEL_ICONS: Record<string, React.ReactNode> = {
   email: <Mail className="h-3 w-3" />,
   instagram_comment: <MessageSquare className="h-3 w-3" />,
+  facebook_comment: <MessageSquare className="h-3 w-3" />,
+  tiktok_comment: <MessageSquare className="h-3 w-3" />,
+  x_mention: <MessageSquare className="h-3 w-3" />,
+  linkedin_comment: <MessageSquare className="h-3 w-3" />,
 }
 
 const STATUS_COLORS: Record<string, string> = {

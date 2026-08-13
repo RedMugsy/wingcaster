@@ -5367,6 +5367,68 @@ app.post('/api/webhooks/instagram', async (req, res) => {
   }
 })
 
+// ==================== FACEBOOK WEBHOOKS ====================
+app.get('/api/webhooks/facebook', (req, res) => {
+  const mode = req.query['hub.mode']
+  const token = req.query['hub.verify_token']
+  const challenge = req.query['hub.challenge']
+  const verifyToken = process.env.FACEBOOK_VERIFY_TOKEN || getWhatsAppConfig().verifyToken
+  if (mode === 'subscribe' && token === verifyToken) {
+    return res.status(200).send(challenge)
+  }
+  return res.sendStatus(403)
+})
+
+app.post('/api/webhooks/facebook', async (req, res) => {
+  try {
+    const events = parseIncomingFacebookWebhook(req.body)
+    const results = []
+
+    for (const event of events) {
+      if (!event.text) continue
+      const channel = event.type === 'dm' ? 'facebook_messenger' : 'facebook_comment'
+      try {
+        const result = await ingestInboundMessage({
+          channel,
+          provider: event.provider,
+          providerMessageId: event.message_id,
+          from: event.from,
+          to: event.post_id || event.to || null,
+          content: event.text,
+          contentType: 'text',
+          rawPayload: event,
+          name: event.from_username,
+          visibility: event.type === 'comment' ? 'public' : 'private',
+        })
+        results.push({ type: event.type, contact_id: result.contact?.id, conversation_id: result.conversation?.id, message_id: result.message?.id })
+        await logActivity({
+          type: event.type === 'dm' ? 'facebook_dm_inbound_message' : 'facebook_comment_inbound_message',
+          agent_id: result.contact?.assigned_agent_id,
+          meta: {
+            from: event.from,
+            message_id: event.message_id,
+            post_id: event.post_id,
+            contact_id: result.contact?.id,
+            conversation_id: result.conversation?.id,
+          },
+        })
+      } catch (err) {
+        logger.error({ error: err.message }, 'Facebook inbound orchestration error')
+        results.push({ type: event.type, error: err.message })
+      }
+    }
+
+    if (isProduction) {
+      res.sendStatus(200)
+    } else {
+      res.json({ received: true, results })
+    }
+  } catch (e) {
+    logger.error({ error: e.message }, 'Facebook webhook processing error')
+    res.status(200).json({ received: true, error: e.message })
+  }
+})
+
 // ==================== TIKTOK WEBHOOKS ====================
 app.post('/api/webhooks/tiktok', async (req, res) => {
   try {

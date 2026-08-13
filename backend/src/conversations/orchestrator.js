@@ -493,6 +493,98 @@ export async function sendOutboundMessage({ conversationId, content, contentType
         }
       }
     }
+  } else if (channel === 'facebook_messenger') {
+    if (!isFacebookEnabled()) {
+      dispatch = { ok: false, status: 'failed', provider: 'facebook', provider_message_id: null, error: 'Facebook is not configured' }
+    } else {
+      const rows = await findAll('conversation_messages', (m) => m.conversation_id === conversation.id && m.direction === 'inbound')
+      const lastInbound = rows.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0]
+      const recipientId = lastInbound?.metadata?.raw_payload?.from || lastInbound?.metadata?.from
+      if (!recipientId) {
+        dispatch = { ok: false, status: 'failed', provider: 'facebook', provider_message_id: null, error: 'No Facebook Messenger recipient found on this thread' }
+      } else {
+        try {
+          const creds = await resolveAgentPlatformCreds(sentByAgentId, 'facebook')
+          const response = await sendFacebookMessengerDM({
+            recipientId,
+            text: content,
+            accessToken: creds?.fb_page_access_token_override || undefined,
+          })
+          dispatch = {
+            ok: response.ok,
+            status: response.ok ? 'sent' : 'failed',
+            provider: response.provider || 'facebook',
+            provider_message_id: response.provider_message_id || null,
+            error: null,
+            simulated: response.simulated || false,
+          }
+        } catch (err) {
+          dispatch = { ok: false, status: 'failed', provider: 'facebook', provider_message_id: null, error: err.message || String(err) }
+        }
+      }
+    }
+  } else if (channel === 'facebook_comment') {
+    if (!isFacebookEnabled()) {
+      dispatch = { ok: false, status: 'failed', provider: 'facebook', provider_message_id: null, error: 'Facebook is not configured' }
+    } else {
+      const rows = await findAll('conversation_messages', (m) => m.conversation_id === conversation.id && m.direction === 'inbound')
+      const lastInbound = rows.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0]
+      const commentId = lastInbound?.metadata?.raw_payload?.message_id || lastInbound?.metadata?.message_id
+      if (!commentId) {
+        dispatch = { ok: false, status: 'failed', provider: 'facebook', provider_message_id: null, error: 'No Facebook comment ID found on this thread' }
+      } else {
+        try {
+          const creds = await resolveAgentPlatformCreds(sentByAgentId, 'facebook')
+          const response = await replyToFacebookComment({
+            commentId,
+            text: content,
+            accessToken: creds?.fb_page_access_token_override || undefined,
+          })
+          dispatch = {
+            ok: response.ok,
+            status: response.ok ? 'sent' : 'failed',
+            provider: response.provider || 'facebook',
+            provider_message_id: response.provider_message_id || null,
+            error: null,
+            simulated: response.simulated || false,
+          }
+        } catch (err) {
+          dispatch = { ok: false, status: 'failed', provider: 'facebook', provider_message_id: null, error: err.message || String(err) }
+        }
+      }
+    }
+  } else if (channel === 'linkedin_comment') {
+    if (!isLinkedInEnabled()) {
+      dispatch = { ok: false, status: 'failed', provider: 'linkedin', provider_message_id: null, error: 'LinkedIn is not configured' }
+    } else {
+      const rows = await findAll('conversation_messages', (m) => m.conversation_id === conversation.id && m.direction === 'inbound')
+      const lastInbound = rows.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0]
+      const postUrn = lastInbound?.metadata?.raw_payload?.post_urn || lastInbound?.metadata?.post_urn
+      if (!postUrn) {
+        dispatch = { ok: false, status: 'failed', provider: 'linkedin', provider_message_id: null, error: 'No LinkedIn post URN found on this thread' }
+      } else {
+        try {
+          const creds = await resolveAgentPlatformCreds(sentByAgentId, 'linkedin')
+          const response = await replyToLinkedInComment({
+            postUrn,
+            parentCommentUrn: lastInbound?.metadata?.raw_payload?.comment_urn || null,
+            text: content,
+            actorUrn: creds?.li_author_urn || undefined,
+            accessToken: creds?.li_access_token_override || undefined,
+          })
+          dispatch = {
+            ok: response.ok,
+            status: response.ok ? 'sent' : 'failed',
+            provider: response.provider || 'linkedin',
+            provider_message_id: response.provider_message_id || null,
+            error: null,
+            simulated: response.simulated || false,
+          }
+        } catch (err) {
+          dispatch = { ok: false, status: 'failed', provider: 'linkedin', provider_message_id: null, error: err.message || String(err) }
+        }
+      }
+    }
   } else {
     dispatch = { ok: false, status: 'pending', provider: null, provider_message_id: null, error: `Outbound dispatch for ${channel} not yet implemented` }
   }
