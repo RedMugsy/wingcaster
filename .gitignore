@@ -1,0 +1,51 @@
+# Dependencies
+node_modules/
+**/node_modules/
+
+# Builds
+dist/
+**/dist/
+build/
+**/build/
+
+# Env / secrets
+.env
+.env.local
+.env.*.local
+**/.env
+!**/.env.example
+
+# Backend data
+backend/data/db.json
+backend/data/*.sqlite
+backend/data/*.sqlite-*
+backend/uploads/
+
+# Logs
+*.log
+logs/
+**/logs/
+npm-debug.log*
+pino-*.log
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Capacitor generated native projects (keep out of git until you commit them)
+mobile/android/app/build/
+mobile/android/.gradle/
+mobile/android/local.properties
+mobile/ios/App/Pods/
+mobile/ios/App/build/
+mobile/ios/App/App.xcworkspace/xcuserdata/
+mobile/ios/App/App.xcodeproj/xcuserdata/
+mobile/.capacitor/
+
+# TypeScript build info
+*.tsbuildinfo
+
+# Session
+**/servers.pid

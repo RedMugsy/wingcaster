@@ -1,0 +1,76 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ============================================================
+   Real Estate Bazaar — Design Tokens mapped to shadcn/ui
+   Accent Gold #C8963C · Neutral Ink #0F0F0F · Red #C40E28
+   Product layer (light, default): ink CTA · gold brand · green verified · red live
+   ============================================================ */
+
+@layer base {
+  :root {
+    /* shadcn → REB semantic mappings */
+    --background: 40 11% 96%;          /* #F7F6F4 warm neutral canvas */
+    --foreground: 0 0% 6%;             /* #0F0F0F ink */
+    --card: 0 0% 100%;                 /* #FFFFFF white surface */
+    --card-foreground: 0 0% 6%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 0 0% 6%;
+
+    /* Primary = ink CTA (per REB design system: ink is the primary action in product) */
+    --primary: 0 0% 6%;                /* #0F0F0F */
+    --primary-foreground: 0 0% 100%;   /* #FFFFFF */
+
+    --secondary: 40 7% 94%;            /* #F0EFEC surface-2 */
+    --secondary-foreground: 0 0% 6%;
+
+    --muted: 40 7% 94%;
+    --muted-foreground: 0 0% 35%;      /* #595958 */
+
+    /* Accent = gold brand */
+    --accent: 38 54% 51%;              /* #C8963C gold */
+    --accent-foreground: 0 0% 6%;
+
+    --destructive: 352 84% 41%;        /* #C40E28 red */
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 36 9% 89%;               /* #E4E3E0 */
+    --input: 36 9% 89%;
+    --ring: 38 54% 51%;                /* #C8963C gold focus ring */
+    --radius: 0.75rem;
+
+    /* REB custom tokens */
+    --reb-gold: #C8963C;
+    --reb-gold-700: #806129;
+    --reb-ink: #0F0F0F;
+    --reb-canvas: #F7F6F4;
+    --reb-surface: #FFFFFF;
+    --reb-surface-2: #F0EFEC;
+    --reb-border: #E4E3E0;
+    --reb-verified: #0E7A4B;
+    --reb-live: #C40E28;
+    --reb-text-muted: #595958;
+    --reb-text-subtle: #8C8C8B;
+    --reb-radius-xl: 20px;
+    --reb-shadow-lg: 0 12px 28px rgba(0,0,0,0.12);
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-family: "Barlow", system-ui, sans-serif;
+    font-feature-settings: "rlig" 1, "calt" 1;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: "DM Sans", "Barlow Condensed", sans-serif;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+  }
+}

@@ -1,0 +1,11 @@
+User-agent: *
+Allow: /areas/*/
+Disallow: /api/
+Disallow: /agent/
+Disallow: /admin/
+
+User-agent: GPTBot
+Disallow: /areas/*/
+
+User-agent: Google-Extended
+Disallow: /areas/*/

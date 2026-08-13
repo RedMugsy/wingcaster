@@ -1,0 +1,20 @@
+node_modules/
+
+# Generated native platform folders (added via `cap add android` / `cap add ios`)
+android/app/build/
+android/.gradle/
+android/local.properties
+android/app/release/
+ios/App/Pods/
+ios/App/build/
+ios/App/App.xcworkspace/xcuserdata/
+ios/App/App.xcodeproj/xcuserdata/
+ios/App/App.xcodeproj/project.xcworkspace/xcuserdata/
+
+# Capacitor
+capacitor.config.local.ts
+.capacitor/
+
+# Web build copies (webDir points to ../web/dist directly)
+public/
+www/
