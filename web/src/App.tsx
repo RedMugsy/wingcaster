@@ -5,7 +5,8 @@ import { ToastProvider } from '@/components/ui/toast'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
 import { Navbar } from '@/components/layout/Navbar'
 import { Footer } from '@/components/layout/Footer'
-import { PropertyDetailPage } from '@/pages/PropertyDetailPage'
+import { ListingsPage } from '@/pages/ListingsPage'
+import { ListingProfilePage } from '@/pages/ListingProfilePage'
 import { AgentProfilePage } from '@/pages/AgentProfilePage'
 import { AgentRegisterPage } from '@/pages/AgentRegisterPage'
 import { AgentDashboardPage } from '@/pages/AgentDashboardPage'
@@ -55,7 +56,8 @@ function AppShell() {
         <Routes>
           <Route path="/" element={<Navigate to="/dashboard" replace />} />
           <Route path="/dashboard" element={<AgentDashboardPage />} />
-          <Route path="/listings/:id" element={<PropertyDetailPage />} />
+          <Route path="/listings" element={<ListingsPage />} />
+          <Route path="/listings/:id" element={<ListingProfilePage />} />
           <Route path="/agent/:id" element={<AgentProfilePage />} />
           <Route path="/register" element={<AgentRegisterPage />} />
           <Route path="/agent/pricing" element={<AgentPricingPage />} />
