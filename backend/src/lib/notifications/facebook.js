@@ -230,6 +230,61 @@ export async function sendFacebookMessengerDM({ recipientId, text, accessToken }
  * Parse a Facebook webhook payload (Page events).
  * Expected shape: { object: 'page', entry: [{ id, messaging?: [...], changes?: [...] }] }
  */
+/**
+ * Fetch aggregate insights for a published Facebook Page post.
+ *
+ * Docs: https://developers.facebook.com/docs/graph-api/reference/v21.0/insights
+ * We ask for impressions + reactions + comments + shares as a starting set.
+ */
+export async function fetchFacebookInsights({ postId, accessToken }) {
+  const cfg = getFacebookConfig()
+  const token = accessToken || cfg.pageAccessToken
+  if (!postId) throw Object.assign(new Error('postId is required'), { code: 'MISSING_POST_ID' })
+
+  if (cfg.provider === 'dev' || !isFacebookEnabled() || !token) {
+    return {
+      impressions: 1800, reach: 1200, likes: 92, comments: 4, shares: 7, saves: null, clicks: 22,
+      source: 'facebook_dev_simulator', simulated: true, fetched_at: new Date().toISOString(),
+    }
+  }
+
+  const metrics = 'post_impressions,post_impressions_unique,post_reactions_like_total,post_reactions_by_type_total,post_clicks'
+  const res = await fetch(`${GRAPH_BASE}/${postId}/insights?metric=${metrics}&access_token=${token}`)
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) {
+    throw Object.assign(
+      new Error(`Facebook insights error (${res.status}): ${data?.error?.message || JSON.stringify(data).slice(0, 200)}`),
+      { code: data?.error?.code || `FACEBOOK_INSIGHTS_${res.status}`, details: data },
+    )
+  }
+  const byName = {}
+  for (const row of data.data || []) byName[row.name] = row.values?.[0]?.value ?? null
+  const reactionsMap = byName.post_reactions_by_type_total || {}
+  const totalReactions = Object.values(reactionsMap).reduce((s, n) => s + (Number(n) || 0), 0)
+
+  // Fetch comment + share count in one extra call (fb doesn't expose these in insights uniformly).
+  let commentCount = null, shareCount = null
+  try {
+    const extra = await fetch(`${GRAPH_BASE}/${postId}?fields=shares,comments.summary(true)&access_token=${token}`)
+    const extraData = await extra.json().catch(() => ({}))
+    commentCount = extraData?.comments?.summary?.total_count ?? null
+    shareCount = extraData?.shares?.count ?? null
+  } catch { /* keep nulls */ }
+
+  return {
+    impressions: byName.post_impressions ?? null,
+    reach: byName.post_impressions_unique ?? null,
+    likes: totalReactions || byName.post_reactions_like_total || null,
+    comments: commentCount,
+    shares: shareCount,
+    saves: null,
+    clicks: byName.post_clicks ?? null,
+    source: 'facebook_graph_api',
+    simulated: false,
+    fetched_at: new Date().toISOString(),
+  }
+}
+
 export function parseIncomingFacebookWebhook(payload) {
   const events = []
   const entries = Array.isArray(payload?.entry) ? payload.entry : []

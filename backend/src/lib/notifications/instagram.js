@@ -181,6 +181,51 @@ export function parseIncomingInstagramDMWebhook(payload) {
 }
 
 /**
+ * Fetch aggregate insights for a published Instagram media object.
+ *
+ * Docs: https://developers.facebook.com/docs/instagram-api/reference/ig-media/insights
+ * The metric set varies by media_type; we ask for a superset and drop nulls.
+ */
+export async function fetchInstagramInsights({ mediaId, accessToken }) {
+  const cfg = getInstagramConfig()
+  const token = accessToken || cfg.pageAccessToken
+  if (!mediaId) throw Object.assign(new Error('mediaId is required'), { code: 'MISSING_MEDIA_ID' })
+
+  if (cfg.provider === 'dev' || !isInstagramEnabled() || !token) {
+    return {
+      impressions: 1200, reach: 890, likes: 74, comments: 6, shares: 3, saves: 12, clicks: null,
+      source: 'instagram_dev_simulator', simulated: true, fetched_at: new Date().toISOString(),
+    }
+  }
+
+  const metrics = 'impressions,reach,likes,comments,shares,saved'
+  const res = await fetch(`${GRAPH_BASE}/${mediaId}/insights?metric=${metrics}&access_token=${token}`)
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) {
+    throw Object.assign(
+      new Error(`Instagram insights error (${res.status}): ${data?.error?.message || JSON.stringify(data).slice(0, 200)}`),
+      { code: data?.error?.code || `INSTAGRAM_INSIGHTS_${res.status}`, details: data },
+    )
+  }
+  const byName = {}
+  for (const row of data.data || []) {
+    byName[row.name] = row.values?.[0]?.value ?? null
+  }
+  return {
+    impressions: byName.impressions ?? null,
+    reach: byName.reach ?? null,
+    likes: byName.likes ?? null,
+    comments: byName.comments ?? null,
+    shares: byName.shares ?? null,
+    saves: byName.saved ?? null,
+    clicks: null,
+    source: 'instagram_graph_api',
+    simulated: false,
+    fetched_at: new Date().toISOString(),
+  }
+}
+
+/**
  * Publish a single-image Instagram feed post.
  * Uses the Instagram Graph API content publishing flow.
  * Docs: https://developers.facebook.com/docs/instagram-api/guides/content-publishing

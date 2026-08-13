@@ -119,7 +119,12 @@ import {
 import {
   isLinkedInEnabled,
   publishLinkedInPost,
+  fetchLinkedInInsights,
 } from './lib/notifications/linkedin.js'
+import { fetchInstagramInsights } from './lib/notifications/instagram.js'
+import { fetchFacebookInsights } from './lib/notifications/facebook.js'
+import { fetchXInsights } from './lib/notifications/x.js'
+import { fetchTikTokInsights } from './lib/notifications/tiktok.js'
 import {
   encryptSecret,
   PLATFORM_INTEGRATION_MODEL,
@@ -5621,6 +5626,85 @@ app.get('/api/listings/:id/comments', authMiddleware, async (req, res) => {
   out.sort((a, b) => new Date(b.last_activity_at || 0).getTime() - new Date(a.last_activity_at || 0).getTime())
 
   res.json({ threads: out, published_posts: dists.length })
+})
+
+/**
+ * Refresh insights (views/likes/shares/comments) for a single published
+ * distribution. Owner-only. Resolves per-tenant credentials, calls the
+ * platform-specific insight fetcher, persists the metrics on the row.
+ */
+app.post('/api/distributions/:id/refresh-insights', authMiddleware, async (req, res) => {
+  const dist = await findOne('distributions', (d) => d.id === req.params.id)
+  if (!dist) return res.status(404).json({ error: 'Distribution not found' })
+  if (dist.agent_id !== req.user.id) {
+    return res.status(403).json({ error: 'Only the distribution owner can refresh its insights' })
+  }
+  if (dist.status !== 'published' || !dist.external_id) {
+    return res.status(400).json({ error: 'Distribution has no published external id yet' })
+  }
+
+  const conn = await findOne(
+    'marketplace_connections',
+    (c) => c.agent_id === req.user.id && c.platform === dist.platform,
+  )
+  const creds = conn ? resolveConnectionCredentials(conn) : null
+
+  let metrics = null
+  try {
+    if (dist.platform === 'instagram') {
+      metrics = await fetchInstagramInsights({
+        mediaId: dist.external_id,
+        accessToken: creds?.ig_page_access_token_override || undefined,
+      })
+    } else if (dist.platform === 'facebook') {
+      metrics = await fetchFacebookInsights({
+        postId: dist.external_id,
+        accessToken: creds?.fb_page_access_token_override || undefined,
+      })
+    } else if (dist.platform === 'x') {
+      metrics = await fetchXInsights({
+        tweetId: dist.external_id,
+        bearerToken: creds?.oauth_access_token || undefined,
+      })
+    } else if (dist.platform === 'linkedin') {
+      metrics = await fetchLinkedInInsights({
+        shareUrn: dist.external_id,
+        authorUrn: creds?.li_author_urn || undefined,
+        accessToken: creds?.li_access_token_override || undefined,
+      })
+    } else if (dist.platform === 'tiktok') {
+      metrics = await fetchTikTokInsights({
+        videoId: dist.external_id,
+        accessToken: creds?.oauth_access_token || undefined,
+      })
+    } else {
+      return res.status(400).json({ error: `Insights not supported for ${dist.platform} yet` })
+    }
+  } catch (err) {
+    return res.status(502).json({ error: 'Insights fetch failed', detail: err.message })
+  }
+
+  await update('distributions', (d) => d.id === dist.id, (d) => ({
+    ...d,
+    insights: metrics,
+    impressions: metrics?.impressions ?? d.impressions,
+    reach: metrics?.reach ?? d.reach,
+    likes: metrics?.likes ?? d.likes,
+    comments_count: metrics?.comments ?? d.comments_count,
+    shares: metrics?.shares ?? d.shares,
+    saves: metrics?.saves ?? d.saves,
+    clicks: metrics?.clicks ?? d.clicks,
+    insights_fetched_at: metrics?.fetched_at || new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  }))
+  await logActivity({
+    type: 'distribution_insights_refreshed',
+    agent_id: req.user.id,
+    meta: { distribution_id: dist.id, platform: dist.platform, simulated: metrics?.simulated || false },
+  })
+
+  const updated = await findOne('distributions', (d) => d.id === dist.id)
+  res.json({ distribution: updated, metrics })
 })
 
 app.post('/api/distributions/:id/retry', authMiddleware, async (req, res) => {

@@ -366,6 +366,7 @@ export function ListingProfilePage() {
 
         <TabsContent value="comms" className="space-y-6">
           <PublishSocialTab property={property} />
+          <InsightsSection listingId={property.id} />
           <CommentsSection listingId={property.id} />
         </TabsContent>
 
@@ -1171,6 +1172,156 @@ function ExtractedFieldsPreview({
       </dl>
     </div>
   )
+}
+
+function InsightsSection({ listingId }: { listingId: string }) {
+  const { addToast } = useToast()
+  type DistT = Awaited<ReturnType<typeof api.getDistributions>>[number]
+  const [dists, setDists] = useState<DistT[]>([])
+  const [loading, setLoading] = useState(true)
+  const [refreshingId, setRefreshingId] = useState<string | null>(null)
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    try {
+      const rows = await api.getDistributions(listingId)
+      setDists(rows.filter((d) => d.status === 'published' && d.external_id))
+    } catch (err: any) {
+      addToast({ title: 'Could not load distributions', description: err?.message, variant: 'error' })
+    } finally {
+      setLoading(false)
+    }
+  }, [listingId, addToast])
+
+  useEffect(() => { load() }, [load])
+
+  async function refresh(id: string) {
+    if (refreshingId) return
+    setRefreshingId(id)
+    try {
+      await api.refreshDistributionInsights(id)
+      addToast({ title: 'Insights refreshed', variant: 'success' })
+      load()
+    } catch (err: any) {
+      addToast({ title: 'Insights refresh failed', description: err?.message, variant: 'error' })
+    } finally {
+      setRefreshingId(null)
+    }
+  }
+
+  const totals = useMemo(() => {
+    const t = { impressions: 0, likes: 0, comments: 0, shares: 0 }
+    for (const d of dists) {
+      t.impressions += (d.impressions || d.insights?.impressions || 0) as number
+      t.likes += (d.likes || d.insights?.likes || 0) as number
+      t.comments += (d.comments_count || d.insights?.comments || 0) as number
+      t.shares += (d.shares || d.insights?.shares || 0) as number
+    }
+    return t
+  }, [dists])
+
+  const platformLabel: Record<string, string> = {
+    instagram: 'Instagram', facebook: 'Facebook', tiktok: 'TikTok',
+    x: 'X', linkedin: 'LinkedIn', whatsapp: 'WhatsApp',
+  }
+
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
+        <div>
+          <CardTitle className="text-lg">Post insights</CardTitle>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            {dists.length} published post{dists.length === 1 ? '' : 's'} · {formatMetricSummary(totals)}
+          </p>
+        </div>
+        <Button size="sm" variant="ghost" onClick={load} disabled={loading} className="gap-1.5">
+          {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <MessageCircle className="h-4 w-4" />}
+          Reload
+        </Button>
+      </CardHeader>
+      <CardContent>
+        {loading ? (
+          <div className="flex items-center justify-center py-6">
+            <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+          </div>
+        ) : dists.length === 0 ? (
+          <p className="rounded-md border border-dashed bg-slate-50 p-4 text-sm text-muted-foreground">
+            Publish this listing to a channel first — insights show up per published post.
+          </p>
+        ) : (
+          <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            {dists.map((d) => {
+              const m = {
+                impressions: d.impressions ?? d.insights?.impressions ?? null,
+                likes: d.likes ?? d.insights?.likes ?? null,
+                comments: d.comments_count ?? d.insights?.comments ?? null,
+                shares: d.shares ?? d.insights?.shares ?? null,
+                saves: d.saves ?? d.insights?.saves ?? null,
+                clicks: d.clicks ?? d.insights?.clicks ?? null,
+              }
+              const fetchedAt = d.insights_fetched_at || d.insights?.fetched_at || null
+              const simulated = d.insights?.simulated || false
+              return (
+                <li key={d.id} className="rounded-lg border bg-white p-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <Badge variant="outline">{platformLabel[d.platform] || d.platform}</Badge>
+                      {simulated && <Badge variant="outline" className="text-[10px]">simulated</Badge>}
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="gap-1"
+                      onClick={() => refresh(d.id)}
+                      disabled={refreshingId === d.id}
+                    >
+                      {refreshingId === d.id
+                        ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        : <Sparkles className="h-3.5 w-3.5" />}
+                      Refresh
+                    </Button>
+                  </div>
+                  <dl className="mt-2 grid grid-cols-3 gap-2 text-xs">
+                    <Metric label="Views" value={m.impressions} />
+                    <Metric label="Likes" value={m.likes} />
+                    <Metric label="Comments" value={m.comments} />
+                    <Metric label="Shares" value={m.shares} />
+                    <Metric label="Saves" value={m.saves} />
+                    <Metric label="Clicks" value={m.clicks} />
+                  </dl>
+                  {fetchedAt && (
+                    <p className="mt-2 text-[10px] text-muted-foreground">
+                      Updated {new Date(fetchedAt).toLocaleString()}
+                    </p>
+                  )}
+                </li>
+              )
+            })}
+          </ul>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+function Metric({ label, value }: { label: string; value: number | null | undefined }) {
+  return (
+    <div className="rounded border bg-slate-50 px-2 py-1">
+      <div className="text-[10px] uppercase tracking-wide text-muted-foreground">{label}</div>
+      <div className="text-sm font-semibold">
+        {value == null ? '—' : Number(value).toLocaleString()}
+      </div>
+    </div>
+  )
+}
+
+function formatMetricSummary(t: { impressions: number; likes: number; comments: number; shares: number }) {
+  const parts: string[] = []
+  if (t.impressions) parts.push(`${t.impressions.toLocaleString()} views`)
+  if (t.likes) parts.push(`${t.likes.toLocaleString()} likes`)
+  if (t.comments) parts.push(`${t.comments.toLocaleString()} comments`)
+  if (t.shares) parts.push(`${t.shares.toLocaleString()} shares`)
+  return parts.length ? parts.join(' · ') : 'no metrics yet'
 }
 
 function CommentsSection({ listingId }: { listingId: string }) {

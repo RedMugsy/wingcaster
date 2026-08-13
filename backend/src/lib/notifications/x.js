@@ -213,6 +213,50 @@ export async function publishXTweet({ text, mediaIds = [], replyToTweetId = null
  *   { tweet_create_events: [{ id, text, user: { id, screen_name }, in_reply_to_status_id?, in_reply_to_user_id?, created_at }] }
  *   { mentions: [{ id, user_id, username, text, tweet_id, created_at }] }
  */
+/**
+ * Fetch public_metrics for a tweet.
+ *
+ * Docs: https://developer.x.com/en/docs/x-api/tweets/lookup/api-reference/get-tweets-id
+ * Metrics returned: impression_count, retweet_count, reply_count, like_count,
+ * quote_count, bookmark_count. Impression count needs elevated / Enterprise access.
+ */
+export async function fetchXInsights({ tweetId, bearerToken }) {
+  const cfg = getXConfig()
+  const token = bearerToken || cfg.bearerToken
+  if (!tweetId) throw Object.assign(new Error('tweetId is required'), { code: 'MISSING_TWEET_ID' })
+
+  if (cfg.provider === 'dev' || !isXEnabled() || !token) {
+    return {
+      impressions: 4300, reach: null, likes: 58, comments: 5, shares: 11, saves: 4, clicks: null,
+      source: 'x_dev_simulator', simulated: true, fetched_at: new Date().toISOString(),
+    }
+  }
+
+  const res = await fetch(`${xApiBase()}/tweets/${tweetId}?tweet.fields=public_metrics`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) {
+    throw Object.assign(
+      new Error(`X insights error (${res.status}): ${data?.detail || JSON.stringify(data).slice(0, 200)}`),
+      { code: data?.title || `X_INSIGHTS_${res.status}`, details: data },
+    )
+  }
+  const m = data?.data?.public_metrics || {}
+  return {
+    impressions: m.impression_count ?? null,
+    reach: null,
+    likes: m.like_count ?? null,
+    comments: m.reply_count ?? null,
+    shares: (m.retweet_count ?? 0) + (m.quote_count ?? 0),
+    saves: m.bookmark_count ?? null,
+    clicks: null,
+    source: 'x_api_v2',
+    simulated: false,
+    fetched_at: new Date().toISOString(),
+  }
+}
+
 export function parseIncomingXWebhook(payload) {
   const events = []
   const dmEvents = payload?.dm_events || []

@@ -220,6 +220,59 @@ export async function publishTikTokVideo({ videoUrl, caption, accessToken }) {
  *     mentions: [{ id, user_id, username, text, video_id, created_at }]
  *   }
  */
+/**
+ * Fetch aggregate video insights.
+ *
+ * TikTok Research API (`/v2/research/video/query/`) is partner-gated. We
+ * always simulate in dev mode; live mode is scaffolded so it can be flipped
+ * on once TikTok for Business partner status is granted.
+ */
+export async function fetchTikTokInsights({ videoId, accessToken }) {
+  const cfg = getTikTokConfig()
+  const token = accessToken || cfg.accessToken
+  if (!videoId) throw Object.assign(new Error('videoId is required'), { code: 'MISSING_VIDEO_ID' })
+
+  if (cfg.provider === 'dev' || !isTikTokEnabled() || !token) {
+    return {
+      impressions: 8400, reach: null, likes: 312, comments: 24, shares: 41, saves: null, clicks: null,
+      source: 'tiktok_dev_simulator', simulated: true, fetched_at: new Date().toISOString(),
+    }
+  }
+
+  const res = await fetch('https://open.tiktokapis.com/v2/research/video/query/', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json; charset=UTF-8',
+    },
+    body: JSON.stringify({
+      query: { and: [{ operation: 'IN', field_name: 'video_ids', field_values: [videoId] }] },
+      fields: ['id', 'view_count', 'like_count', 'comment_count', 'share_count'],
+      max_count: 1,
+    }),
+  })
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) {
+    throw Object.assign(
+      new Error(`TikTok insights error (${res.status}): ${data?.error?.message || JSON.stringify(data).slice(0, 200)}`),
+      { code: `TIKTOK_INSIGHTS_${res.status}`, details: data },
+    )
+  }
+  const v = data?.data?.videos?.[0] || {}
+  return {
+    impressions: v.view_count ?? null,
+    reach: null,
+    likes: v.like_count ?? null,
+    comments: v.comment_count ?? null,
+    shares: v.share_count ?? null,
+    saves: null,
+    clicks: null,
+    source: 'tiktok_research_api',
+    simulated: false,
+    fetched_at: new Date().toISOString(),
+  }
+}
+
 export function parseIncomingTikTokWebhook(payload) {
   const events = []
   const comments = payload?.comments || payload?.comment || []

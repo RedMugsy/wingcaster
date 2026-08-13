@@ -372,7 +372,38 @@ export const api = {
         intent: options?.intent || 'distribute',
       }),
     }),
-  getDistributions: (propertyId: string) => fetchJson(`/properties/${propertyId}/distributions`),
+  getDistributions: (propertyId: string): Promise<Array<{
+    id: string
+    property_id: string
+    platform: string
+    status: string
+    external_id: string | null
+    published_at: string | null
+    landing_page?: string | null
+    post_url?: string | null
+    insights?: {
+      impressions: number | null
+      reach: number | null
+      likes: number | null
+      comments: number | null
+      shares: number | null
+      saves: number | null
+      clicks: number | null
+      source: string
+      simulated: boolean
+      fetched_at: string
+    } | null
+    impressions?: number
+    reach?: number
+    likes?: number
+    comments_count?: number
+    shares?: number
+    saves?: number
+    clicks?: number
+    insights_fetched_at?: string
+  }>> => fetchJson(`/properties/${propertyId}/distributions`),
+  refreshDistributionInsights: (distributionId: string) =>
+    fetchJson(`/distributions/${distributionId}/refresh-insights`, { method: 'POST', body: '{}' }),
   retryDistribution: (distributionId: string) =>
     fetchJson(`/distributions/${distributionId}/retry`, { method: 'POST', body: '{}' }),
   retryPendingDistributions: (limit = 20) =>

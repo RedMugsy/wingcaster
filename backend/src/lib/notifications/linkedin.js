@@ -155,6 +155,55 @@ export async function publishLinkedInPost({
  *
  *   POST /v2/socialActions/{shareUrn}/comments  {actor, message: {text}}
  */
+/**
+ * Fetch aggregate share statistics for a LinkedIn post.
+ *
+ * Docs: https://learn.microsoft.com/en-us/linkedin/marketing/community-management/shares/share-statistics
+ * Requires organizationalEntity (author URN) + the share URN.
+ */
+export async function fetchLinkedInInsights({ shareUrn, authorUrn, accessToken }) {
+  const cfg = getLinkedInConfig()
+  const token = accessToken || cfg.accessToken
+  const author = authorUrn || cfg.authorUrn
+  if (!shareUrn) throw Object.assign(new Error('shareUrn is required'), { code: 'MISSING_SHARE_URN' })
+
+  if (cfg.provider === 'dev' || !isLinkedInEnabled() || !token) {
+    return {
+      impressions: 950, reach: null, likes: 34, comments: 2, shares: 5, saves: null, clicks: 18,
+      source: 'linkedin_dev_simulator', simulated: true, fetched_at: new Date().toISOString(),
+    }
+  }
+
+  const path = `/organizationalEntityShareStatistics?q=organizationalEntity&organizationalEntity=${encodeURIComponent(author)}&shares[0]=${encodeURIComponent(shareUrn)}`
+  const res = await fetch(`${REST_BASE}${path}`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'LinkedIn-Version': cfg.apiVersion,
+      'X-Restli-Protocol-Version': '2.0.0',
+    },
+  })
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) {
+    throw Object.assign(
+      new Error(`LinkedIn insights error (${res.status}): ${data?.message || JSON.stringify(data).slice(0, 200)}`),
+      { code: `LINKEDIN_INSIGHTS_${res.status}`, details: data },
+    )
+  }
+  const row = data?.elements?.[0]?.totalShareStatistics || {}
+  return {
+    impressions: row.impressionCount ?? null,
+    reach: row.uniqueImpressionsCount ?? null,
+    likes: row.likeCount ?? null,
+    comments: row.commentCount ?? null,
+    shares: row.shareCount ?? null,
+    saves: null,
+    clicks: row.clickCount ?? null,
+    source: 'linkedin_share_statistics',
+    simulated: false,
+    fetched_at: new Date().toISOString(),
+  }
+}
+
 export async function replyToLinkedInComment({ postUrn, parentCommentUrn, text, actorUrn, accessToken }) {
   const cfg = getLinkedInConfig()
   const actor = actorUrn || cfg.authorUrn
