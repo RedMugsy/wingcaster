@@ -5865,6 +5865,142 @@ app.get('/api/comment-classifier/config', authMiddleware, (_req, res) => {
 })
 
 /**
+ * Aggregated Command Center payload for the operations screen.
+ *
+ * Returns:
+ *   escalations       — hot leads waiting for reply, unresolved complaints,
+ *                       unresolved objections
+ *   pipeline          — opportunities auto-opened from social routing,
+ *                       grouped by sub_pipeline (standard | investor)
+ *   inquiries         — inquiries created by the router in the last 30d
+ *   engagement        — aggregate reaction / referral counts across the
+ *                       caller's published distributions
+ *   ai_watching       — conversations currently under AI thread-watch
+ *   testimonials      — testimonials_queue rows awaiting consent /
+ *                       review / publish
+ *   routing_activity  — last 100 comment_routings for the caller
+ */
+app.get('/api/command-center', authMiddleware, async (req, res) => {
+  const agentId = req.user.id
+  const since30d = Date.now() - 30 * 24 * 3600 * 1000
+
+  // Escalations — surface anything the router flagged as needing attention.
+  const flaggedMessages = await findAll('conversation_messages', (m) =>
+    m.needs_agent_attention && !m.is_hidden
+  )
+  const flaggedForMe = []
+  for (const m of flaggedMessages) {
+    const raw = m.metadata?.raw_payload || {}
+    const externalCandidates = [raw.media_id, raw.post_id, raw.post_urn, raw.tweet_id, raw.video_id].filter(Boolean).map(String)
+    const dist = externalCandidates.length
+      ? await findOne('distributions', (d) => externalCandidates.includes(String(d.external_id)))
+      : null
+    if (dist?.agent_id === agentId) {
+      const property = dist.property_id ? await findOne('properties', (p) => p.id === dist.property_id) : null
+      const conv = await findOne('conversations', (c) => c.id === m.conversation_id)
+      const contact = conv?.contact_id ? await findOne('contacts', (c) => c.id === conv.contact_id) : null
+      flaggedForMe.push({
+        message_id: m.id,
+        conversation_id: m.conversation_id,
+        category: m.category,
+        sentiment: m.sentiment,
+        priority: m.priority || 'normal',
+        content: (m.content || '').slice(0, 300),
+        author_name: raw.from_username || raw.from || contact?.name || null,
+        contact_id: contact?.id || null,
+        listing_id: property?.id || null,
+        listing_title: property?.title || null,
+        platform: dist.platform,
+        suggested_reply: m.suggested_reply || null,
+        created_at: m.created_at,
+      })
+    }
+  }
+
+  // Group by category for the panel layout.
+  const escalations = {
+    complaints: flaggedForMe.filter((f) => f.category === 'complaint'),
+    objections: flaggedForMe.filter((f) => f.category === 'objection'),
+    hot_leads: flaggedForMe.filter((f) => f.category === 'hot_lead'),
+    other: flaggedForMe.filter((f) => !['complaint', 'objection', 'hot_lead'].includes(f.category)),
+  }
+
+  // Router-created opportunities — split by sub_pipeline for the CRM tabs.
+  const opps = await findAll('opportunities', (o) =>
+    o.agent_id === agentId && o.origin === 'social_comment'
+  )
+  const pipeline = {
+    standard: opps.filter((o) => (o.sub_pipeline || 'standard') === 'standard'),
+    investor: opps.filter((o) => o.sub_pipeline === 'investor'),
+    other: opps.filter((o) => o.sub_pipeline && !['standard', 'investor'].includes(o.sub_pipeline)),
+  }
+
+  // Inquiries created by the router.
+  const inquiries = (await findAll('inquiries', (i) =>
+    i.agent_id === agentId
+    && i.origin === 'social_comment'
+    && new Date(i.created_at).getTime() > since30d
+  )).sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+
+  // Engagement roll-up — sum across the caller's published distributions.
+  const myDists = await findAll('distributions', (d) => d.agent_id === agentId && d.status === 'published')
+  const engagement = { reactions: 0, referrals: 0, mentions: 0, by_platform: {} }
+  for (const d of myDists) {
+    const c = d.engagement_counts || {}
+    engagement.reactions += c.reactions || 0
+    engagement.referrals += c.referrals || 0
+    engagement.mentions += c.mentions || 0
+    const p = d.platform || 'other'
+    if (!engagement.by_platform[p]) engagement.by_platform[p] = { reactions: 0, referrals: 0, mentions: 0 }
+    engagement.by_platform[p].reactions += c.reactions || 0
+    engagement.by_platform[p].referrals += c.referrals || 0
+    engagement.by_platform[p].mentions += c.mentions || 0
+  }
+
+  // AI-watched conversation threads on the caller's listings.
+  const aiWatchedConvs = await findAll('conversations', (c) => c.ai_watching === true)
+  const aiWatching = []
+  for (const c of aiWatchedConvs.slice(0, 50)) {
+    const contact = c.contact_id ? await findOne('contacts', (co) => co.id === c.contact_id) : null
+    if (contact?.assigned_agent_id !== agentId) continue
+    aiWatching.push({
+      conversation_id: c.id,
+      channel: c.source_channel,
+      contact_name: contact?.name || null,
+      last_message_preview: c.last_message_preview || '',
+      last_message_at: c.last_message_at,
+      ai_watch_started_at: c.ai_watch_started_at,
+    })
+  }
+
+  // Testimonials queue.
+  const testimonials = (await findAll('testimonials_queue', (t) => t.agent_id === agentId))
+    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+
+  // Recent routing activity for the caller.
+  const myRoutings = (await findAll('comment_routings', (r) => r.agent_id === agentId))
+    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+    .slice(0, 100)
+
+  res.json({
+    escalations,
+    pipeline,
+    inquiries,
+    engagement,
+    ai_watching: aiWatching,
+    testimonials,
+    routing_activity: myRoutings,
+    summary: {
+      escalations_total: flaggedForMe.length,
+      pipeline_total: opps.length,
+      inquiries_total: inquiries.length,
+      testimonials_total: testimonials.length,
+      ai_watching_total: aiWatching.length,
+    },
+  })
+})
+
+/**
  * Retro-classify: run the rules stage over every previously-ingested public
  * comment for this listing that has no category yet. One-shot backfill for
  * tenants who had comments landing before the classifier shipped.

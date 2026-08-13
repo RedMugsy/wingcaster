@@ -8,6 +8,39 @@ import type {
   PricingTrendSnapshot,
 } from '@/types/marketPricing'
 
+export interface CommandItem {
+  message_id: string
+  conversation_id: string
+  category: string
+  sentiment: 'positive' | 'neutral' | 'negative' | null
+  priority: 'low' | 'normal' | 'high' | 'urgent'
+  content: string
+  author_name: string | null
+  contact_id: string | null
+  listing_id: string | null
+  listing_title: string | null
+  platform: string
+  suggested_reply: string | null
+  created_at: string
+}
+
+export interface CommandOpportunity {
+  id: string
+  contact_id: string
+  property_id: string | null
+  agent_id: string | null
+  stage: string
+  deal_value: number | null
+  currency: string
+  probability: number
+  source: string
+  sub_pipeline?: string
+  origin?: string
+  notes: string
+  created_at: string
+  updated_at: string
+}
+
 function resolveApiBase() {
   const configured = String(import.meta.env.VITE_API_URL || '').trim()
   if (configured) return configured.replace(/\/$/, '')
@@ -530,6 +563,49 @@ export const api = {
     owner_type?: 'agent' | 'agency'
     routes: Record<string, Record<string, unknown>>
   }) => fetchJson('/routing-config', { method: 'PUT', body: JSON.stringify(payload) }),
+
+  getCommandCenter: (): Promise<{
+    escalations: {
+      complaints: Array<CommandItem>
+      objections: Array<CommandItem>
+      hot_leads: Array<CommandItem>
+      other: Array<CommandItem>
+    }
+    pipeline: {
+      standard: Array<CommandOpportunity>
+      investor: Array<CommandOpportunity>
+      other: Array<CommandOpportunity>
+    }
+    inquiries: Array<{
+      id: string; property_id: string | null; property_title: string | null;
+      name: string; email: string; phone: string; message: string;
+      channel: string; status: string; priority: string; created_at: string;
+      origin_message_id?: string
+    }>
+    engagement: {
+      reactions: number; referrals: number; mentions: number;
+      by_platform: Record<string, { reactions: number; referrals: number; mentions: number }>
+    }
+    ai_watching: Array<{
+      conversation_id: string; channel: string; contact_name: string | null;
+      last_message_preview: string; last_message_at: string | null;
+      ai_watch_started_at: string | null
+    }>
+    testimonials: Array<{
+      id: string; content: string; author_name: string; source_channel: string;
+      source_post_url: string | null; consent_status: string;
+      published_status: string; created_at: string
+    }>
+    routing_activity: Array<{
+      id: string; message_id: string; category: string; route: string | null;
+      outcomes: Array<{ type: string; ref_id?: string; at: string; notes?: string }>;
+      created_at: string
+    }>
+    summary: {
+      escalations_total: number; pipeline_total: number; inquiries_total: number;
+      testimonials_total: number; ai_watching_total: number
+    }
+  }> => fetchJson('/command-center'),
   assignConversation: (id: string, agentId?: string) =>
     fetchJson(`/conversations/${id}/assign`, { method: 'POST', body: JSON.stringify({ agent_id: agentId }) }),
   updateConversation: (id: string, data: Record<string, unknown>) =>

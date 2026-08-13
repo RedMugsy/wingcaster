@@ -2,7 +2,7 @@ import { Link, useLocation } from 'react-router-dom'
 import { useState } from 'react'
 import {
   Menu, X, LogIn, UserPlus, LayoutDashboard, LogOut, User, Inbox,
-  ListTodo, Users as UsersIcon, Building2, Megaphone, Calendar,
+  ListTodo, Users as UsersIcon, Building2, Megaphone, Calendar, Radar,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useAuth } from '@/context/AuthContext'
@@ -16,6 +16,7 @@ export function Navbar() {
 
   const agentNav = [
     { path: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
+    { path: '/command-center', label: 'Command', icon: Radar },
     { path: '/listings', label: 'Listings', icon: Building2 },
     { path: '/dashboard/inbox', label: 'Inbox', icon: Inbox },
     { path: '/contacts', label: 'Contacts', icon: UsersIcon },
