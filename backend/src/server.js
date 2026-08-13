@@ -120,6 +120,9 @@ import {
   createModule as createMarketPricingModule,
 } from './modules/market-pricing/index.js'
 import {
+  createModule as createListingsAiModule,
+} from './modules/listings-ai/index.js'
+import {
   isXEnabled,
   parseIncomingXWebhook,
 } from './lib/notifications/x.js'
@@ -445,6 +448,11 @@ const whatsAppListingsModule = createWhatsAppListingsModule({
 if (whatsAppListingsModule.enabled) {
   await whatsAppListingsModule.registerRoutes(app)
   await whatsAppListingsModule.registerWorker()
+}
+
+const listingsAiModule = createListingsAiModule()
+if (listingsAiModule.enabled) {
+  listingsAiModule.registerRoutes(app, { authMiddleware })
 }
 
 app.post('/api/uploads', authMiddleware, (req, res) => {

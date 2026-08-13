@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { Loader2, X, Link2, Upload, MapPin, Trash2, Image as ImageIcon, Video } from 'lucide-react'
+import { Loader2, X, Link2, Upload, MapPin, Trash2, Image as ImageIcon, Video, Sparkles } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -156,6 +156,60 @@ export function ListingFormModal({ open, property, onClose, onSaved }: ListingFo
   const [dragOver, setDragOver] = useState(false)
   const [geoBusy, setGeoBusy] = useState(false)
   const [amenityQuery, setAmenityQuery] = useState('')
+  const [aiBusy, setAiBusy] = useState(false)
+  const [aiMessage, setAiMessage] = useState('')
+
+  async function handleAiDraft() {
+    if (aiBusy) return
+    const photoUrls = form.media
+      .filter((m) => (m.media_type || 'image') === 'image' && !!m.url?.trim())
+      .map((m) => m.url.trim())
+    if (photoUrls.length === 0) {
+      setAiMessage('Add at least one photo before running AI describe.')
+      return
+    }
+    setAiBusy(true)
+    setAiMessage('')
+    try {
+      const r = await api.describeListingFromPhotos({
+        photo_urls: photoUrls,
+        hints: {
+          city: form.city || undefined,
+          neighborhood: form.neighborhood || undefined,
+          type: form.type,
+          property_type: form.property_type || undefined,
+          price: form.price ? Number(form.price) : undefined,
+          currency: form.price_unit || undefined,
+        },
+        intent: 'create',
+      })
+      const p = r.property
+      setForm((prev) => ({
+        ...prev,
+        // Prefer AI value only when the field is empty — never overwrite user edits.
+        title: prev.title || p.title || '',
+        description: prev.description || p.description || '',
+        property_type: prev.property_type || p.property_type || '',
+        bedrooms: prev.bedrooms || (p.bedrooms != null ? String(p.bedrooms) : ''),
+        bathrooms: prev.bathrooms || (p.bathrooms != null ? String(p.bathrooms) : ''),
+        area: prev.area || (p.area != null ? String(p.area) : ''),
+        area_unit: prev.area_unit || p.area_unit || '',
+        city: prev.city || p.city || '',
+        neighborhood: prev.neighborhood || p.neighborhood || '',
+        location: prev.location || p.location || '',
+        address: prev.address || p.address || '',
+        amenities:
+          Array.isArray(prev.amenities) && prev.amenities.length > 0
+            ? prev.amenities
+            : (p.amenities || []),
+      }))
+      setAiMessage(`Drafted via ${r.provider} (confidence ${Math.round((p.confidence || 0) * 100)}%). Review and edit as needed.`)
+    } catch (err: any) {
+      setAiMessage(err?.message || 'AI draft failed.')
+    } finally {
+      setAiBusy(false)
+    }
+  }
   const fileRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -360,6 +414,34 @@ export function ListingFormModal({ open, property, onClose, onSaved }: ListingFo
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-5">
+          <div className="flex items-start justify-between gap-3 rounded-lg border border-dashed bg-amber-50/50 p-3">
+            <div className="flex-1 text-xs text-slate-700">
+              <div className="flex items-center gap-1.5 font-medium">
+                <Sparkles className="h-3.5 w-3.5 text-amber-500" />
+                Draft with AI
+              </div>
+              <p className="mt-0.5 text-muted-foreground">
+                Upload photos below, then hit Draft — AI fills the title, description, and as many
+                fields as it can infer. It never overwrites anything you've already typed.
+              </p>
+              {aiMessage && (
+                <p className="mt-1.5 text-slate-800">{aiMessage}</p>
+              )}
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="gap-1.5"
+              disabled={aiBusy || form.media.length === 0}
+              onClick={handleAiDraft}
+              title={form.media.length === 0 ? 'Add photos first' : 'Draft listing from uploaded photos'}
+            >
+              {aiBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+              {aiBusy ? 'Drafting…' : 'Draft with AI'}
+            </Button>
+          </div>
+
           <div>
             <Label>Title *</Label>
             <Input className="mt-1" value={form.title} onChange={(e) => set('title', e.target.value)} required />

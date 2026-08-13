@@ -767,4 +767,44 @@ export const api = {
 
   submitAgentPriceReport: (data: Record<string, unknown>) =>
     fetchJson('/pricing/agent-price-reports', { method: 'POST', body: JSON.stringify(data) }),
+
+  // Listings AI — draft a listing from photos.
+  describeListingFromPhotos: (payload: {
+    photo_urls: string[]
+    hints?: {
+      city?: string
+      neighborhood?: string
+      type?: 'sale' | 'rent'
+      property_type?: string
+      price?: number
+      currency?: string
+      notes?: string
+    }
+    provider?: string
+    intent?: 'create' | 'update'
+    existing_listing?: Record<string, unknown>
+  }): Promise<{
+    property: {
+      title: string | null
+      description: string | null
+      type: 'sale' | 'rent' | null
+      property_type: string | null
+      price: number | null
+      price_unit: string | null
+      bedrooms: number | null
+      bathrooms: number | null
+      area: number | null
+      area_unit: string | null
+      location: string | null
+      city: string | null
+      neighborhood: string | null
+      address: string | null
+      amenities: string[]
+      furnished: boolean | null
+      features: string[]
+      confidence: number
+    }
+    provider: string
+    change_summary: Record<string, unknown> | null
+  }> => fetchJson('/listings-ai/describe', { method: 'POST', body: JSON.stringify(payload) }),
 }

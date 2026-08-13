@@ -1,0 +1,114 @@
+/**
+ * HTTP routes for the listings-ai module.
+ *
+ * POST /api/listings-ai/describe
+ *   Body: {
+ *     photo_urls: string[],           // required (1..config.maxPhotos)
+ *     hints?: {                       // optional context to steer the model
+ *       city?: string
+ *       neighborhood?: string
+ *       type?: 'sale' | 'rent'
+ *       property_type?: string
+ *       price?: number
+ *       currency?: string
+ *       notes?: string
+ *     },
+ *     provider?: string,              // optional override (claude|openai|...)
+ *     intent?: 'create' | 'update',   // default 'create'
+ *     existing_listing?: object       // when intent = 'update', the current listing
+ *   }
+ *   Returns: {
+ *     property: {
+ *       title, description, type, property_type, price, price_unit,
+ *       bedrooms, bathrooms, area, area_unit,
+ *       location, city, neighborhood, address,
+ *       amenities, furnished, features, confidence
+ *     },
+ *     provider,
+ *     change_summary?
+ *   }
+ */
+
+export function registerListingsAiRoutes(app, { aiAdapter, config, logger, authMiddleware }) {
+  const auth = authMiddleware || ((_req, _res, next) => next())
+
+  app.post('/api/listings-ai/describe', auth, async (req, res) => {
+    const started = Date.now()
+    const {
+      photo_urls,
+      hints,
+      provider,
+      intent,
+      existing_listing: existingListing,
+    } = req.body || {}
+
+    if (!Array.isArray(photo_urls) || photo_urls.length === 0) {
+      return res.status(400).json({ error: 'photo_urls must be a non-empty array' })
+    }
+    if (photo_urls.length > config.maxPhotos) {
+      return res.status(400).json({
+        error: `Too many photos (max ${config.maxPhotos})`,
+      })
+    }
+
+    const validUrls = photo_urls.filter((u) => typeof u === 'string' && u.trim().length > 0)
+    if (validUrls.length === 0) {
+      return res.status(400).json({ error: 'photo_urls must contain valid strings' })
+    }
+
+    const images = validUrls.map((url) => ({ url }))
+    const messages = buildHintMessages(hints)
+
+    try {
+      const result = await aiAdapter.extractProperty({
+        messages,
+        images,
+        provider: provider || undefined,
+        intent: intent === 'update' ? 'update' : 'create',
+        existingListing: existingListing || null,
+      })
+      const elapsed = Date.now() - started
+      logger.info(
+        {
+          agentId: req.user?.id,
+          photoCount: images.length,
+          provider: result.provider,
+          confidence: result.property?.confidence,
+          elapsedMs: elapsed,
+        },
+        'listings-ai describe complete',
+      )
+      return res.json({
+        property: result.property,
+        provider: result.provider,
+        change_summary: result.changeSummary || null,
+      })
+    } catch (err) {
+      logger.warn(
+        { err: err.message, agentId: req.user?.id, photoCount: images.length },
+        'listings-ai describe failed',
+      )
+      return res.status(502).json({
+        error: 'AI extraction failed',
+        detail: err.message,
+      })
+    }
+  })
+}
+
+function buildHintMessages(hints) {
+  if (!hints || typeof hints !== 'object') return []
+  const parts = []
+  if (hints.type) parts.push(`Listing intent: ${hints.type === 'rent' ? 'for rent' : 'for sale'}.`)
+  if (hints.property_type) parts.push(`Property type is ${hints.property_type}.`)
+  if (hints.city || hints.neighborhood) {
+    const loc = [hints.neighborhood, hints.city].filter(Boolean).join(', ')
+    parts.push(`Location: ${loc}.`)
+  }
+  if (typeof hints.price === 'number' && hints.price > 0) {
+    parts.push(`Asking price: ${hints.price}${hints.currency ? ` ${hints.currency}` : ''}.`)
+  }
+  if (hints.notes) parts.push(`Notes from agent: ${hints.notes}`)
+  if (!parts.length) return []
+  return [{ role: 'user', text: parts.join(' ') }]
+}
