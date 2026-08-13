@@ -152,6 +152,11 @@ import {
   classifyByRules,
 } from './lib/comment-classifier.js'
 import {
+  routeClassifiedMessage,
+  registerCommentRouterRoutes,
+} from './modules/comment-router/index.js'
+import { setCommentRouterHook } from './conversations/orchestrator.js'
+import {
   isXEnabled,
   parseIncomingXWebhook,
   publishXTweet,
@@ -486,6 +491,23 @@ if (listingsAiModule.enabled) {
 }
 
 /* ============================================================================
+ * Comment router — inject the dispatch hook into the orchestrator + register
+ * the tenant routing-config endpoints.
+ * ========================================================================== */
+
+registerCommentRouterRoutes(app, { authMiddleware })
+
+setCommentRouterHook(async (message) => {
+  await routeClassifiedMessage({
+    message,
+    orchestrator: { sendOutboundMessage },
+    aiAdapter: listingsAiModule.enabled ? listingsAiModule.aiAdapter : null,
+    aiProvider: listingsAiModule.config?.aiProvider,
+    logger,
+  })
+})
+
+/* ============================================================================
  * Comment classifier — AI reclassification worker
  *
  * Periodically picks up public-comment messages whose rules-stage
@@ -544,6 +566,19 @@ async function runCommentClassifierBatch() {
       category_matched_rule: c.reasoning || null,
       category_updated_at: new Date().toISOString(),
     }))
+    // Re-route with the upgraded category — the router's idempotency guard
+    // keys on (message_id, category, category_source) so this fires exactly
+    // once per (rules→ai) upgrade.
+    const upgraded = await findOne('conversation_messages', (m) => m.id === c.id)
+    if (upgraded) {
+      void routeClassifiedMessage({
+        message: upgraded,
+        orchestrator: { sendOutboundMessage },
+        aiAdapter: listingsAiModule.enabled ? listingsAiModule.aiAdapter : null,
+        aiProvider: listingsAiModule.config?.aiProvider,
+        logger,
+      }).catch((err) => logger.warn({ err: err.message, messageId: c.id }, 'Router re-dispatch failed'))
+    }
     updated++
   }
   return { batched: items.length, updated }
@@ -5680,6 +5715,24 @@ app.get('/api/listings/:id/comments', authMiddleware, async (req, res) => {
     summary[cat] = (summary[cat] || 0) + 1
   }
 
+  // Pre-load routing outcomes for every inbound classified message so we
+  // can attach them to the response in a single pass.
+  const inboundMessageIds = new Set(messages.filter((m) => m.direction === 'inbound').map((m) => m.id))
+  const routings = inboundMessageIds.size
+    ? await findAll('comment_routings', (r) => inboundMessageIds.has(r.message_id))
+    : []
+  const routingsByMessage = new Map()
+  for (const r of routings) {
+    if (!routingsByMessage.has(r.message_id)) routingsByMessage.set(r.message_id, [])
+    routingsByMessage.get(r.message_id).push({
+      id: r.id,
+      category: r.category,
+      route: r.route,
+      outcomes: r.outcomes || [],
+      created_at: r.created_at,
+    })
+  }
+
   // Group by conversation and attach the associated distribution.
   const threads = new Map()
   for (const m of messages) {
@@ -5708,10 +5761,13 @@ app.get('/api/listings/:id/comments', authMiddleware, async (req, res) => {
         // Thread-level top category = most severe / highest-signal category
         // across inbound messages in the thread. Set below after sort.
         top_category: null,
+        needs_agent_attention: false,
         messages: [],
       })
     }
-    threads.get(m.conversation_id).messages.push({
+    const thread = threads.get(m.conversation_id)
+    if (m.needs_agent_attention) thread.needs_agent_attention = true
+    thread.messages.push({
       id: m.id,
       direction: m.direction,
       content: m.content,
@@ -5722,6 +5778,12 @@ app.get('/api/listings/:id/comments', authMiddleware, async (req, res) => {
       sentiment: m.sentiment || null,
       category_confidence: m.category_confidence ?? null,
       category_source: m.category_source || null,
+      suggested_reply: m.suggested_reply || null,
+      suggested_reply_composed_at: m.suggested_reply_composed_at || null,
+      needs_agent_attention: !!m.needs_agent_attention,
+      priority: m.priority || null,
+      is_hidden: !!m.is_hidden,
+      routings: routingsByMessage.get(m.id) || [],
     })
   }
 

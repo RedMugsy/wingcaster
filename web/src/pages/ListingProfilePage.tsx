@@ -1394,6 +1394,17 @@ function CommentsSection({ listingId }: { listingId: string }) {
     }
   }
 
+  async function sendSuggested(conversationId: string, text: string) {
+    if (!text?.trim()) return
+    try {
+      await api.sendConversationMessage(conversationId, text.trim())
+      addToast({ title: 'Suggested reply sent', variant: 'success' })
+      load()
+    } catch (err: any) {
+      addToast({ title: 'Reply failed', description: err?.message, variant: 'error' })
+    }
+  }
+
   async function reclassify(messageId: string, category: string, sentiment?: string) {
     try {
       await api.reclassifyComment(messageId, category, sentiment)
@@ -1509,6 +1520,14 @@ function CommentsSection({ listingId }: { listingId: string }) {
                           {topMeta.emoji} {topMeta.label}
                         </span>
                       )}
+                      {t.needs_agent_attention && (
+                        <span
+                          className="inline-flex items-center gap-1 rounded-full border border-rose-300 bg-rose-100 px-2 py-0.5 text-[10px] font-semibold text-rose-800 animate-pulse"
+                          title="Needs agent attention (flagged by router)"
+                        >
+                          ⚑ Needs attention
+                        </span>
+                      )}
                       <span className="text-sm font-medium">{displayName}</span>
                     </div>
                     {t.distribution_url && (
@@ -1532,6 +1551,7 @@ function CommentsSection({ listingId }: { listingId: string }) {
                         reclassifyOpen={reclassifyOpenFor === m.id}
                         onOpenReclassify={() => setReclassifyOpenFor(reclassifyOpenFor === m.id ? null : m.id)}
                         onReclassify={(cat, sent) => reclassify(m.id, cat, sent)}
+                        onSendSuggestedReply={(text) => sendSuggested(t.conversation_id, text)}
                       />
                     ))}
                   </ul>
@@ -1579,6 +1599,7 @@ function MessageRow({
   reclassifyOpen,
   onOpenReclassify,
   onReclassify,
+  onSendSuggestedReply,
 }: {
   message: {
     id: string
@@ -1591,11 +1612,23 @@ function MessageRow({
     sentiment: 'positive' | 'neutral' | 'negative' | null
     category_confidence: number | null
     category_source: 'rules' | 'ai' | 'manual' | null
+    suggested_reply?: string | null
+    needs_agent_attention?: boolean
+    priority?: 'low' | 'normal' | 'high' | 'urgent' | null
+    is_hidden?: boolean
+    routings?: Array<{
+      id: string
+      category: string
+      route: string | null
+      outcomes: Array<{ type: string; ref_id?: string; at: string; notes?: string }>
+      created_at: string
+    }>
   }
   categoryMeta: Record<string, { label: string; emoji: string; description: string; route: string }>
   reclassifyOpen: boolean
   onOpenReclassify: () => void
   onReclassify: (category: string, sentiment?: string) => void
+  onSendSuggestedReply?: (text: string) => void
 }) {
   const meta = m.category ? categoryMeta[m.category] : null
   const bubbleClass = m.direction === 'inbound'
@@ -1645,7 +1678,67 @@ function MessageRow({
           ))}
         </div>
       )}
+
+      {/* Routing outcome badges — surface what the router did per message. */}
+      {m.direction === 'inbound' && m.routings && m.routings.length > 0 && (
+        <div className="mt-1 flex flex-wrap gap-1">
+          {m.routings.flatMap((r) => r.outcomes.map((o, i) => (
+            <RoutingOutcomeChip key={`${r.id}-${i}`} type={o.type} notes={o.notes || undefined} />
+          )))}
+        </div>
+      )}
+
+      {/* Suggested reply drafted by the router — agent can send / edit / dismiss. */}
+      {m.direction === 'inbound' && m.suggested_reply && (
+        <div className="mt-1.5 rounded-md border border-amber-200 bg-amber-50 p-2 text-xs">
+          <div className="mb-0.5 flex items-center gap-1 text-[10px] font-medium text-amber-900">
+            <Sparkles className="h-3 w-3" />
+            Suggested reply (agent review)
+          </div>
+          <div className="whitespace-pre-wrap text-amber-900">{m.suggested_reply}</div>
+          {onSendSuggestedReply && (
+            <div className="mt-1 flex gap-1.5">
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-6 gap-1 px-2 text-[10px]"
+                onClick={() => onSendSuggestedReply(m.suggested_reply!)}
+              >
+                Send as-is
+              </Button>
+            </div>
+          )}
+        </div>
+      )}
     </li>
+  )
+}
+
+function RoutingOutcomeChip({ type, notes }: { type: string; notes?: string }) {
+  const meta: Record<string, { label: string; className: string; icon?: string }> = {
+    reply_sent:              { label: 'Reply sent',            className: 'bg-emerald-100 text-emerald-800 border-emerald-200', icon: '↩' },
+    reply_drafted:           { label: 'Reply drafted',         className: 'bg-amber-100 text-amber-800 border-amber-200',       icon: '✎' },
+    reply_suppressed:        { label: 'Auto-reply suppressed', className: 'bg-slate-100 text-slate-700 border-slate-200',       icon: '⊘' },
+    opportunity_created:     { label: 'Opportunity opened',    className: 'bg-blue-100 text-blue-800 border-blue-200',          icon: '⚡' },
+    inquiry_created:         { label: 'Inquiry created',       className: 'bg-indigo-100 text-indigo-800 border-indigo-200',    icon: '?' },
+    engagement_incremented:  { label: 'Engagement counted',    className: 'bg-slate-100 text-slate-700 border-slate-200',       icon: '+' },
+    agent_notified:          { label: 'Agent notified',        className: 'bg-rose-100 text-rose-800 border-rose-200',          icon: '!' },
+    agency_owner_notified:   { label: 'Owner notified',        className: 'bg-rose-100 text-rose-800 border-rose-200',          icon: '‼' },
+    marketing_queued:        { label: 'Marketing queue',       className: 'bg-emerald-100 text-emerald-800 border-emerald-200', icon: '★' },
+    ai_watcher_subscribed:   { label: 'AI watching thread',    className: 'bg-purple-100 text-purple-800 border-purple-200',    icon: '👁' },
+    hidden:                  { label: 'Hidden (spam)',         className: 'bg-zinc-100 text-zinc-500 border-zinc-200',          icon: '×' },
+    flagged_for_agent:       { label: 'Flagged for agent',     className: 'bg-orange-100 text-orange-800 border-orange-200',    icon: '⚑' },
+    skipped:                 { label: 'Skipped',               className: 'bg-slate-100 text-slate-500 border-slate-200',       icon: '·' },
+  }
+  const m = meta[type] || { label: type, className: 'bg-slate-100 text-slate-600 border-slate-200' }
+  return (
+    <span
+      className={`inline-flex items-center gap-1 rounded-full border px-1.5 py-0 text-[10px] font-medium ${m.className}`}
+      title={notes ? `${m.label} — ${notes}` : m.label}
+    >
+      {m.icon && <span className="opacity-70">{m.icon}</span>}
+      {m.label}
+    </span>
   )
 }
 

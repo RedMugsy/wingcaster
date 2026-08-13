@@ -11,6 +11,22 @@ import { replyToLinkedInComment, isLinkedInEnabled } from '../lib/notifications/
 import { resolveConnectionCredentials } from '../lib/credentials.js'
 import { classifyByRules } from '../lib/comment-classifier.js'
 
+// Router is injected at boot to avoid an import cycle
+// (router imports opportunities → orchestrator would form a loop).
+let routerHook = null
+export function setCommentRouterHook(fn) { routerHook = fn }
+async function dispatchToRouter(message) {
+  if (!routerHook) return
+  try {
+    await routerHook(message)
+  } catch (err) {
+    // Router failures never break ingest. They are recorded in
+    // comment_routings.outcomes with type='handler_error'.
+    // eslint-disable-next-line no-console
+    console.warn('[orchestrator] router hook failed:', err?.message || err)
+  }
+}
+
 // Public comment channels that get classified on ingest. DM channels
 // (whatsapp, sms, email, *_dm) skip classification because they're
 // already private conversations owned by a specific contact.
@@ -165,6 +181,9 @@ export async function ingestInboundMessage({ channel, provider, providerMessageI
     classification = classifyByRules(content)
   }
 
+  // Router is injected via setRouterHook to avoid an import cycle. It fires
+  // fire-and-forget after the message is persisted (see below).
+
   const message = {
     id: uuidv4(),
     conversation_id: conversation.id,
@@ -190,6 +209,13 @@ export async function ingestInboundMessage({ channel, provider, providerMessageI
     created_at: new Date().toISOString(),
   }
   await insert('conversation_messages', message)
+
+  // Fire-and-forget router dispatch. We deliberately do NOT await so a slow
+  // AI refinement or downstream side effect never blocks the webhook / ingest
+  // response. The router records everything to comment_routings + logs.
+  if (classification && CLASSIFIABLE_CHANNELS.has(channel)) {
+    void dispatchToRouter(message)
+  }
 
   await update('conversations', (c) => c.id === conversation.id, (c) => ({
     ...c,

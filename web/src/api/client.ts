@@ -467,6 +467,7 @@ export const api = {
       distribution_url: string | null
       top_category: string | null
       contact: { id: string; name: string; avatar: string | null } | null
+      needs_agent_attention: boolean
       messages: Array<{
         id: string
         direction: 'inbound' | 'outbound'
@@ -478,6 +479,18 @@ export const api = {
         sentiment: 'positive' | 'neutral' | 'negative' | null
         category_confidence: number | null
         category_source: 'rules' | 'ai' | 'manual' | null
+        suggested_reply: string | null
+        suggested_reply_composed_at: string | null
+        needs_agent_attention: boolean
+        priority: 'low' | 'normal' | 'high' | 'urgent' | null
+        is_hidden: boolean
+        routings: Array<{
+          id: string
+          category: string
+          route: string | null
+          outcomes: Array<{ type: string; ref_id?: string; at: string; notes?: string; details?: any }>
+          created_at: string
+        }>
       }>
       last_activity_at: string | null
     }>
@@ -503,6 +516,20 @@ export const api = {
     }),
   backfillCommentCategories: (listingId: string) =>
     fetchJson(`/listings/${listingId}/comments/backfill-categories`, { method: 'POST', body: '{}' }),
+
+  getRoutingConfig: (): Promise<{
+    config: Record<string, Record<string, unknown>>
+    agency_id: string | null
+    agent_id: string | null
+  }> => fetchJson('/routing-config'),
+  getRoutingConfigDefaults: (): Promise<{
+    defaults: Record<string, Record<string, unknown>>
+    categories: string[]
+  }> => fetchJson('/routing-config/defaults'),
+  updateRoutingConfig: (payload: {
+    owner_type?: 'agent' | 'agency'
+    routes: Record<string, Record<string, unknown>>
+  }) => fetchJson('/routing-config', { method: 'PUT', body: JSON.stringify(payload) }),
   assignConversation: (id: string, agentId?: string) =>
     fetchJson(`/conversations/${id}/assign`, { method: 'POST', body: JSON.stringify({ agent_id: agentId }) }),
   updateConversation: (id: string, data: Record<string, unknown>) =>
