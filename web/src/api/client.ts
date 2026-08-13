@@ -285,6 +285,68 @@ export const api = {
   // Distribution Hub
   getPlatforms: () => fetchJson('/platforms'),
   getFiAccounts: () => fetchJson('/fi-accounts'),
+
+  // Multi-tenant social channels
+  getSocialChannelsConfig: (): Promise<{
+    integration_models: Record<string, 'enterprise' | 'oauth'>
+    connection_fields: Record<string, {
+      model: 'enterprise' | 'oauth'
+      target_fields: Array<{ key: string; label: string; required: boolean; secret: boolean }>
+    }>
+  }> => fetchJson('/social-channels/config'),
+  getSocialChannels: (): Promise<Array<{
+    id: string
+    platform: string
+    account_name: string
+    status: string
+    health: string
+    handle: string | null
+    enterprise_targets: Record<string, string>
+    oauth: {
+      connected: boolean
+      scope?: string | null
+      expires_at?: string | null
+      user_id?: string | null
+    }
+    updated_at: string | null
+  }>> => fetchJson('/social-channels'),
+  upsertSocialChannel: (
+    platform: string,
+    payload: {
+      handle?: string
+      account_name?: string
+      enterprise_targets?: Record<string, string>
+    },
+  ) => fetchJson(`/social-channels/${platform}`, {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  }),
+  disconnectSocialChannel: (platform: string) =>
+    fetchJson(`/social-channels/${platform}`, { method: 'DELETE' }),
+  startSocialOAuth: (platform: string): Promise<{ auth_url: string; state: string; dev: boolean }> =>
+    fetchJson(`/social-channels/oauth/${platform}/start`),
+  publishListingToSocial: (
+    propertyId: string,
+    payload: {
+      channels: Array<{ platform: string; format?: string; link_url?: string }>
+      caption: string
+      media_urls?: string[]
+    },
+  ): Promise<{
+    results: Array<{
+      platform: string
+      status: 'published' | 'failed'
+      external_id: string | null
+      external_url: string | null
+      provider: string | null
+      simulated: boolean
+      error: string | null
+    }>
+  }> =>
+    fetchJson(`/listings/${propertyId}/publish-social`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
   getMyConnections: () => fetchJson('/my-connections'),
   connectMyPlatform: (data: Record<string, unknown>) =>
     fetchJson('/my-connections', { method: 'POST', body: JSON.stringify(data) }),

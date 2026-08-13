@@ -44,8 +44,9 @@ export function isInstagramEnabled() {
 /**
  * Send an Instagram DM reply (dev simulation or live Meta Graph API).
  */
-export async function sendInstagramDM({ recipientId, text, attachmentUrl }) {
+export async function sendInstagramDM({ recipientId, text, attachmentUrl, accessToken }) {
   const cfg = getInstagramConfig()
+  const token = accessToken || cfg.pageAccessToken
   if (!recipientId) throw Object.assign(new Error('recipientId is required for Instagram DM'), { code: 'MISSING_RECIPIENT' })
   if (!text?.trim() && !attachmentUrl) throw Object.assign(new Error('text or attachmentUrl is required'), { code: 'MISSING_CONTENT' })
 
@@ -74,7 +75,7 @@ export async function sendInstagramDM({ recipientId, text, attachmentUrl }) {
     payload.message = { text: text.trim() }
   }
 
-  const res = await fetch(`${GRAPH_BASE}/me/messages?access_token=${cfg.pageAccessToken}`, {
+  const res = await fetch(`${GRAPH_BASE}/me/messages?access_token=${token}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
@@ -102,8 +103,9 @@ export async function sendInstagramDM({ recipientId, text, attachmentUrl }) {
  * Reply to an Instagram comment (public). Public replies should never contain PII;
  * we encourage the user to move to DM.
  */
-export async function replyToInstagramComment({ commentId, text }) {
+export async function replyToInstagramComment({ commentId, text, accessToken }) {
   const cfg = getInstagramConfig()
+  const token = accessToken || cfg.pageAccessToken
   if (!commentId) throw Object.assign(new Error('commentId is required'), { code: 'MISSING_COMMENT_ID' })
   if (!text?.trim()) throw Object.assign(new Error('reply text is required'), { code: 'MISSING_CONTENT' })
 
@@ -121,7 +123,7 @@ export async function replyToInstagramComment({ commentId, text }) {
     throw Object.assign(new Error('Instagram dev mode configured to fail'), { code: 'DEV_FAILURE' })
   }
 
-  const res = await fetch(`${GRAPH_BASE}/${commentId}/replies?access_token=${cfg.pageAccessToken}`, {
+  const res = await fetch(`${GRAPH_BASE}/${commentId}/replies?access_token=${token}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ message: text.trim() }),
@@ -183,13 +185,15 @@ export function parseIncomingInstagramDMWebhook(payload) {
  * Uses the Instagram Graph API content publishing flow.
  * Docs: https://developers.facebook.com/docs/instagram-api/guides/content-publishing
  */
-export async function publishInstagramFeed({ imageUrl, caption }) {
+export async function publishInstagramFeed({ imageUrl, caption, businessAccountId, accessToken }) {
   const cfg = getInstagramConfig()
-  if (!cfg.businessAccountId) {
+  const igAccountId = businessAccountId || cfg.businessAccountId
+  const token = accessToken || cfg.pageAccessToken
+  if (!igAccountId) {
     return simulateInstagramPublish('feed_image', { imageUrl, caption })
   }
 
-  const createUrl = `${GRAPH_BASE}/${cfg.businessAccountId}/media?access_token=${cfg.pageAccessToken}`
+  const createUrl = `${GRAPH_BASE}/${igAccountId}/media?access_token=${token}`
   const createBody = new URLSearchParams({ image_url: imageUrl })
   if (caption) createBody.append('caption', caption)
 
@@ -199,7 +203,7 @@ export async function publishInstagramFeed({ imageUrl, caption }) {
     throw Object.assign(new Error(`Instagram feed creation failed (${createRes.status}): ${createData?.error?.message || JSON.stringify(createData).slice(0, 200)}`), { code: 'INSTAGRAM_FEED_CREATE_FAILED', details: createData })
   }
 
-  const publishUrl = `${GRAPH_BASE}/${cfg.businessAccountId}/media_publish?access_token=${cfg.pageAccessToken}`
+  const publishUrl = `${GRAPH_BASE}/${igAccountId}/media_publish?access_token=${token}`
   const publishBody = new URLSearchParams({ creation_id: createData.id })
   const publishRes = await fetch(publishUrl, { method: 'POST', body: publishBody })
   const publishData = await publishRes.json().catch(() => ({}))
@@ -219,16 +223,18 @@ export async function publishInstagramFeed({ imageUrl, caption }) {
 /**
  * Publish an Instagram carousel post.
  */
-export async function publishInstagramCarousel({ imageUrls, caption }) {
+export async function publishInstagramCarousel({ imageUrls, caption, businessAccountId, accessToken }) {
   const cfg = getInstagramConfig()
+  const igAccountId = businessAccountId || cfg.businessAccountId
+  const token = accessToken || cfg.pageAccessToken
   if (!imageUrls?.length) throw Object.assign(new Error('imageUrls is required for carousel'), { code: 'MISSING_CAROUSEL_IMAGES' })
-  if (!cfg.businessAccountId) {
+  if (!igAccountId) {
     return simulateInstagramPublish('carousel', { imageUrls, caption })
   }
 
   const children = []
   for (const imageUrl of imageUrls) {
-    const childUrl = `${GRAPH_BASE}/${cfg.businessAccountId}/media?access_token=${cfg.pageAccessToken}`
+    const childUrl = `${GRAPH_BASE}/${igAccountId}/media?access_token=${token}`
     const childBody = new URLSearchParams({ is_carousel_item: 'true', image_url: imageUrl })
     const childRes = await fetch(childUrl, { method: 'POST', body: childBody })
     const childData = await childRes.json().catch(() => ({}))
@@ -238,7 +244,7 @@ export async function publishInstagramCarousel({ imageUrls, caption }) {
     children.push(childData.id)
   }
 
-  const createUrl = `${GRAPH_BASE}/${cfg.businessAccountId}/media?access_token=${cfg.pageAccessToken}`
+  const createUrl = `${GRAPH_BASE}/${igAccountId}/media?access_token=${token}`
   const createBody = new URLSearchParams({ media_type: 'CAROUSEL', children: children.join(',') })
   if (caption) createBody.append('caption', caption)
   const createRes = await fetch(createUrl, { method: 'POST', body: createBody })
@@ -247,7 +253,7 @@ export async function publishInstagramCarousel({ imageUrls, caption }) {
     throw Object.assign(new Error(`Instagram carousel creation failed (${createRes.status}): ${createData?.error?.message || JSON.stringify(createData).slice(0, 200)}`), { code: 'INSTAGRAM_CAROUSEL_CREATE_FAILED', details: createData })
   }
 
-  const publishUrl = `${GRAPH_BASE}/${cfg.businessAccountId}/media_publish?access_token=${cfg.pageAccessToken}`
+  const publishUrl = `${GRAPH_BASE}/${igAccountId}/media_publish?access_token=${token}`
   const publishBody = new URLSearchParams({ creation_id: createData.id })
   const publishRes = await fetch(publishUrl, { method: 'POST', body: publishBody })
   const publishData = await publishRes.json().catch(() => ({}))
@@ -269,13 +275,15 @@ export async function publishInstagramCarousel({ imageUrls, caption }) {
  * Note: Reels have strict requirements (duration, aspect ratio, codec). The caller
  * should provide a compliant video URL. We attempt the Graph API container flow.
  */
-export async function publishInstagramReel({ videoUrl, caption }) {
+export async function publishInstagramReel({ videoUrl, caption, businessAccountId, accessToken }) {
   const cfg = getInstagramConfig()
-  if (!cfg.businessAccountId) {
+  const igAccountId = businessAccountId || cfg.businessAccountId
+  const token = accessToken || cfg.pageAccessToken
+  if (!igAccountId) {
     return simulateInstagramPublish('reel', { videoUrl, caption })
   }
 
-  const createUrl = `${GRAPH_BASE}/${cfg.businessAccountId}/media?access_token=${cfg.pageAccessToken}`
+  const createUrl = `${GRAPH_BASE}/${igAccountId}/media?access_token=${token}`
   const createBody = new URLSearchParams({ media_type: 'REELS', video_url: videoUrl })
   if (caption) createBody.append('caption', caption)
   if (process.env.INSTAGRAM_SHARE_REEL_TO_FEED === 'true') createBody.append('share_to_feed', 'true')
@@ -287,7 +295,7 @@ export async function publishInstagramReel({ videoUrl, caption }) {
   }
 
   // Reels may require polling for status before publish. We do a single immediate attempt.
-  const publishUrl = `${GRAPH_BASE}/${cfg.businessAccountId}/media_publish?access_token=${cfg.pageAccessToken}`
+  const publishUrl = `${GRAPH_BASE}/${igAccountId}/media_publish?access_token=${token}`
   const publishBody = new URLSearchParams({ creation_id: createData.id })
   const publishRes = await fetch(publishUrl, { method: 'POST', body: publishBody })
   const publishData = await publishRes.json().catch(() => ({}))
@@ -307,13 +315,15 @@ export async function publishInstagramReel({ videoUrl, caption }) {
 /**
  * Publish an Instagram Story (single image).
  */
-export async function publishInstagramStory({ imageUrl }) {
+export async function publishInstagramStory({ imageUrl, businessAccountId, accessToken }) {
   const cfg = getInstagramConfig()
-  if (!cfg.businessAccountId) {
+  const igAccountId = businessAccountId || cfg.businessAccountId
+  const token = accessToken || cfg.pageAccessToken
+  if (!igAccountId) {
     return simulateInstagramPublish('story', { imageUrl })
   }
 
-  const createUrl = `${GRAPH_BASE}/${cfg.businessAccountId}/media?access_token=${cfg.pageAccessToken}`
+  const createUrl = `${GRAPH_BASE}/${igAccountId}/media?access_token=${token}`
   const createBody = new URLSearchParams({ media_type: 'STORIES', image_url: imageUrl })
 
   const createRes = await fetch(createUrl, { method: 'POST', body: createBody })
@@ -322,7 +332,7 @@ export async function publishInstagramStory({ imageUrl }) {
     throw Object.assign(new Error(`Instagram story creation failed (${createRes.status}): ${createData?.error?.message || JSON.stringify(createData).slice(0, 200)}`), { code: 'INSTAGRAM_STORY_CREATE_FAILED', details: createData })
   }
 
-  const publishUrl = `${GRAPH_BASE}/${cfg.businessAccountId}/media_publish?access_token=${cfg.pageAccessToken}`
+  const publishUrl = `${GRAPH_BASE}/${igAccountId}/media_publish?access_token=${token}`
   const publishBody = new URLSearchParams({ creation_id: createData.id })
   const publishRes = await fetch(publishUrl, { method: 'POST', body: publishBody })
   const publishData = await publishRes.json().catch(() => ({}))

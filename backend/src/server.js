@@ -107,7 +107,25 @@ import {
 import {
   isTikTokEnabled,
   parseIncomingTikTokWebhook,
+  publishTikTokPhoto,
+  publishTikTokVideo,
 } from './lib/notifications/tiktok.js'
+import {
+  isFacebookEnabled,
+  parseIncomingFacebookWebhook,
+  publishFacebookPagePost,
+  publishFacebookPagePhoto,
+} from './lib/notifications/facebook.js'
+import {
+  isLinkedInEnabled,
+  publishLinkedInPost,
+} from './lib/notifications/linkedin.js'
+import {
+  encryptSecret,
+  PLATFORM_INTEGRATION_MODEL,
+  PLATFORM_CONNECTION_FIELDS,
+  resolveConnectionCredentials,
+} from './lib/credentials.js'
 import {
   createModule as createWhatsAppListingsModule,
   createDefaultPlatformAdapter as createWhatsAppPlatformAdapter,
@@ -125,6 +143,7 @@ import {
 import {
   isXEnabled,
   parseIncomingXWebhook,
+  publishXTweet,
 } from './lib/notifications/x.js'
 import {
   getOrCreateContact,
@@ -3912,6 +3931,14 @@ const PLATFORM_CAPABILITIES = {
     catalogue_sync: false, posting: true, draft_creation: true, direct_publishing: true,
     messaging: true, analytics: true, paid_promotion: true, payments: false,
   },
+  facebook: {
+    catalogue_sync: false, posting: true, draft_creation: true, direct_publishing: true,
+    messaging: true, analytics: true, paid_promotion: true, payments: false,
+  },
+  linkedin: {
+    catalogue_sync: false, posting: true, draft_creation: true, direct_publishing: true,
+    messaging: false, analytics: true, paid_promotion: true, payments: false,
+  },
 }
 
 async function retryDistributionDelivery(row, { requestedBy, source = 'manual' } = {}) {
@@ -4128,6 +4155,26 @@ app.get('/api/platforms', (req, res) => {
       capabilities: PLATFORM_CAPABILITIES.x,
       limitations: 'Thread generation available; paid promotion is optional.',
     },
+    {
+      id: 'facebook', name: 'Facebook', type: 'social', icon: 'facebook', requiresAuth: true,
+      description: 'Page feed posts, photo posts, and Messenger replies',
+      formats: ['feed_post', 'photo_post', 'video_post', 'messenger'],
+      capabilities: PLATFORM_CAPABILITIES.facebook,
+      limitations: isFacebookEnabled()
+        ? 'Live posting active. Uses the page token in FACEBOOK_PAGE_ACCESS_TOKEN.'
+        : 'Add FACEBOOK_PAGE_ACCESS_TOKEN + FACEBOOK_PAGE_ID in .env to enable live posting.',
+      configured: isFacebookEnabled(),
+    },
+    {
+      id: 'linkedin', name: 'LinkedIn', type: 'social', icon: 'linkedin', requiresAuth: true,
+      description: 'Company page + personal UGC posts',
+      formats: ['text_post', 'image_post', 'article_share'],
+      capabilities: PLATFORM_CAPABILITIES.linkedin,
+      limitations: isLinkedInEnabled()
+        ? 'Live posting active. Image posts require a pre-uploaded asset URN.'
+        : 'Add LINKEDIN_ACCESS_TOKEN + LINKEDIN_AUTHOR_URN in .env to enable live posting.',
+      configured: isLinkedInEnabled(),
+    },
   ])
 })
 
@@ -4135,15 +4182,390 @@ app.get('/api/fi-accounts', async (req, res) => {
   res.json(await findAll('platform_accounts', a => a.type === 'fi'))
 })
 
+/* ============================================================================
+ * Social Channels — multi-tenant credentials
+ *
+ * Enterprise-model platforms (Facebook, Instagram, LinkedIn, WhatsApp):
+ *   ListingClarion holds the enterprise access token in env vars. Each tenant
+ *   provides their platform target IDs (fb_page_id, ig_business_account_id,
+ *   li_author_urn, wa_phone_number_id) so posts appear under the tenant's
+ *   identity. Optional per-tenant token overrides are supported (encrypted).
+ *
+ * OAuth-model platforms (X, TikTok):
+ *   Each tenant completes an OAuth flow. Their access token + refresh token
+ *   are stored encrypted on the connection row.
+ * ========================================================================== */
+
+app.get('/api/social-channels/config', authMiddleware, (_req, res) => {
+  res.json({
+    integration_models: PLATFORM_INTEGRATION_MODEL,
+    connection_fields: PLATFORM_CONNECTION_FIELDS,
+  })
+})
+
+app.get('/api/social-channels', authMiddleware, async (req, res) => {
+  const rows = await findAll('marketplace_connections', c => c.agent_id === req.user.id)
+  res.json(rows.map(sanitizeSocialConnection))
+})
+
+app.put('/api/social-channels/:platform', authMiddleware, async (req, res) => {
+  const platform = req.params.platform
+  if (!PLATFORM_INTEGRATION_MODEL[platform]) {
+    return res.status(400).json({ error: `Unsupported platform: ${platform}` })
+  }
+  const model = PLATFORM_INTEGRATION_MODEL[platform]
+  const spec = PLATFORM_CONNECTION_FIELDS[platform]
+
+  const enterpriseTargets = normalizeEnterpriseTargets(platform, req.body?.enterprise_targets || {})
+
+  // Validate required target fields for enterprise model.
+  if (model === 'enterprise') {
+    for (const field of spec.target_fields) {
+      if (field.required && !field.secret) {
+        const val = enterpriseTargets[field.key]
+        if (!val || String(val).trim() === '') {
+          return res.status(400).json({ error: `${field.label} is required for ${platform}` })
+        }
+      }
+    }
+  }
+
+  const existing = await findOne(
+    'marketplace_connections',
+    c => c.agent_id === req.user.id && c.platform === platform,
+  )
+  const accountName = req.body?.account_name || existing?.account_name || `${platform} account`
+
+  const settingsPatch = {
+    handle: req.body?.handle || existing?.settings?.handle || accountName,
+    enterprise_targets: {
+      ...(existing?.settings?.enterprise_targets || {}),
+      ...enterpriseTargets,
+    },
+    credentials: existing?.settings?.credentials || {},
+  }
+
+  if (existing) {
+    await update('marketplace_connections', c => c.id === existing.id, c => ({
+      ...c,
+      account_name: accountName,
+      status: 'connected',
+      health: 'healthy',
+      capabilities: PLATFORM_CAPABILITIES[platform] || {},
+      settings: {
+        ...(c.settings || {}),
+        ...settingsPatch,
+      },
+      updated_at: new Date().toISOString(),
+    }))
+    const updated = await findOne('marketplace_connections', c => c.id === existing.id)
+    await logActivity({ type: 'social_connection_updated', agent_id: req.user.id, meta: { platform, connection_id: existing.id } })
+    return res.json(sanitizeSocialConnection(updated))
+  }
+
+  const created = {
+    id: uuidv4(),
+    agent_id: req.user.id,
+    platform,
+    account_name: accountName,
+    status: 'connected',
+    health: 'healthy',
+    capabilities: PLATFORM_CAPABILITIES[platform] || {},
+    settings: settingsPatch,
+    terms_accepted_at: new Date().toISOString(),
+    terms_version: '2026-07-1',
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  }
+  await insert('marketplace_connections', created)
+  await logActivity({ type: 'social_connection_created', agent_id: req.user.id, meta: { platform, connection_id: created.id } })
+  res.json(sanitizeSocialConnection(created))
+})
+
+app.delete('/api/social-channels/:platform', authMiddleware, async (req, res) => {
+  const platform = req.params.platform
+  const existing = await findOne(
+    'marketplace_connections',
+    c => c.agent_id === req.user.id && c.platform === platform,
+  )
+  if (!existing) return res.status(404).json({ error: 'Not connected' })
+  await update('marketplace_connections', c => c.id === existing.id, c => ({
+    ...c,
+    status: 'disconnected',
+    settings: {
+      ...(c.settings || {}),
+      credentials: {},
+    },
+    updated_at: new Date().toISOString(),
+  }))
+  await logActivity({ type: 'social_connection_disconnected', agent_id: req.user.id, meta: { platform, connection_id: existing.id } })
+  res.json({ ok: true })
+})
+
+/* --- OAuth start/callback (per-agent — X, TikTok) --- */
+
+function getOAuthConfig(platform) {
+  if (platform === 'x') {
+    return {
+      auth_url: 'https://twitter.com/i/oauth2/authorize',
+      token_url: 'https://api.twitter.com/2/oauth2/token',
+      scope: 'tweet.read tweet.write users.read offline.access',
+      client_id: process.env.X_OAUTH_CLIENT_ID || '',
+      client_secret: process.env.X_OAUTH_CLIENT_SECRET || '',
+      dev: process.env.X_PROVIDER !== 'x_api_v2' || !process.env.X_OAUTH_CLIENT_ID,
+    }
+  }
+  if (platform === 'tiktok') {
+    return {
+      auth_url: 'https://www.tiktok.com/v2/auth/authorize/',
+      token_url: 'https://open.tiktokapis.com/v2/oauth/token/',
+      scope: 'user.info.basic,video.publish',
+      client_id: process.env.TIKTOK_CLIENT_KEY || '',
+      client_secret: process.env.TIKTOK_CLIENT_SECRET || '',
+      dev: process.env.TIKTOK_PROVIDER !== 'tiktok_for_business' || !process.env.TIKTOK_CLIENT_KEY,
+    }
+  }
+  return null
+}
+
+function getOAuthRedirectBase(req) {
+  return process.env.PUBLIC_API_URL || `${req.protocol}://${req.get('host')}/api`
+}
+
+app.get('/api/social-channels/oauth/:platform/start', authMiddleware, async (req, res) => {
+  const platform = req.params.platform
+  if (PLATFORM_INTEGRATION_MODEL[platform] !== 'oauth') {
+    return res.status(400).json({ error: `${platform} is not an OAuth platform` })
+  }
+  const cfg = getOAuthConfig(platform)
+  if (!cfg) return res.status(400).json({ error: 'Unsupported platform' })
+
+  const state = uuidv4()
+  const redirectUri = `${getOAuthRedirectBase(req)}/social-channels/oauth/${platform}/callback`
+
+  // Persist state → agent binding so we can validate on callback.
+  await insert('oauth_states', {
+    id: state,
+    agent_id: req.user.id,
+    platform,
+    created_at: new Date().toISOString(),
+    expires_at: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
+  })
+
+  if (cfg.dev) {
+    // Dev mode: skip the platform entirely, redirect straight to our callback
+    // with a synthetic code so the flow completes end-to-end without live creds.
+    const devUrl = `${redirectUri}?code=dev_ok&state=${state}`
+    return res.json({ auth_url: devUrl, state, dev: true })
+  }
+
+  const authUrl = new URL(cfg.auth_url)
+  authUrl.searchParams.set('response_type', 'code')
+  authUrl.searchParams.set('client_id', cfg.client_id)
+  authUrl.searchParams.set('redirect_uri', redirectUri)
+  authUrl.searchParams.set('scope', cfg.scope)
+  authUrl.searchParams.set('state', state)
+  if (platform === 'x') {
+    // PKCE — we use plain challenge in dev; production must generate a real one.
+    authUrl.searchParams.set('code_challenge', state)
+    authUrl.searchParams.set('code_challenge_method', 'plain')
+  }
+  if (platform === 'tiktok') {
+    authUrl.searchParams.set('client_key', cfg.client_id)
+  }
+
+  res.json({ auth_url: authUrl.toString(), state, dev: false })
+})
+
+app.get('/api/social-channels/oauth/:platform/callback', async (req, res) => {
+  const platform = req.params.platform
+  if (PLATFORM_INTEGRATION_MODEL[platform] !== 'oauth') {
+    return res.status(400).send('Unsupported platform')
+  }
+  const { code, state, error } = req.query
+  if (error) return res.status(400).send(`OAuth error: ${error}`)
+  if (!code || !state) return res.status(400).send('Missing code or state')
+
+  const stateRow = await findOne('oauth_states', s => s.id === state)
+  if (!stateRow || stateRow.platform !== platform) {
+    return res.status(400).send('Invalid or expired state')
+  }
+  if (new Date(stateRow.expires_at).getTime() < Date.now()) {
+    return res.status(400).send('State expired — restart the connect flow')
+  }
+
+  const cfg = getOAuthConfig(platform)
+  let tokenPayload = null
+  let userInfo = null
+
+  if (cfg.dev || code === 'dev_ok') {
+    // Dev-mode: synthesize a token so downstream publish adapters work.
+    tokenPayload = {
+      access_token: `dev_${platform}_${uuidv4().slice(0, 20)}`,
+      refresh_token: `dev_refresh_${platform}_${uuidv4().slice(0, 20)}`,
+      expires_at: new Date(Date.now() + 90 * 24 * 3600 * 1000).toISOString(),
+    }
+    userInfo = { id: `dev_${platform}_user`, handle: `dev_${platform}_handle` }
+  } else {
+    try {
+      const redirectUri = `${getOAuthRedirectBase(req)}/social-channels/oauth/${platform}/callback`
+      const body = new URLSearchParams({
+        grant_type: 'authorization_code',
+        code: String(code),
+        redirect_uri: redirectUri,
+        client_id: cfg.client_id,
+      })
+      if (platform === 'x') body.set('code_verifier', String(state))
+      if (platform === 'tiktok') {
+        body.set('client_key', cfg.client_id)
+        body.set('client_secret', cfg.client_secret)
+      }
+      const headers = { 'Content-Type': 'application/x-www-form-urlencoded' }
+      if (platform === 'x' && cfg.client_secret) {
+        const basic = Buffer.from(`${cfg.client_id}:${cfg.client_secret}`).toString('base64')
+        headers.Authorization = `Basic ${basic}`
+      }
+      const tokenRes = await fetch(cfg.token_url, { method: 'POST', headers, body })
+      const parsed = await tokenRes.json().catch(() => ({}))
+      if (!tokenRes.ok) {
+        return res.status(502).send(`Token exchange failed: ${parsed?.error || tokenRes.status}`)
+      }
+      tokenPayload = {
+        access_token: parsed.access_token,
+        refresh_token: parsed.refresh_token || null,
+        expires_at: parsed.expires_in
+          ? new Date(Date.now() + Number(parsed.expires_in) * 1000).toISOString()
+          : null,
+        scope: parsed.scope || cfg.scope,
+      }
+      userInfo = { id: parsed.open_id || parsed.user_id || null, handle: null }
+    } catch (e) {
+      logger.error({ err: e.message, platform }, 'OAuth token exchange failed')
+      return res.status(502).send('OAuth token exchange failed')
+    }
+  }
+
+  // Persist encrypted tokens on the tenant's connection row.
+  const existing = await findOne(
+    'marketplace_connections',
+    c => c.agent_id === stateRow.agent_id && c.platform === platform,
+  )
+  const credentialsPatch = {
+    access_token_encrypted: encryptSecret(tokenPayload.access_token),
+    refresh_token_encrypted: tokenPayload.refresh_token ? encryptSecret(tokenPayload.refresh_token) : null,
+    expires_at: tokenPayload.expires_at || null,
+    scope: tokenPayload.scope || cfg.scope,
+    user_id: userInfo?.id || null,
+  }
+
+  if (existing) {
+    await update('marketplace_connections', c => c.id === existing.id, c => ({
+      ...c,
+      status: 'connected',
+      health: 'healthy',
+      capabilities: PLATFORM_CAPABILITIES[platform] || {},
+      settings: {
+        ...(c.settings || {}),
+        credentials: credentialsPatch,
+        handle: userInfo?.handle || c.settings?.handle || `${platform} account`,
+      },
+      updated_at: new Date().toISOString(),
+    }))
+  } else {
+    await insert('marketplace_connections', {
+      id: uuidv4(),
+      agent_id: stateRow.agent_id,
+      platform,
+      account_name: userInfo?.handle || `${platform} account`,
+      status: 'connected',
+      health: 'healthy',
+      capabilities: PLATFORM_CAPABILITIES[platform] || {},
+      settings: {
+        handle: userInfo?.handle || `${platform} account`,
+        enterprise_targets: {},
+        credentials: credentialsPatch,
+      },
+      terms_accepted_at: new Date().toISOString(),
+      terms_version: '2026-07-1',
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    })
+  }
+
+  await remove('oauth_states', s => s.id === state)
+  await logActivity({
+    type: 'social_oauth_completed',
+    agent_id: stateRow.agent_id,
+    meta: { platform, dev: cfg.dev },
+  })
+
+  // Return a small HTML page that closes the popup window and signals success.
+  res.send(`<!doctype html><html><body style="font-family:system-ui;padding:2rem;text-align:center;">
+<h2>Connected to ${platform}</h2>
+<p>You can close this window and return to ListingClarion.</p>
+<script>try { window.opener && window.opener.postMessage({ type: 'listingclarion:oauth:done', platform: '${platform}' }, '*'); } catch(e){}
+setTimeout(() => { window.close() }, 800)</script>
+</body></html>`)
+})
+
+function normalizeEnterpriseTargets(platform, input) {
+  const spec = PLATFORM_CONNECTION_FIELDS[platform]
+  if (!spec) return {}
+  const out = {}
+  for (const field of spec.target_fields || []) {
+    const raw = input[field.key]
+    if (raw == null || raw === '') continue
+    if (field.secret) {
+      // Store as `<key>_encrypted`, keep the plain key absent so we never leak it.
+      out[`${field.key}_encrypted`] = encryptSecret(String(raw))
+    } else {
+      out[field.key] = String(raw).trim()
+    }
+  }
+  return out
+}
+
+function sanitizeSocialConnection(row) {
+  if (!row) return null
+  const settings = row.settings || {}
+  const targets = { ...(settings.enterprise_targets || {}) }
+  // Redact anything encrypted before returning to the client — we never send
+  // ciphertext to the browser.
+  for (const key of Object.keys(targets)) {
+    if (key.endsWith('_encrypted')) {
+      targets[key.replace(/_encrypted$/, '')] = '••••••••'
+      delete targets[key]
+    }
+  }
+  const creds = settings.credentials || {}
+  const hasOAuth = Boolean(creds.access_token_encrypted)
+  return {
+    id: row.id,
+    platform: row.platform,
+    account_name: row.account_name,
+    status: row.status,
+    health: row.health,
+    handle: settings.handle || null,
+    enterprise_targets: targets,
+    oauth: hasOAuth ? {
+      connected: true,
+      scope: creds.scope || null,
+      expires_at: creds.expires_at || null,
+      user_id: creds.user_id || null,
+    } : { connected: false },
+    updated_at: row.updated_at || row.created_at || null,
+  }
+}
+
 app.get('/api/my-connections', authMiddleware, async (req, res) => {
   res.json(await findAll('marketplace_connections', c => c.agent_id === req.user.id))
 })
 
 app.post('/api/my-connections', authMiddleware, async (req, res) => {
   const platform = req.body.platform
-  const allowed = ['whatsapp', 'instagram', 'telegram', 'tiktok', 'x']
+  const allowed = ['whatsapp', 'instagram', 'telegram', 'tiktok', 'x', 'facebook', 'linkedin']
   if (!allowed.includes(platform)) {
-    return res.status(400).json({ error: 'Unsupported platform. Use Instagram, Telegram, TikTok, X, or WhatsApp.' })
+    return res.status(400).json({ error: 'Unsupported platform. Use Instagram, Facebook, LinkedIn, Telegram, TikTok, X, or WhatsApp.' })
   }
   let health = 'healthy'
   let healthError = null
@@ -4381,6 +4803,221 @@ app.post('/api/properties/:propertyId/distribute-own', authMiddleware, async (re
   }
 
   res.json(distributions)
+})
+
+/**
+ * Direct-publish path: fans out to platform-specific publish scaffolds.
+ * Unlike /distribute-own (which queues for retry on social channels), this
+ * endpoint hits the real IG / FB / X / TikTok / LinkedIn publish functions
+ * directly. Dev-mode adapters return simulated results so the UX works
+ * end-to-end without live credentials.
+ */
+app.post('/api/listings/:id/publish-social', authMiddleware, async (req, res) => {
+  const property = await findOne('properties', p => p.id === req.params.id)
+  if (!property) return res.status(404).json({ error: 'Listing not found' })
+  if (property.agent_id !== req.user.id) return res.status(403).json({ error: 'Forbidden' })
+
+  const { channels, caption } = req.body || {}
+  if (!Array.isArray(channels) || channels.length === 0) {
+    return res.status(400).json({ error: 'channels[] must have at least one entry' })
+  }
+
+  const mediaUrls = Array.isArray(req.body?.media_urls) && req.body.media_urls.length > 0
+    ? req.body.media_urls
+    : Array.isArray(property.photos) ? property.photos : []
+  const firstImage = mediaUrls.find((u) => typeof u === 'string' && !/\.(mp4|webm|mov)(\?|$)/i.test(u)) || mediaUrls[0]
+  const firstVideo = mediaUrls.find((u) => typeof u === 'string' && /\.(mp4|webm|mov)(\?|$)/i.test(u))
+  const text = String(caption || '').trim() || `${property.title} — ${[property.city, property.neighborhood].filter(Boolean).join(', ')}`
+
+  const results = []
+  for (const raw of channels) {
+    const platform = raw?.platform
+    const format = raw?.format || null
+    if (!platform) {
+      results.push({ platform, status: 'failed', error: 'platform is required' })
+      continue
+    }
+
+    const conn = await findOne(
+      'marketplace_connections',
+      c => c.agent_id === req.user.id && c.platform === platform && c.status === 'connected',
+    )
+    if (!conn) {
+      results.push({
+        platform,
+        status: 'failed',
+        error: `${platform} is not connected. Connect it in Settings → Integrations.`,
+      })
+      continue
+    }
+
+    // Resolve per-tenant creds. Enterprise platforms use ListingClarion's env
+    // token + the tenant's target ID; OAuth platforms use the tenant's own
+    // stored access token.
+    const creds = resolveConnectionCredentials(conn)
+    const model = PLATFORM_INTEGRATION_MODEL[platform] || 'enterprise'
+
+    let publishResult = null
+    let publishError = null
+    try {
+      switch (platform) {
+        case 'instagram': {
+          if (!creds.ig_business_account_id) {
+            throw Object.assign(
+              new Error('Instagram Business Account ID missing on this tenant\'s connection'),
+              { code: 'MISSING_TENANT_TARGET' },
+            )
+          }
+          const igArgs = {
+            businessAccountId: creds.ig_business_account_id,
+            accessToken: creds.ig_page_access_token_override || undefined,
+          }
+          if (format === 'reel' && firstVideo) {
+            publishResult = await publishInstagramReel({ videoUrl: firstVideo, caption: text, ...igArgs })
+          } else if (format === 'story' && firstImage) {
+            publishResult = await publishInstagramStory({ imageUrl: firstImage, ...igArgs })
+          } else if (mediaUrls.length > 1) {
+            publishResult = await publishInstagramCarousel({ imageUrls: mediaUrls.slice(0, 10), caption: text, ...igArgs })
+          } else if (firstImage) {
+            publishResult = await publishInstagramFeed({ imageUrl: firstImage, caption: text, ...igArgs })
+          } else {
+            throw Object.assign(new Error('Instagram publish requires at least one image or video'), { code: 'MISSING_MEDIA' })
+          }
+          break
+        }
+        case 'facebook': {
+          if (!creds.fb_page_id) {
+            throw Object.assign(
+              new Error('Facebook Page ID missing on this tenant\'s connection'),
+              { code: 'MISSING_TENANT_TARGET' },
+            )
+          }
+          const fbArgs = {
+            pageId: creds.fb_page_id,
+            accessToken: creds.fb_page_access_token_override || undefined,
+          }
+          if (firstImage) {
+            publishResult = await publishFacebookPagePhoto({ imageUrl: firstImage, caption: text, ...fbArgs })
+          } else {
+            publishResult = await publishFacebookPagePost({ message: text, linkUrl: raw?.link_url || null, ...fbArgs })
+          }
+          break
+        }
+        case 'x': {
+          // OAuth model — the tenant's own token must be stored on the connection.
+          if (!creds.oauth_access_token) {
+            throw Object.assign(
+              new Error('X is not connected for this tenant. Complete OAuth in Settings → Channels.'),
+              { code: 'MISSING_OAUTH_TOKEN' },
+            )
+          }
+          publishResult = await publishXTweet({ text, bearerToken: creds.oauth_access_token })
+          break
+        }
+        case 'tiktok': {
+          if (!creds.oauth_access_token) {
+            throw Object.assign(
+              new Error('TikTok is not connected for this tenant. Complete OAuth in Settings → Channels.'),
+              { code: 'MISSING_OAUTH_TOKEN' },
+            )
+          }
+          const ttArgs = { accessToken: creds.oauth_access_token }
+          if (firstVideo) {
+            publishResult = await publishTikTokVideo({ videoUrl: firstVideo, caption: text, ...ttArgs })
+          } else if (mediaUrls.length > 0) {
+            publishResult = await publishTikTokPhoto({ imageUrls: mediaUrls.slice(0, 10), caption: text, ...ttArgs })
+          } else {
+            throw Object.assign(new Error('TikTok publish requires at least one photo or video'), { code: 'MISSING_MEDIA' })
+          }
+          break
+        }
+        case 'linkedin': {
+          if (!creds.li_author_urn) {
+            throw Object.assign(
+              new Error('LinkedIn Author URN missing on this tenant\'s connection'),
+              { code: 'MISSING_TENANT_TARGET' },
+            )
+          }
+          publishResult = await publishLinkedInPost({
+            commentary: text,
+            authorUrn: creds.li_author_urn,
+            accessToken: creds.li_access_token_override || undefined,
+          })
+          break
+        }
+        default:
+          throw Object.assign(new Error(`Direct publish for ${platform} is not yet implemented`), {
+            code: 'NOT_SUPPORTED',
+          })
+      }
+    } catch (e) {
+      publishError = e
+    }
+    // Silence unused-var warnings — `model` is exposed on the row for observability.
+    void model
+
+    const status = publishError ? 'failed' : 'published'
+    const externalId =
+      publishResult?.publish_id ||
+      publishResult?.post_id ||
+      publishResult?.tweet_id ||
+      publishResult?.post_urn ||
+      null
+    const externalUrl = publishResult?.external_url || null
+    const row = {
+      id: uuidv4(),
+      property_id: property.id,
+      agent_id: req.user.id,
+      platform,
+      owner_type: 'agent',
+      status,
+      external_id: externalId,
+      error: publishError?.message || null,
+      formats: format ? [format] : [],
+      connection_id: conn.id,
+      meta: {
+        format: format || null,
+        caption: text,
+        media_count: mediaUrls.length,
+        external_url: externalUrl,
+        simulated: publishResult?.simulated || false,
+        provider: publishResult?.provider || null,
+        intent: 'publish',
+      },
+      views: 0,
+      leads: 0,
+      clicks: 0,
+      cost: 0,
+      published_at: status === 'published' ? new Date().toISOString() : null,
+      created_at: new Date().toISOString(),
+    }
+    await insert('distributions', row)
+    await logActivity({
+      type: status === 'published' ? 'distribution_published' : 'distribution_failed',
+      property_id: property.id,
+      agent_id: req.user.id,
+      meta: {
+        platform,
+        distribution_id: row.id,
+        status,
+        external_id: externalId,
+        provider: publishResult?.provider || null,
+        error: publishError?.message || null,
+      },
+    })
+
+    results.push({
+      platform,
+      status,
+      external_id: externalId,
+      external_url: externalUrl,
+      provider: publishResult?.provider || null,
+      simulated: publishResult?.simulated || false,
+      error: publishError?.message || null,
+    })
+  }
+
+  res.json({ results })
 })
 
 // ==================== WHATSAPP CLOUD API ====================

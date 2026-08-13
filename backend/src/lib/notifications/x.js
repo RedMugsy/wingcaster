@@ -143,6 +143,68 @@ export async function replyToXMention({ tweetId, text }) {
 }
 
 /**
+ * Publish a tweet. Live path uses X API v2 `POST /2/tweets` with OAuth 2.0
+ * bearer token (user context) plus optional media_ids from a prior upload.
+ * Media upload uses v1.1 `media/upload.json` — the current caller supplies
+ * already-uploaded media_ids. When no media_ids are provided the tweet is
+ * text-only.
+ *
+ * Reference: https://developer.x.com/en/docs/x-api/tweets/manage-tweets/api-reference/post-tweets
+ */
+export async function publishXTweet({ text, mediaIds = [], replyToTweetId = null, bearerToken }) {
+  const cfg = getXConfig()
+  const token = bearerToken || cfg.bearerToken
+  if (!text?.trim() && mediaIds.length === 0) {
+    throw Object.assign(new Error('text or mediaIds is required'), { code: 'MISSING_CONTENT' })
+  }
+  const trimmed = String(text || '').trim().slice(0, 280)
+
+  if (cfg.provider === 'dev' || !isXEnabled()) {
+    if (cfg.devAlwaysSuccess) {
+      const id = `x_tweet_dev_${uuidv4().slice(0, 12)}`
+      return {
+        ok: true,
+        provider: 'x_dev_simulator',
+        tweet_id: id,
+        external_url: `https://x.com/dev/status/${id}`,
+        text: trimmed,
+        media_count: mediaIds.length,
+        simulated: true,
+      }
+    }
+    throw Object.assign(new Error('X dev mode configured to fail'), { code: 'DEV_FAILURE' })
+  }
+
+  const body = { text: trimmed }
+  if (mediaIds.length > 0) body.media = { media_ids: mediaIds.slice(0, 4) }
+  if (replyToTweetId) body.reply = { in_reply_to_tweet_id: String(replyToTweetId) }
+
+  const res = await fetch(`${xApiBase()}/tweets`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(body),
+  })
+  const payload = await res.json().catch(() => ({}))
+  if (!res.ok) {
+    throw Object.assign(new Error(payload?.detail || payload?.title || `X tweet failed: ${res.status}`), {
+      code: 'X_LIVE_ERROR',
+      details: payload,
+    })
+  }
+  const tweetId = payload?.data?.id
+  return {
+    ok: true,
+    provider: 'x_api_v2',
+    tweet_id: tweetId,
+    external_url: tweetId ? `https://x.com/i/web/status/${tweetId}` : null,
+    raw: payload,
+  }
+}
+
+/**
  * Parse an X API v2 webhook payload (filtered stream or account activity).
  * Expected normalized shapes:
  *   { dm_events: [{ id, sender_id, text, created_at }] }

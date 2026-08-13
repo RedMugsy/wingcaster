@@ -365,12 +365,7 @@ export function ListingProfilePage() {
         </TabsContent>
 
         <TabsContent value="comms">
-          <StubTab
-            icon={MessageCircle}
-            title="Communication orchestrator"
-            phase="Phase 4"
-            body="Message composer + inbox unified across Meta (Instagram DM, Facebook Messenger), TikTok, X, and email. Reply to comments in one place. Backend scaffolds already exist for IG/TikTok/X — Phase 4 wires the UI and adds LinkedIn + FB posting."
-          />
+          <PublishSocialTab property={property} />
         </TabsContent>
 
         <TabsContent value="email">
@@ -746,6 +741,252 @@ function ScheduleModal({
           </div>
         </form>
       </div>
+    </div>
+  )
+}
+
+interface PlatformInfo {
+  id: string
+  name: string
+  type: string
+  icon: string
+  description?: string
+  formats?: string[]
+  capabilities?: Record<string, boolean>
+  limitations?: string
+  configured?: boolean
+}
+
+interface AgentConnection {
+  id: string
+  platform: string
+  account_name?: string
+  status: string
+  health?: string
+  settings?: Record<string, any>
+}
+
+function PublishSocialTab({ property }: { property: Property }) {
+  const { addToast } = useToast()
+  const [platforms, setPlatforms] = useState<PlatformInfo[]>([])
+  const [connections, setConnections] = useState<AgentConnection[]>([])
+  const [loading, setLoading] = useState(true)
+  const [selected, setSelected] = useState<Record<string, string>>({}) // platform -> format
+  const [caption, setCaption] = useState('')
+  const [publishing, setPublishing] = useState(false)
+  const [results, setResults] = useState<Array<{
+    platform: string
+    status: 'published' | 'failed'
+    external_id: string | null
+    external_url: string | null
+    provider: string | null
+    simulated: boolean
+    error: string | null
+  }>>([])
+
+  useEffect(() => {
+    let cancelled = false
+    Promise.all([
+      api.getPlatforms().catch(() => []),
+      api.getMyConnections().catch(() => []),
+    ]).then(([plats, conns]: any[]) => {
+      if (cancelled) return
+      setPlatforms(Array.isArray(plats) ? plats : [])
+      setConnections(Array.isArray(conns) ? conns : [])
+      setLoading(false)
+    })
+    return () => { cancelled = true }
+  }, [])
+
+  useEffect(() => {
+    if (!caption) {
+      const price = property.price ? ` · ${new Intl.NumberFormat().format(property.price)} ${property.price_unit || 'USD'}` : ''
+      const where = [property.city, property.neighborhood].filter(Boolean).join(', ')
+      setCaption(`${property.title}${where ? ` — ${where}` : ''}${price}\n\n${(property.description || '').slice(0, 500)}`.trim())
+    }
+  }, [property]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const connectedPlatforms = useMemo(() => {
+    const connectedIds = new Set(connections.filter((c) => c.status === 'connected').map((c) => c.platform))
+    return platforms.filter((p) => p.type === 'social' && connectedIds.has(p.id))
+  }, [platforms, connections])
+
+  const availableUnconnected = useMemo(
+    () => platforms.filter((p) => p.type === 'social' && !connectedPlatforms.find((cp) => cp.id === p.id)),
+    [platforms, connectedPlatforms],
+  )
+
+  const chosen = Object.keys(selected)
+
+  async function publish() {
+    if (publishing || chosen.length === 0) return
+    setPublishing(true)
+    setResults([])
+    try {
+      const r = await api.publishListingToSocial(property.id, {
+        channels: chosen.map((p) => ({ platform: p, format: selected[p] || undefined })),
+        caption: caption.trim(),
+        media_urls: property.photos || [],
+      })
+      setResults(r.results)
+      const okCount = r.results.filter((x) => x.status === 'published').length
+      if (okCount === r.results.length) {
+        addToast({ title: `Published to ${okCount} channel${okCount === 1 ? '' : 's'}`, variant: 'success' })
+      } else if (okCount === 0) {
+        addToast({ title: 'All channels failed', variant: 'error' })
+      } else {
+        addToast({ title: `${okCount} of ${r.results.length} channels published`, variant: 'warning' })
+      }
+    } catch (err: any) {
+      addToast({ title: 'Publish failed', description: err?.message, variant: 'error' })
+    } finally {
+      setPublishing(false)
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center rounded-md border border-dashed bg-white py-12">
+        <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg">Publish to social channels</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {connectedPlatforms.length === 0 ? (
+            <div className="rounded-md border border-dashed bg-slate-50 p-4 text-sm text-muted-foreground">
+              No social channels connected yet. Head to{' '}
+              <Link to="/settings/channels" className="text-primary underline">Settings → Channels</Link>{' '}
+              to connect Instagram, Facebook, LinkedIn, X, or TikTok.
+            </div>
+          ) : (
+            <div>
+              <Label className="text-xs">Channels</Label>
+              <div className="mt-1.5 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                {connectedPlatforms.map((p) => {
+                  const isSelected = p.id in selected
+                  const formats = Array.isArray(p.formats) ? p.formats : []
+                  const format = selected[p.id]
+                  return (
+                    <div key={p.id} className={`flex items-start gap-2 rounded-md border p-2 ${isSelected ? 'bg-slate-50 border-slate-300' : ''}`}>
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={(e) => {
+                          setSelected((prev) => {
+                            const next = { ...prev }
+                            if (e.target.checked) next[p.id] = formats[0] || ''
+                            else delete next[p.id]
+                            return next
+                          })
+                        }}
+                        className="mt-1"
+                      />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-medium">{p.name}</span>
+                          {p.configured === false && (
+                            <Badge variant="outline" className="text-[10px]">dev mode</Badge>
+                          )}
+                        </div>
+                        {isSelected && formats.length > 1 && (
+                          <select
+                            value={format}
+                            onChange={(e) =>
+                              setSelected((prev) => ({ ...prev, [p.id]: e.target.value }))
+                            }
+                            className="mt-1 block w-full rounded border bg-white px-2 py-1 text-xs"
+                          >
+                            {formats.map((f) => (
+                              <option key={f} value={f}>{f}</option>
+                            ))}
+                          </select>
+                        )}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+              {availableUnconnected.length > 0 && (
+                <p className="mt-2 text-xs text-muted-foreground">
+                  Also available (not yet connected):{' '}
+                  {availableUnconnected.map((p) => p.name).join(' · ')}
+                </p>
+              )}
+            </div>
+          )}
+
+          <div>
+            <Label className="text-xs">Caption</Label>
+            <textarea
+              rows={6}
+              value={caption}
+              onChange={(e) => setCaption(e.target.value)}
+              className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm leading-relaxed"
+            />
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              {caption.length} chars — X truncates at 280, TikTok / IG accept much more.
+            </p>
+          </div>
+
+          <div className="flex items-center justify-end">
+            <Button
+              onClick={publish}
+              disabled={publishing || chosen.length === 0}
+              className="gap-1.5"
+            >
+              {publishing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Share2 className="h-4 w-4" />}
+              Publish to {chosen.length || 0} channel{chosen.length === 1 ? '' : 's'}
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      {results.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm">Publish results</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ul className="divide-y">
+              {results.map((r, i) => (
+                <li key={`${r.platform}-${i}`} className="flex items-start justify-between gap-3 py-2 text-sm">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="font-medium capitalize">{r.platform}</span>
+                      <Badge
+                        variant="outline"
+                        className={r.status === 'published' ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-red-200 bg-red-50 text-red-800'}
+                      >
+                        {r.status}
+                      </Badge>
+                      {r.simulated && <Badge variant="outline" className="text-[10px]">simulated</Badge>}
+                    </div>
+                    {r.error && <p className="mt-0.5 text-xs text-red-700">{r.error}</p>}
+                    {r.provider && <p className="mt-0.5 text-[11px] text-muted-foreground">via {r.provider}</p>}
+                  </div>
+                  {r.external_url && (
+                    <a
+                      href={r.external_url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="flex items-center gap-1 text-xs text-primary hover:underline"
+                    >
+                      Open <ExternalLink className="h-3 w-3" />
+                    </a>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </CardContent>
+        </Card>
+      )}
     </div>
   )
 }

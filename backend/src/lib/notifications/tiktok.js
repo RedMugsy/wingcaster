@@ -86,6 +86,128 @@ export async function sendTikTokDM({ userId, text }) {
 }
 
 /**
+ * Publish a photo post to TikTok. Live path uses TikTok Content Posting API's
+ * Direct Post (photo mode). Requires a TikTok for Business developer app with
+ * `video.publish` scope (photo mode is enabled at app-review time).
+ *
+ * Live endpoint: POST https://open.tiktokapis.com/v2/post/publish/content/init/
+ *   body: { post_info, source_info: { source: 'PULL_FROM_URL', photo_images: [...] } }
+ */
+export async function publishTikTokPhoto({ imageUrls, caption, accessToken }) {
+  const cfg = getTikTokConfig()
+  const token = accessToken || cfg.accessToken
+  const urls = Array.isArray(imageUrls) ? imageUrls.filter(Boolean) : [imageUrls].filter(Boolean)
+  if (!urls.length) throw Object.assign(new Error('imageUrls is required'), { code: 'MISSING_MEDIA' })
+
+  if (cfg.provider === 'dev' || !isTikTokEnabled()) {
+    if (cfg.devAlwaysSuccess) {
+      return {
+        ok: true,
+        provider: 'tiktok_dev_simulator',
+        publish_id: `tiktok_photo_dev_${uuidv4().slice(0, 12)}`,
+        external_url: `https://tiktok.com/dev/photo/${uuidv4().slice(0, 8)}`,
+        image_count: urls.length,
+        caption: caption || '',
+        simulated: true,
+      }
+    }
+    throw Object.assign(new Error('TikTok dev mode configured to fail'), { code: 'DEV_FAILURE' })
+  }
+
+  // Live path — POST /v2/post/publish/content/init/
+  const res = await fetch('https://open.tiktokapis.com/v2/post/publish/content/init/', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json; charset=UTF-8',
+    },
+    body: JSON.stringify({
+      post_info: {
+        title: caption || '',
+        privacy_level: 'PUBLIC_TO_EVERYONE',
+        disable_comment: false,
+      },
+      source_info: {
+        source: 'PULL_FROM_URL',
+        photo_cover_index: 0,
+        photo_images: urls,
+      },
+      post_mode: 'DIRECT_POST',
+      media_type: 'PHOTO',
+    }),
+  })
+  const body = await res.json().catch(() => ({}))
+  if (!res.ok) {
+    throw Object.assign(new Error(body?.error?.message || `TikTok photo publish failed: ${res.status}`), {
+      code: 'TIKTOK_LIVE_ERROR',
+      details: body,
+    })
+  }
+  return {
+    ok: true,
+    provider: 'tiktok_content_api',
+    publish_id: body?.data?.publish_id || null,
+    raw: body,
+  }
+}
+
+/**
+ * Publish a vertical video to TikTok via the Content Posting API.
+ * Live path requires the same `video.publish` scope on a TikTok for Business app.
+ */
+export async function publishTikTokVideo({ videoUrl, caption, accessToken }) {
+  const cfg = getTikTokConfig()
+  const token = accessToken || cfg.accessToken
+  if (!videoUrl) throw Object.assign(new Error('videoUrl is required'), { code: 'MISSING_MEDIA' })
+
+  if (cfg.provider === 'dev' || !isTikTokEnabled()) {
+    if (cfg.devAlwaysSuccess) {
+      return {
+        ok: true,
+        provider: 'tiktok_dev_simulator',
+        publish_id: `tiktok_video_dev_${uuidv4().slice(0, 12)}`,
+        external_url: `https://tiktok.com/dev/video/${uuidv4().slice(0, 8)}`,
+        caption: caption || '',
+        simulated: true,
+      }
+    }
+    throw Object.assign(new Error('TikTok dev mode configured to fail'), { code: 'DEV_FAILURE' })
+  }
+
+  const res = await fetch('https://open.tiktokapis.com/v2/post/publish/video/init/', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json; charset=UTF-8',
+    },
+    body: JSON.stringify({
+      post_info: {
+        title: caption || '',
+        privacy_level: 'PUBLIC_TO_EVERYONE',
+        disable_comment: false,
+      },
+      source_info: {
+        source: 'PULL_FROM_URL',
+        video_url: videoUrl,
+      },
+    }),
+  })
+  const body = await res.json().catch(() => ({}))
+  if (!res.ok) {
+    throw Object.assign(new Error(body?.error?.message || `TikTok video publish failed: ${res.status}`), {
+      code: 'TIKTOK_LIVE_ERROR',
+      details: body,
+    })
+  }
+  return {
+    ok: true,
+    provider: 'tiktok_content_api',
+    publish_id: body?.data?.publish_id || null,
+    raw: body,
+  }
+}
+
+/**
  * Parse a TikTok webhook payload for comments and mentions.
  * This accepts a normalized JSON shape because TikTok webhooks vary by
  * integration partner. Expected shape:

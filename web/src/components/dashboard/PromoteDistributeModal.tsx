@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
   Check, Globe, Loader2, Megaphone, Send, Settings, Share2, X,
-  Instagram, MessageCircle, Video, Twitter,
+  Instagram, MessageCircle, Video, Twitter, Facebook, Linkedin,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -9,11 +9,13 @@ import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import { api } from '@/api/client'
 
-export const SOCIAL_PROMOTE_PLATFORMS: string[] = ['instagram', 'telegram', 'tiktok', 'x']
+export const SOCIAL_PROMOTE_PLATFORMS: string[] = ['instagram', 'facebook', 'linkedin', 'x', 'tiktok', 'telegram']
 
 export const PLATFORM_META: Record<string, { name: string; color: string; icon: any; handleHint: string }> = {
   whatsapp: { name: 'WhatsApp Business', color: 'text-green-600', icon: MessageCircle, handleHint: '' },
   instagram: { name: 'Instagram', color: 'text-pink-600', icon: Instagram, handleHint: '@youragency' },
+  facebook: { name: 'Facebook Page', color: 'text-blue-600', icon: Facebook, handleHint: 'Page name or numeric page ID' },
+  linkedin: { name: 'LinkedIn', color: 'text-blue-700', icon: Linkedin, handleHint: 'Company page URL or personal profile URL' },
   telegram: { name: 'Telegram', color: 'text-blue-500', icon: Send, handleHint: '@your_channel or channel link' },
   tiktok: { name: 'TikTok', color: 'text-black', icon: Video, handleHint: '@yourhandle' },
   x: { name: 'X (Twitter)', color: 'text-slate-800', icon: Twitter, handleHint: '@yourhandle' },

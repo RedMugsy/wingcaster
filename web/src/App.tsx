@@ -29,6 +29,7 @@ import { AgencyManagementPage } from '@/pages/AgencyManagementPage'
 import { WhiteLabelBuilderPage } from '@/pages/WhiteLabelBuilderPage'
 import { WidgetBuilderPage } from '@/pages/WidgetBuilderPage'
 import { IntegrationSettingsPage } from '@/pages/IntegrationSettingsPage'
+import { SocialChannelsPage } from '@/pages/SocialChannelsPage'
 import { MessageTemplatesPage } from '@/pages/MessageTemplatesPage'
 import { AdminWhatsAppListingsPage } from '@/pages/admin/whatsapp-listings/AdminWhatsAppListingsPage'
 import { AgencyWhatsAppListingsPage } from '@/pages/agency/whatsapp-listings/AgencyWhatsAppListingsPage'
@@ -80,6 +81,7 @@ function AppShell() {
           <Route path="/white-label" element={<WhiteLabelBuilderPage />} />
           <Route path="/widgets" element={<WidgetBuilderPage />} />
           <Route path="/integrations" element={<IntegrationSettingsPage />} />
+          <Route path="/settings/channels" element={<SocialChannelsPage />} />
           <Route path="/admin/whatsapp-listings" element={<AdminWhatsAppListingsPage />} />
           <Route path="/admin/areas" element={<AdminAreasPage />} />
           <Route path="/admin/scoring" element={<AdminScoringPage />} />
