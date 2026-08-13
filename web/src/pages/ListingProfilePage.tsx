@@ -364,8 +364,9 @@ export function ListingProfilePage() {
           />
         </TabsContent>
 
-        <TabsContent value="comms">
+        <TabsContent value="comms" className="space-y-6">
           <PublishSocialTab property={property} />
+          <CommentsSection listingId={property.id} />
         </TabsContent>
 
         <TabsContent value="email">
@@ -1172,5 +1173,158 @@ function ExtractedFieldsPreview({
   )
 }
 
+function CommentsSection({ listingId }: { listingId: string }) {
+  const { addToast } = useToast()
+  type ThreadT = Awaited<ReturnType<typeof api.getListingComments>>['threads'][number]
+  const [threads, setThreads] = useState<ThreadT[]>([])
+  const [publishedPosts, setPublishedPosts] = useState(0)
+  const [loading, setLoading] = useState(true)
+  const [replyOpenFor, setReplyOpenFor] = useState<string | null>(null)
+  const [replyText, setReplyText] = useState('')
+  const [replyBusy, setReplyBusy] = useState(false)
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    try {
+      const r = await api.getListingComments(listingId)
+      setThreads(r.threads)
+      setPublishedPosts(r.published_posts)
+    } catch (err: any) {
+      addToast({ title: 'Could not load comments', description: err?.message, variant: 'error' })
+    } finally {
+      setLoading(false)
+    }
+  }, [listingId, addToast])
+
+  useEffect(() => { load() }, [load])
+
+  async function submitReply(conversationId: string) {
+    if (replyBusy || !replyText.trim()) return
+    setReplyBusy(true)
+    try {
+      await api.sendConversationMessage(conversationId, replyText.trim())
+      addToast({ title: 'Reply sent', variant: 'success' })
+      setReplyText('')
+      setReplyOpenFor(null)
+      load()
+    } catch (err: any) {
+      addToast({ title: 'Reply failed', description: err?.message, variant: 'error' })
+    } finally {
+      setReplyBusy(false)
+    }
+  }
+
+  const channelLabel: Record<string, string> = {
+    instagram_comment: 'Instagram',
+    facebook_comment: 'Facebook',
+    tiktok_comment: 'TikTok',
+    x_mention: 'X',
+    linkedin_comment: 'LinkedIn',
+  }
+
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
+        <div>
+          <CardTitle className="text-lg">Comments on your published posts</CardTitle>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            Across {publishedPosts} published post{publishedPosts === 1 ? '' : 's'} · replies use the
+            same tenant credentials you set on <Link to="/settings/channels" className="text-primary underline">Settings → Channels</Link>.
+          </p>
+        </div>
+        <Button size="sm" variant="ghost" onClick={load} disabled={loading} className="gap-1.5">
+          {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <MessageCircle className="h-4 w-4" />}
+          Refresh
+        </Button>
+      </CardHeader>
+      <CardContent>
+        {loading ? (
+          <div className="flex items-center justify-center py-6">
+            <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+          </div>
+        ) : threads.length === 0 ? (
+          <p className="rounded-md border border-dashed bg-slate-50 p-4 text-sm text-muted-foreground">
+            No comments yet. Once your published posts start getting engagement, comment threads will
+            appear here — reply inline without leaving ListingClarion.
+          </p>
+        ) : (
+          <ul className="space-y-4">
+            {threads.map((t) => {
+              const displayName = t.contact?.name || t.messages[0]?.author_name || 'Someone'
+              return (
+                <li key={t.conversation_id} className="rounded-lg border bg-white p-3">
+                  <div className="flex items-center justify-between gap-2 pb-2">
+                    <div className="flex items-center gap-2">
+                      <Badge variant="outline">{channelLabel[t.channel] || t.channel}</Badge>
+                      <span className="text-sm font-medium">{displayName}</span>
+                    </div>
+                    {t.distribution_url && (
+                      <a
+                        href={t.distribution_url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+                      >
+                        <ExternalLink className="h-3 w-3" />
+                        View post
+                      </a>
+                    )}
+                  </div>
+                  <ul className="space-y-1.5 border-t pt-2">
+                    {t.messages.map((m) => (
+                      <li
+                        key={m.id}
+                        className={
+                          m.direction === 'inbound'
+                            ? 'rounded-md bg-slate-50 px-2.5 py-1.5 text-sm'
+                            : 'ml-8 rounded-md bg-slate-900 px-2.5 py-1.5 text-sm text-white'
+                        }
+                      >
+                        <div className="whitespace-pre-wrap">{m.content}</div>
+                        <div className={`mt-0.5 text-[10px] ${m.direction === 'inbound' ? 'text-muted-foreground' : 'text-white/70'}`}>
+                          {new Date(m.created_at).toLocaleString()}
+                          {m.direction === 'outbound' && ` · ${m.status}`}
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                  {replyOpenFor === t.conversation_id ? (
+                    <div className="mt-2 flex gap-2">
+                      <Input
+                        value={replyText}
+                        onChange={(e) => setReplyText(e.target.value)}
+                        placeholder="Type a reply…"
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' && !e.shiftKey) {
+                            e.preventDefault()
+                            submitReply(t.conversation_id)
+                          }
+                        }}
+                        autoFocus
+                      />
+                      <Button size="sm" onClick={() => submitReply(t.conversation_id)} disabled={replyBusy}>
+                        {replyBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Send'}
+                      </Button>
+                      <Button size="sm" variant="ghost" onClick={() => { setReplyOpenFor(null); setReplyText('') }}>
+                        Cancel
+                      </Button>
+                    </div>
+                  ) : (
+                    <div className="mt-2">
+                      <Button size="sm" variant="outline" onClick={() => { setReplyOpenFor(t.conversation_id); setReplyText('') }}>
+                        Reply
+                      </Button>
+                    </div>
+                  )}
+                </li>
+              )
+            })}
+          </ul>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
 // Silence unused-icon warnings for imports kept for near-term feature additions.
-void [Camera, Video, ExternalLink, Copy, Megaphone]
+void [Camera, Video, Copy, Megaphone]

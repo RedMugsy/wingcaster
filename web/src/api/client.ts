@@ -423,6 +423,27 @@ export const api = {
   getConversation: (id: string) => fetchJson(`/conversations/${id}`),
   sendConversationMessage: (id: string, content: string, options?: { content_type?: string; image_url?: string; subject?: string }) =>
     fetchJson(`/conversations/${id}/messages`, { method: 'POST', body: JSON.stringify({ content, ...(options || {}) }) }),
+
+  getListingComments: (listingId: string): Promise<{
+    threads: Array<{
+      conversation_id: string
+      platform: string | null
+      channel: string
+      external_post_id: string | null
+      distribution_url: string | null
+      contact: { id: string; name: string; avatar: string | null } | null
+      messages: Array<{
+        id: string
+        direction: 'inbound' | 'outbound'
+        content: string
+        created_at: string
+        author_name: string | null
+        status: string
+      }>
+      last_activity_at: string | null
+    }>
+    published_posts: number
+  }> => fetchJson(`/listings/${listingId}/comments`),
   assignConversation: (id: string, agentId?: string) =>
     fetchJson(`/conversations/${id}/assign`, { method: 'POST', body: JSON.stringify({ agent_id: agentId }) }),
   updateConversation: (id: string, data: Record<string, unknown>) =>

@@ -5533,6 +5533,96 @@ app.get('/api/properties/:propertyId/distributions', authMiddleware, async (req,
   res.json(await findAll('distributions', d => d.property_id === req.params.propertyId && d.agent_id === req.user.id))
 })
 
+/**
+ * List public comment threads across every published post for this listing.
+ *
+ * Iterates the listing's distributions (per-platform published posts),
+ * matches inbound conversation_messages whose raw_payload carries the
+ * distribution's external post id (media_id / post_id / video_id /
+ * tweet_id / post_urn), groups the messages by conversation, and returns
+ * one thread per conversation with the platform badge attached. Outbound
+ * replies belong to the same conversation and come back on the same row.
+ */
+app.get('/api/listings/:id/comments', authMiddleware, async (req, res) => {
+  const listingId = req.params.id
+  const property = await findOne('properties', (p) => p.id === listingId)
+  if (!property) return res.status(404).json({ error: 'Listing not found' })
+  if (property.agent_id !== req.user.id) {
+    return res.status(403).json({ error: 'Only the listing owner can view its comments' })
+  }
+
+  const dists = await findAll(
+    'distributions',
+    (d) => d.property_id === listingId && d.status === 'published' && d.external_id,
+  )
+  if (!dists.length) return res.json({ threads: [], published_posts: 0 })
+
+  // Map every external id to its distribution so we can label threads.
+  const distByExternalId = new Map()
+  for (const d of dists) distByExternalId.set(String(d.external_id), d)
+
+  const publicChannels = new Set([
+    'instagram_comment',
+    'facebook_comment',
+    'tiktok_comment',
+    'x_mention',
+    'linkedin_comment',
+  ])
+
+  const messages = await findAll('conversation_messages', (m) => {
+    if (!publicChannels.has(m.channel)) return false
+    const raw = m.metadata?.raw_payload || {}
+    const candidates = [
+      raw.media_id, raw.post_id, raw.post_urn, raw.tweet_id, raw.video_id,
+      m.metadata?.media_id, m.metadata?.post_id,
+    ].filter(Boolean).map(String)
+    return candidates.some((c) => distByExternalId.has(c))
+  })
+
+  // Group by conversation and attach the associated distribution.
+  const threads = new Map()
+  for (const m of messages) {
+    const raw = m.metadata?.raw_payload || {}
+    const externalId = [
+      raw.media_id, raw.post_id, raw.post_urn, raw.tweet_id, raw.video_id,
+    ].find((c) => c && distByExternalId.has(String(c)))
+    const dist = externalId ? distByExternalId.get(String(externalId)) : null
+
+    if (!threads.has(m.conversation_id)) {
+      const conversation = await findOne('conversations', (c) => c.id === m.conversation_id)
+      const contact = conversation ? await findOne('contacts', (c) => c.id === conversation.contact_id) : null
+      threads.set(m.conversation_id, {
+        conversation_id: m.conversation_id,
+        conversation,
+        contact: contact ? { id: contact.id, name: contact.name, avatar: contact.avatar || null } : null,
+        platform: dist?.platform || null,
+        channel: m.channel,
+        external_post_id: externalId || null,
+        distribution_url: dist?.landing_page || dist?.post_url || null,
+        messages: [],
+      })
+    }
+    threads.get(m.conversation_id).messages.push({
+      id: m.id,
+      direction: m.direction,
+      content: m.content,
+      created_at: m.created_at,
+      author_name: m.metadata?.raw_payload?.from_username || null,
+      status: m.status,
+    })
+  }
+
+  // Return threads sorted by most-recent activity first.
+  const out = Array.from(threads.values()).map((t) => {
+    t.messages.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
+    t.last_activity_at = t.messages.at(-1)?.created_at || t.conversation?.updated_at || null
+    return t
+  })
+  out.sort((a, b) => new Date(b.last_activity_at || 0).getTime() - new Date(a.last_activity_at || 0).getTime())
+
+  res.json({ threads: out, published_posts: dists.length })
+})
+
 app.post('/api/distributions/:id/retry', authMiddleware, async (req, res) => {
   const row = await findOne('distributions', d => d.id === req.params.id)
   if (!row) return res.status(404).json({ error: 'Distribution not found' })
