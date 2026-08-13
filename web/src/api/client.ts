@@ -24,6 +24,47 @@ export interface CommandItem {
   created_at: string
 }
 
+export interface SocialCardTemplate {
+  id: string
+  schema_version?: number
+  name: string
+  description?: string
+  owner_type: 'platform' | 'store' | 'agency' | 'agent'
+  owner_id: string | null
+  engine?: 'builtin' | 'bannerbear'
+  category?: string
+  tags?: string[]
+  base_canvas: { width: number; height: number }
+  background?: Record<string, unknown>
+  layers: Array<Record<string, unknown>>
+  platform_overrides?: Record<string, Record<string, unknown>>
+  created_at?: string
+  updated_at?: string
+  __preview?: {
+    layer_count: number
+    aspect: string | null
+    has_photo_layer: boolean
+    engine: string
+    category: string | null
+    tags: string[]
+  }
+}
+
+export interface SocialCardAsset {
+  id: string
+  listing_id: string
+  template_id: string
+  template_name: string
+  template_engine?: string
+  platform: string
+  platform_label: string
+  dimensions: { width: number; height: number; aspect?: string }
+  filename: string
+  url: string
+  size_bytes: number
+  created_at: string
+}
+
 export interface CommandOpportunity {
   id: string
   contact_id: string
@@ -437,6 +478,59 @@ export const api = {
   }>> => fetchJson(`/properties/${propertyId}/distributions`),
   refreshDistributionInsights: (distributionId: string) =>
     fetchJson(`/distributions/${distributionId}/refresh-insights`, { method: 'POST', body: '{}' }),
+
+  /* -------------------- Social-card templates + renders -------------------- */
+  getSocialCardPlatforms: (): Promise<{
+    platforms: Array<{ key: string; width: number; height: number; aspect: string; label: string }>
+  }> => fetchJson('/social-cards/platforms'),
+  getSocialCardBindings: (): Promise<{
+    paths: string[]; helpers: string[]; example_usage: Record<string, string>
+  }> => fetchJson('/social-card-templates/bindings'),
+  listSocialCardTemplates: (
+    scope?: 'visible' | 'platform' | 'store' | 'agency' | 'agent' | 'mine',
+  ): Promise<{
+    templates: SocialCardTemplate[]
+    agency_id: string | null
+  }> => fetchJson(`/social-card-templates${scope ? `?scope=${scope}` : ''}`),
+  getSocialCardTemplate: (id: string): Promise<{ template: SocialCardTemplate }> =>
+    fetchJson(`/social-card-templates/${id}`),
+  createSocialCardTemplate: (
+    template: Partial<SocialCardTemplate>,
+    ownerType?: 'agent' | 'agency',
+  ): Promise<{ template: SocialCardTemplate }> =>
+    fetchJson('/social-card-templates', {
+      method: 'POST',
+      body: JSON.stringify({ template, owner_type: ownerType || 'agent' }),
+    }),
+  duplicateSocialCardTemplate: (
+    id: string,
+    payload?: { name?: string; owner_type?: 'agent' | 'agency' },
+  ): Promise<{ template: SocialCardTemplate }> =>
+    fetchJson(`/social-card-templates/${id}/duplicate`, {
+      method: 'POST',
+      body: JSON.stringify(payload || {}),
+    }),
+  updateSocialCardTemplate: (
+    id: string, template: Partial<SocialCardTemplate>,
+  ): Promise<{ template: SocialCardTemplate }> =>
+    fetchJson(`/social-card-templates/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify({ template }),
+    }),
+  deleteSocialCardTemplate: (id: string) =>
+    fetchJson(`/social-card-templates/${id}`, { method: 'DELETE' }),
+
+  listSocialCards: (listingId: string): Promise<{ cards: SocialCardAsset[] }> =>
+    fetchJson(`/listings/${listingId}/social-cards`),
+  renderSocialCards: (
+    listingId: string,
+    payload: { template_ids: string[]; platforms: string[]; brand?: Record<string, unknown> },
+  ): Promise<{ cards: SocialCardAsset[]; errors: Array<{ template_id: string; platform: string; error: string }> }> =>
+    fetchJson(`/listings/${listingId}/social-cards/render`, {
+      method: 'POST', body: JSON.stringify(payload),
+    }),
+  deleteSocialCard: (id: string) =>
+    fetchJson(`/social-cards/${id}`, { method: 'DELETE' }),
   retryDistribution: (distributionId: string) =>
     fetchJson(`/distributions/${distributionId}/retry`, { method: 'POST', body: '{}' }),
   retryPendingDistributions: (limit = 20) =>

@@ -19,6 +19,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { SocialCardStudio } from '@/components/social-cards/SocialCardStudio'
 import { MarketContextCard } from '@/components/market-pricing/MarketContextCard'
 import { TrendMiniChart } from '@/components/market-pricing/TrendMiniChart'
 import { ComparableListModal } from '@/components/market-pricing/ComparableListModal'
@@ -365,6 +366,7 @@ export function ListingProfilePage() {
         </TabsContent>
 
         <TabsContent value="comms" className="space-y-6">
+          <SocialCardStudio property={property} />
           <PublishSocialTab property={property} />
           <InsightsSection listingId={property.id} />
           <CommentsSection listingId={property.id} />

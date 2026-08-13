@@ -146,6 +146,9 @@ import {
   createModule as createListingsAiModule,
 } from './modules/listings-ai/index.js'
 import {
+  createModule as createSocialCardsModule,
+} from './modules/social-cards/index.js'
+import {
   COMMENT_CATEGORIES,
   COMMENT_SENTIMENTS,
   CATEGORY_META,
@@ -488,6 +491,12 @@ if (whatsAppListingsModule.enabled) {
 const listingsAiModule = createListingsAiModule()
 if (listingsAiModule.enabled) {
   listingsAiModule.registerRoutes(app, { authMiddleware })
+}
+
+const socialCardsModule = createSocialCardsModule()
+if (socialCardsModule.enabled) {
+  await socialCardsModule.prepare()
+  socialCardsModule.registerRoutes(app, { authMiddleware })
 }
 
 /* ============================================================================
