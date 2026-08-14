@@ -32,19 +32,23 @@ export function SocialCardStudio({ property }: Props) {
   const [rendered, setRendered] = useState<SocialCardAsset[]>([])
   const [editingTemplate, setEditingTemplate] = useState<SocialCardTemplate | null>(null)
   const [importOpen, setImportOpen] = useState(false)
+  const [bannerbear, setBannerbear] = useState<{ enabled: boolean } | null>(null)
+  const [syncingBb, setSyncingBb] = useState(false)
 
   const loadAll = useCallback(async () => {
     setLoading(true)
     try {
-      const [tpls, pls, cards] = await Promise.all([
+      const [tpls, pls, cards, bb] = await Promise.all([
         api.listSocialCardTemplates('visible'),
         api.getSocialCardPlatforms(),
         api.listSocialCards(property.id),
+        api.getBannerbearStatus().catch(() => ({ enabled: false })),
       ])
       setTemplates(tpls.templates)
       setAgencyId(tpls.agency_id)
       setPlatforms(pls.platforms)
       setRendered(cards.cards)
+      setBannerbear({ enabled: bb.enabled })
       // Sensible default: pre-check Instagram feed + story if nothing chosen yet.
       setSelectedPlatforms((prev) => prev.size ? prev : new Set(['instagram_feed', 'instagram_story']))
     } catch (err: any) {
@@ -53,6 +57,20 @@ export function SocialCardStudio({ property }: Props) {
       setLoading(false)
     }
   }, [property.id, addToast])
+
+  async function handleBannerbearSync() {
+    if (syncingBb) return
+    setSyncingBb(true)
+    try {
+      const r = await api.syncBannerbearCatalog()
+      addToast({ title: `Bannerbear synced (${r.synced} templates)`, variant: 'success' })
+      loadAll()
+    } catch (err: any) {
+      addToast({ title: 'Bannerbear sync failed', description: err?.message, variant: 'error' })
+    } finally {
+      setSyncingBb(false)
+    }
+  }
 
   useEffect(() => { loadAll() }, [loadAll])
 
@@ -159,7 +177,19 @@ export function SocialCardStudio({ property }: Props) {
               platforms — each combo becomes a ready-to-publish PNG.
             </p>
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            {bannerbear && (
+              bannerbear.enabled ? (
+                <Button size="sm" variant="outline" className="gap-1.5" onClick={handleBannerbearSync} disabled={syncingBb}>
+                  {syncingBb ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Store className="h-3.5 w-3.5" />}
+                  Sync Bannerbear
+                </Button>
+              ) : (
+                <Badge variant="outline" className="text-[10px]" title="Set BANNERBEAR_API_KEY on the backend to enable the premium template lane.">
+                  Bannerbear: disabled
+                </Badge>
+              )
+            )}
             <Button size="sm" variant="outline" className="gap-1.5" onClick={() => setImportOpen(true)}>
               <Upload className="h-3.5 w-3.5" />
               Import JSON

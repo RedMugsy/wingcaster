@@ -17,6 +17,7 @@ import { PLATFORM_DIMENSIONS, isValidPlatformKey } from './dimensions.js'
 import { resolveTemplateForPlatform } from './schema.js'
 import { buildBindingContext } from './data-binding.js'
 import { renderTemplateToSvg } from './template-engine.js'
+import { renderBannerbearCard } from './bannerbear-adapter.js'
 
 const MIME_BY_EXT = {
   '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png',
@@ -65,10 +66,21 @@ async function ensureListingDir(listingId, storageRoot) {
 /**
  * Render a single (template, platform) combo. Returns the persisted asset
  * metadata + relative public URL under /uploads/social-cards/.
+ *
+ * Dispatches by template.engine — 'bannerbear' hands off to the Bannerbear
+ * adapter (external API); anything else (including undefined, which maps
+ * to 'builtin') runs the built-in SVG → sharp pipeline.
  */
 export async function renderSocialCard({ template, listing, agent, brand, distribution, platform, storageRoot, publicBaseUrl = '/uploads/social-cards' }) {
   if (!template) throw Object.assign(new Error('template is required'), { code: 'MISSING_TEMPLATE' })
   if (!isValidPlatformKey(platform)) throw Object.assign(new Error(`Unknown platform: ${platform}`), { code: 'BAD_PLATFORM' })
+
+  // Route to the Bannerbear engine when the template opts in.
+  if (template.engine === 'bannerbear') {
+    return renderBannerbearCard({
+      template, listing, agent, brand, distribution, platform, storageRoot, publicBaseUrl,
+    })
+  }
 
   const dimensions = { ...PLATFORM_DIMENSIONS[platform], __key: platform }
   const resolved = resolveTemplateForPlatform(template, dimensions)

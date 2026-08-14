@@ -531,6 +531,11 @@ export const api = {
     }),
   deleteSocialCard: (id: string) =>
     fetchJson(`/social-cards/${id}`, { method: 'DELETE' }),
+  getBannerbearStatus: (): Promise<{
+    enabled: boolean; force_synchronous: boolean; webhook_url_configured: boolean
+  }> => fetchJson('/social-cards/bannerbear/status'),
+  syncBannerbearCatalog: (): Promise<{ synced: number }> =>
+    fetchJson('/social-cards/bannerbear/sync', { method: 'POST', body: '{}' }),
   retryDistribution: (distributionId: string) =>
     fetchJson(`/distributions/${distributionId}/retry`, { method: 'POST', body: '{}' }),
   retryPendingDistributions: (limit = 20) =>

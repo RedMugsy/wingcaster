@@ -33,6 +33,11 @@ import { OWNER_TYPES, validateTemplate } from './schema.js'
 import { BINDABLE_PATHS } from './data-binding.js'
 import { renderSocialCard, renderSocialCardMatrix } from './renderer.js'
 import { seedSocialCardTemplates } from './seed-templates.js'
+import {
+  isBannerbearEnabled, getBannerbearConfig,
+  fetchBannerbearTemplates, fetchBannerbearTemplateDetail,
+  parseBannerbearWebhook,
+} from './bannerbear-adapter.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -68,7 +73,18 @@ export function createModule() {
     async prepare() {
       await mkdir(config.storagePath, { recursive: true })
       await seedSocialCardTemplates({ findOne, insert, update })
-      logger.info({ storage: config.storagePath }, 'social-cards module ready')
+      if (isBannerbearEnabled()) {
+        // Best-effort catalog sync at boot. Failure never blocks boot —
+        // logged and picked up on next admin manual refresh.
+        try {
+          const count = await upsertBannerbearCatalog()
+          logger.info({ storage: config.storagePath, bannerbear_templates: count }, 'social-cards module ready (Bannerbear synced)')
+        } catch (err) {
+          logger.warn({ err: err.message }, 'social-cards module ready — Bannerbear sync deferred')
+        }
+      } else {
+        logger.info({ storage: config.storagePath }, 'social-cards module ready (Bannerbear disabled)')
+      }
     },
     registerRoutes(app, { authMiddleware } = {}) {
       const auth = authMiddleware || ((_req, _res, next) => next())
@@ -293,7 +309,86 @@ export function createModule() {
         // PNG stays on disk; a periodic sweeper can clean orphans.
         res.json({ ok: true })
       })
+
+      /* --------------------------- Bannerbear --------------------------- */
+
+      app.get('/api/social-cards/bannerbear/status', auth, (_req, res) => {
+        const cfg = getBannerbearConfig()
+        res.json({
+          enabled: cfg.enabled,
+          force_synchronous: cfg.forceSynchronous,
+          webhook_url_configured: Boolean(cfg.webhookUrl),
+        })
+      })
+
+      // Manual catalog refresh — admin-only for the platform-owned key.
+      // Per-tenant keys (future) will use a scoped refresh route.
+      app.post('/api/social-cards/bannerbear/sync', auth, async (req, res) => {
+        try {
+          const count = await upsertBannerbearCatalog()
+          logger.info({ synced: count, agent_id: req.user?.id }, 'bannerbear catalog synced')
+          res.json({ synced: count })
+        } catch (err) {
+          logger.error({ err: err.message }, 'bannerbear catalog sync failed')
+          res.status(502).json({ error: err.message })
+        }
+      })
+
+      // Detail fetch for the template editor — surfaces the raw
+      // available_modifications from Bannerbear so the mapping form can
+      // render every field the designer defined.
+      app.get('/api/social-cards/bannerbear/templates/:uid', auth, async (req, res) => {
+        try {
+          const t = await fetchBannerbearTemplateDetail(req.params.uid)
+          res.json({ template: t })
+        } catch (err) {
+          res.status(err.code === 'MISSING_KEY' ? 400 : 502).json({ error: err.message, code: err.code || null })
+        }
+      })
+
+      // Webhook receiver — only used when force_synchronous=false and the
+      // adapter registered a webhook_url. Persists nothing on its own (the
+      // render call inserts the row); this hook is for future async-only
+      // flows where we don't wait for the render inline.
+      app.post('/api/social-cards/bannerbear/webhook', async (req, res) => {
+        const event = parseBannerbearWebhook(req.body)
+        if (!event) return res.status(400).json({ error: 'unparseable webhook payload' })
+        logger.info({ event }, 'bannerbear webhook received')
+        res.json({ received: true })
+      })
     },
+  }
+
+  /**
+   * Fetch the Bannerbear catalog and upsert each template into our DB.
+   * Called at boot + manually via /api/social-cards/bannerbear/sync.
+   */
+  async function upsertBannerbearCatalog() {
+    const templates = await fetchBannerbearTemplates()
+    let count = 0
+    for (const t of templates) {
+      const existing = await findOne('social_card_templates', (r) => r.id === t.id)
+      const row = {
+        ...t,
+        created_at: existing?.created_at || new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }
+      if (existing) {
+        // Preserve any per-tenant binding overrides layered on top.
+        const merged = {
+          ...row,
+          bannerbear: {
+            ...row.bannerbear,
+            bindings: existing.bannerbear?.bindings || row.bannerbear?.bindings,
+          },
+        }
+        await update('social_card_templates', (r) => r.id === t.id, () => merged)
+      } else {
+        await insert('social_card_templates', row)
+      }
+      count++
+    }
+    return count
   }
 }
 
