@@ -24,6 +24,24 @@ export interface CommandItem {
   created_at: string
 }
 
+export interface PerformanceMetricBlock {
+  impressions: number
+  reach: number
+  likes: number
+  comments: number
+  shares: number
+  saves: number
+  clicks: number
+  engagements: number
+  messages: number
+  inquiries: number
+  viewings_scheduled: number
+  closes: number
+  contacts: number
+  avg_views_per_post: number
+  published_posts: number
+}
+
 export interface ClosedTransaction {
   id: string
   listing_id: string
@@ -657,6 +675,31 @@ export const api = {
   }> => fetchJson(`/contacts/${contactId}/lead-summary`),
   regenerateContactLeadSummary: (contactId: string) =>
     fetchJson(`/contacts/${contactId}/regenerate-summary`, { method: 'POST', body: '{}' }),
+
+  /* -------- Per-listing Performance dashboard (Phase 4.9) -------- */
+  getListingPerformance: (listingId: string, days = 30): Promise<{
+    listing_id: string
+    generated_at: string
+    all_channels: PerformanceMetricBlock
+    per_channel: Array<PerformanceMetricBlock & { platform: string }>
+    funnel: Array<{
+      platform: string
+      views: number; engagements: number; clicks: number
+      inquiries: number; viewings_scheduled: number; closes: number
+    }>
+    time_series: {
+      days: number
+      channels: Record<string, Array<{
+        date: string; impressions: number; engagements: number; clicks: number
+        comments: number; likes: number; shares: number; saves: number
+      }>>
+    }
+    counts: {
+      published_posts: number; channels: number
+      snapshot_days: number; snapshot_points: number
+      contacts_reached: number
+    }
+  }> => fetchJson(`/listings/${listingId}/performance?days=${days}`),
   retryDistribution: (distributionId: string) =>
     fetchJson(`/distributions/${distributionId}/retry`, { method: 'POST', body: '{}' }),
   retryPendingDistributions: (limit = 20) =>

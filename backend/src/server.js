@@ -178,6 +178,7 @@ import {
   regenerateLeadSummary,
   CATEGORY_WEIGHTS,
 } from './contact-360.js'
+import { resolveListingPerformance } from './performance-dashboard.js'
 import {
   isXEnabled,
   parseIncomingXWebhook,
@@ -4060,6 +4061,21 @@ app.get('/api/contact-360/config', authMiddleware, (_req, res) => {
   res.json({ category_weights: CATEGORY_WEIGHTS })
 })
 
+/* ==============================================================
+ * Per-listing Performance dashboard (Phase 4.9). Aggregates
+ * distributions + insight snapshots + inquiries + messages +
+ * viewings + closed transactions into a full channel-level view.
+ * ============================================================== */
+app.get('/api/listings/:id/performance', authMiddleware, async (req, res) => {
+  const days = Math.max(7, Math.min(90, Number(req.query.days) || 30))
+  const bundle = await resolveListingPerformance(req.params.id, req.user.id, { days })
+  if (bundle.error) {
+    const code = bundle.error === 'Listing not found' ? 404 : 403
+    return res.status(code).json({ error: bundle.error })
+  }
+  res.json(bundle)
+})
+
 app.get('/api/contacts/:id/conversations-360', authMiddleware, async (req, res) => {
   const feed = await resolveContact360Feed(req.params.id, req.user.id)
   if (feed.error) {
@@ -6369,6 +6385,28 @@ app.post('/api/distributions/:id/refresh-insights', authMiddleware, async (req, 
     insights_fetched_at: metrics?.fetched_at || new Date().toISOString(),
     updated_at: new Date().toISOString(),
   }))
+
+  // Persist a snapshot every refresh — powers the time-series in the
+  // Performance dashboard (Phase 4.9). Small rows, keyed by
+  // (distribution_id, snapshot_at). Never mutated after insert.
+  await insert('distribution_insight_snapshots', {
+    id: uuidv4(),
+    distribution_id: dist.id,
+    listing_id: dist.property_id,
+    agent_id: req.user.id,
+    platform: dist.platform,
+    impressions: metrics?.impressions ?? null,
+    reach: metrics?.reach ?? null,
+    likes: metrics?.likes ?? null,
+    comments: metrics?.comments ?? null,
+    shares: metrics?.shares ?? null,
+    saves: metrics?.saves ?? null,
+    clicks: metrics?.clicks ?? null,
+    simulated: metrics?.simulated || false,
+    snapshot_at: metrics?.fetched_at || new Date().toISOString(),
+    source: metrics?.source || null,
+  })
+
   await logActivity({
     type: 'distribution_insights_refreshed',
     agent_id: req.user.id,

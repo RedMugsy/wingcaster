@@ -20,6 +20,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { SocialCardStudio } from '@/components/social-cards/SocialCardStudio'
+import { PerformanceTab } from '@/components/performance/PerformanceTab'
 import { RecordClosureModal } from '@/components/closed-transactions/RecordClosureModal'
 import { MarketContextCard } from '@/components/market-pricing/MarketContextCard'
 import { TrendMiniChart } from '@/components/market-pricing/TrendMiniChart'
@@ -320,6 +321,7 @@ export function ListingProfilePage() {
           <TabsTrigger value="email">Email</TabsTrigger>
           <TabsTrigger value="viewings">Viewings</TabsTrigger>
           <TabsTrigger value="area">Property Score</TabsTrigger>
+          <TabsTrigger value="performance">Performance</TabsTrigger>
         </TabsList>
 
         <TabsContent value="overview" className="space-y-6">
@@ -441,6 +443,10 @@ export function ListingProfilePage() {
 
         <TabsContent value="area">
           <PropertyScorePanel listingId={property.id} />
+        </TabsContent>
+
+        <TabsContent value="performance">
+          <PerformanceTab listingId={property.id} />
         </TabsContent>
       </Tabs>
 
