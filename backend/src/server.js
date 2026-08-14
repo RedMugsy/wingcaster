@@ -160,6 +160,18 @@ import {
 } from './modules/comment-router/index.js'
 import { setCommentRouterHook } from './conversations/orchestrator.js'
 import {
+  recordClosedTransaction,
+  listClosedTransactions,
+  getClosedTransaction,
+  deleteClosedTransaction,
+  importClosedTransactionsCsv,
+  TRANSACTION_TYPES,
+  BUYER_TYPES,
+  PAYMENT_METHODS,
+  ATTRIBUTION_SOURCES,
+  CLOSE_REASONS,
+} from './closed-transactions.js'
+import {
   isXEnabled,
   parseIncomingXWebhook,
   publishXTweet,
@@ -3931,7 +3943,127 @@ app.patch('/api/opportunities/:id', authMiddleware, validate(opportunityUpdateSc
     agent_id: req.user.id,
     meta: { opportunity_id: updated.id, stage: updated.stage },
   })
-  res.json(updated)
+  // Signal the frontend that a closure form should be shown — never
+  // blocking. Frontend decides whether to prompt.
+  const closureSignal = opp.stage !== 'closed_won' && updated.stage === 'closed_won'
+    ? {
+        should_prompt_closure_form: true,
+        listing_id: updated.property_id || null,
+        contact_id: updated.contact_id || null,
+        opportunity_id: updated.id,
+        deal_value_hint: updated.deal_value || null,
+        currency_hint: updated.currency || 'USD',
+      }
+    : null
+  res.json({ ...updated, closure_prompt: closureSignal })
+})
+
+/* ==============================================================
+ * Closed transactions — AVM training data capture (task #6)
+ *
+ * DO NOT surface anywhere in the current agent UI beyond the
+ * RecordClosureModal + Settings → Historical Transactions. This
+ * data is training signal for a future AVM (Stage 3+); every day
+ * of delay is transactions lost forever.
+ * ============================================================== */
+
+app.get('/api/closed-transactions/config', authMiddleware, (_req, res) => {
+  res.json({
+    transaction_types: TRANSACTION_TYPES,
+    buyer_types: BUYER_TYPES,
+    payment_methods: PAYMENT_METHODS,
+    attribution_sources: ATTRIBUTION_SOURCES,
+    close_reasons: CLOSE_REASONS,
+  })
+})
+
+app.get('/api/closed-transactions', authMiddleware, async (req, res) => {
+  const listingId = req.query.listing_id ? String(req.query.listing_id) : undefined
+  const contactId = req.query.contact_id ? String(req.query.contact_id) : undefined
+  const rows = await listClosedTransactions({
+    agentId: req.user.id,
+    listingId,
+    contactId,
+    limit: Math.min(500, Number(req.query.limit) || 200),
+  })
+  res.json({ transactions: rows })
+})
+
+app.get('/api/closed-transactions/:id', authMiddleware, async (req, res) => {
+  const row = await getClosedTransaction(req.params.id)
+  if (!row) return res.status(404).json({ error: 'Not found' })
+  if (row.agent_id !== req.user.id) return res.status(403).json({ error: 'Forbidden' })
+  res.json(row)
+})
+
+app.post('/api/closed-transactions', authMiddleware, async (req, res) => {
+  const body = req.body || {}
+  // Only owner-scoped writes — agent_id / agency_id come from the token,
+  // never from the client body.
+  const agent = await findOne('agents', (a) => a.id === req.user.id)
+  const agencyId = agent?.agency_id || null
+
+  if (body.listing_id && !String(body.listing_id).startsWith('backfill:')) {
+    const listing = await findOne('properties', (p) => p.id === body.listing_id)
+    if (!listing) return res.status(404).json({ error: 'Listing not found' })
+    if (listing.agent_id !== req.user.id) return res.status(403).json({ error: 'Not authorised for this listing' })
+  }
+
+  try {
+    const row = await recordClosedTransaction({
+      ...body,
+      agent_id: req.user.id,
+      agency_id: agencyId,
+    })
+    await logActivity({
+      type: 'closed_transaction_recorded',
+      agent_id: req.user.id,
+      meta: {
+        listing_id: row.listing_id,
+        transaction_type: row.transaction_type,
+        sold_price: row.final_sold_price,
+        is_backfilled: row.is_backfilled,
+      },
+    })
+    res.json(row)
+  } catch (err) {
+    res.status(400).json({ error: err.message })
+  }
+})
+
+app.delete('/api/closed-transactions/:id', authMiddleware, async (req, res) => {
+  const row = await getClosedTransaction(req.params.id)
+  if (!row) return res.status(404).json({ error: 'Not found' })
+  if (row.agent_id !== req.user.id) return res.status(403).json({ error: 'Forbidden' })
+  await deleteClosedTransaction(row.id)
+  res.json({ ok: true })
+})
+
+app.post('/api/closed-transactions/import', authMiddleware, async (req, res) => {
+  const { csv_text: csvText } = req.body || {}
+  if (!csvText || typeof csvText !== 'string') {
+    return res.status(400).json({ error: 'csv_text (string) is required' })
+  }
+  if (csvText.length > 500_000) {
+    return res.status(400).json({ error: 'CSV too large (500KB max)' })
+  }
+  try {
+    const agent = await findOne('agents', (a) => a.id === req.user.id)
+    const agencyId = agent?.agency_id || null
+    const result = await importClosedTransactionsCsv({
+      csvText,
+      agentId: req.user.id,
+      agencyId,
+    })
+    await logActivity({
+      type: 'closed_transactions_csv_imported',
+      agent_id: req.user.id,
+      meta: { imported: result.imported, skipped: result.skipped },
+    })
+    res.json(result)
+  } catch (err) {
+    res.status(400).json({ error: err.message })
+  }
 })
 
 // ==================== CONTACT TIMELINE & NOTES ====================

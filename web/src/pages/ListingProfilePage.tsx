@@ -20,6 +20,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { SocialCardStudio } from '@/components/social-cards/SocialCardStudio'
+import { RecordClosureModal } from '@/components/closed-transactions/RecordClosureModal'
 import { MarketContextCard } from '@/components/market-pricing/MarketContextCard'
 import { TrendMiniChart } from '@/components/market-pricing/TrendMiniChart'
 import { ComparableListModal } from '@/components/market-pricing/ComparableListModal'
@@ -124,12 +125,20 @@ export function ListingProfilePage() {
       const updated = await api.updateProperty(property.id, { status: next })
       setProperty((prev) => (prev ? { ...prev, ...updated, status: next } : prev))
       addToast({ title: `Status set to ${LISTING_STATUS_META[next].label}`, variant: 'success' })
+      // Flipping to archived typically means the deal closed — prompt for
+      // the closure form (agent can skip; never blocking). Captures training
+      // data from day 1 for the future AVM (do NOT wait for Stage 3).
+      if (next === 'archived' && status !== 'archived') {
+        setClosureModalOpen(true)
+      }
     } catch (err: any) {
       addToast({ title: 'Could not update status', description: err?.message, variant: 'error' })
     } finally {
       setStatusBusy(false)
     }
   }
+
+  const [closureModalOpen, setClosureModalOpen] = useState(false)
 
   async function handleDelete() {
     if (!property || deleteBusy) return
@@ -484,6 +493,17 @@ export function ListingProfilePage() {
             setProperty(updated)
             setAiOpen(false)
           }}
+        />
+      )}
+
+      {closureModalOpen && (
+        <RecordClosureModal
+          listingId={property.id}
+          listingTitle={property.title}
+          originalListedPrice={property.price}
+          currency={property.price_unit || 'USD'}
+          transactionType={property.type === 'rent' ? 'rent' : 'sale'}
+          onClose={() => setClosureModalOpen(false)}
         />
       )}
     </div>

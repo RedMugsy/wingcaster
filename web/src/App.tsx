@@ -31,6 +31,7 @@ import { WidgetBuilderPage } from '@/pages/WidgetBuilderPage'
 import { IntegrationSettingsPage } from '@/pages/IntegrationSettingsPage'
 import { SocialChannelsPage } from '@/pages/SocialChannelsPage'
 import { NeighborhoodValuatorPage } from '@/pages/NeighborhoodValuatorPage'
+import { HistoricalTransactionsPage } from '@/pages/HistoricalTransactionsPage'
 import { CommandCenterPage } from '@/pages/CommandCenterPage'
 import { RoutingSettingsPage } from '@/pages/RoutingSettingsPage'
 import { MessageTemplatesPage } from '@/pages/MessageTemplatesPage'
@@ -87,6 +88,7 @@ function AppShell() {
           <Route path="/integrations" element={<IntegrationSettingsPage />} />
           <Route path="/settings/channels" element={<SocialChannelsPage />} />
           <Route path="/settings/routing" element={<RoutingSettingsPage />} />
+          <Route path="/settings/historical-transactions" element={<HistoricalTransactionsPage />} />
           <Route path="/command-center" element={<CommandCenterPage />} />
           <Route path="/operations" element={<CommandCenterPage />} />
           <Route path="/admin/whatsapp-listings" element={<AdminWhatsAppListingsPage />} />

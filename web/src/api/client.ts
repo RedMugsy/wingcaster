@@ -24,6 +24,48 @@ export interface CommandItem {
   created_at: string
 }
 
+export interface ClosedTransaction {
+  id: string
+  listing_id: string
+  agent_id: string
+  agency_id: string | null
+  contact_id: string | null
+  opportunity_id: string | null
+  transaction_type: 'sale' | 'rent' | 'lease'
+
+  original_listed_price: number | null
+  final_sold_price: number | null
+  currency: string
+  price_reductions_count: number | null
+
+  listed_at: string | null
+  closed_at: string
+  days_on_market: number | null
+  days_to_first_offer: number | null
+
+  offers_received_count: number | null
+  viewings_conducted: number | null
+  rejected_offer_max: number | null
+  rejected_offer_min: number | null
+
+  buyer_type: string
+  buyer_nationality: string | null
+  payment_method: string
+  down_payment_percent: number | null
+  mortgage_provider: string | null
+
+  close_reason: string
+  agent_notes: string
+  attribution_source: string
+
+  origin: string
+  is_backfilled: boolean
+  source_note: string | null
+
+  created_at: string
+  updated_at: string
+}
+
 export interface SocialCardTemplate {
   id: string
   schema_version?: number
@@ -536,6 +578,35 @@ export const api = {
   }> => fetchJson('/social-cards/bannerbear/status'),
   syncBannerbearCatalog: (): Promise<{ synced: number }> =>
     fetchJson('/social-cards/bannerbear/sync', { method: 'POST', body: '{}' }),
+
+  /* ------ Closed transactions (AVM training data capture) ------ */
+  getClosedTransactionsConfig: (): Promise<{
+    transaction_types: string[]
+    buyer_types: string[]
+    payment_methods: string[]
+    attribution_sources: string[]
+    close_reasons: string[]
+  }> => fetchJson('/closed-transactions/config'),
+  listClosedTransactions: (params?: {
+    listing_id?: string; contact_id?: string; limit?: number
+  }): Promise<{ transactions: ClosedTransaction[] }> => {
+    const q = new URLSearchParams()
+    if (params?.listing_id) q.set('listing_id', params.listing_id)
+    if (params?.contact_id) q.set('contact_id', params.contact_id)
+    if (params?.limit) q.set('limit', String(params.limit))
+    const qs = q.toString() ? `?${q.toString()}` : ''
+    return fetchJson(`/closed-transactions${qs}`)
+  },
+  recordClosedTransaction: (payload: Partial<ClosedTransaction>): Promise<ClosedTransaction> =>
+    fetchJson('/closed-transactions', { method: 'POST', body: JSON.stringify(payload) }),
+  deleteClosedTransaction: (id: string) =>
+    fetchJson(`/closed-transactions/${id}`, { method: 'DELETE' }),
+  importClosedTransactionsCsv: (csvText: string): Promise<{
+    imported: number; skipped: number; errors: Array<{ row: number; error: string }>
+  }> => fetchJson('/closed-transactions/import', {
+    method: 'POST',
+    body: JSON.stringify({ csv_text: csvText }),
+  }),
   retryDistribution: (distributionId: string) =>
     fetchJson(`/distributions/${distributionId}/retry`, { method: 'POST', body: '{}' }),
   retryPendingDistributions: (limit = 20) =>
