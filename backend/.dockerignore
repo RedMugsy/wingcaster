@@ -1,0 +1,32 @@
+node_modules
+npm-debug.log*
+coverage
+.nyc_output
+
+# Env + secrets — Railway injects env vars at runtime.
+.env
+.env.*
+!.env.example
+
+# Test artifacts + IDE
+*.test.js
+tests/
+.vscode
+.idea
+
+# Repo / VCS
+.git
+.gitignore
+.github
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor + tooling caches
+*.log
+*.swp
+
+# Local uploads — created fresh in the image, will be replaced by object
+# storage in Phase 8.
+uploads/
