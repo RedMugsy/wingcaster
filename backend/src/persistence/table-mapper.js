@@ -236,6 +236,7 @@ const TABLE_MAP = {
     table: 'conversation_messages',
     columns: ['conversation_id', 'direction', 'channel', 'provider', 'provider_message_id', 'content', 'content_type', 'status', 'sent_at', 'delivered_at', 'read_at', 'failed_reason', 'metadata', 'created_by_agent_id'],
   },
+  webhook_delivery_log: { schema: 'public', table: 'webhook_delivery_log', columns: ['provider', 'external_id', 'received_at'] },
 
   // Campaigns
   campaigns: { schema: 'public', table: 'campaigns', columns: ['agent_id', 'agency_id', 'name', 'status', 'trigger', 'tags', 'steps'] },

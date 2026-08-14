@@ -11,7 +11,7 @@ import bcrypt from 'bcryptjs'
 import { v4 as uuidv4 } from 'uuid'
 import multer from 'multer'
 import { loadDb, getDb, findAll, findOne, insert, remove, update, transaction } from './db.js'
-import { getPool } from './persistence/postgres-adapter.js'
+import { getPool, query } from './persistence/postgres-adapter.js'
 import { seedData } from './seed.js'
 import { signToken, authMiddleware } from './auth.js'
 import {
@@ -39,6 +39,13 @@ import { createPropertyWithCanonical } from './lib/property-write.js'
 import { escapeXml } from './lib/xml.js'
 import { sendOtp } from './lib/otp.js'
 import { resolveServerPort } from './lib/port.js'
+import {
+  verifyEmailSignature,
+  verifyMetaSignature,
+  verifySmsSignature,
+  verifyTikTokSignature,
+  verifyXSignature,
+} from './lib/webhook-verify.js'
 import {
   validate,
   validateQuery,
@@ -443,7 +450,10 @@ if (isProduction && process.env.FORCE_HTTPS === 'true') {
   })
 }
 
-app.use(express.json({ limit: '12mb', verify: (req, _res, buf) => { req.rawBody = buf } }))
+const captureRawBody = (req, _res, buf) => { req.rawBody = Buffer.from(buf) }
+app.use('/api/webhooks', express.json({ verify: captureRawBody, limit: '1mb' }))
+app.use('/api/webhooks/sms', express.urlencoded({ extended: false, verify: captureRawBody, limit: '1mb' }))
+app.use(express.json({ limit: '12mb' }))
 
 const uploadsDir = join(__dirname, '../uploads')
 if (!existsSync(uploadsDir)) mkdirSync(uploadsDir, { recursive: true })
@@ -5465,6 +5475,46 @@ app.post('/api/whatsapp/send-text', authMiddleware, async (req, res) => {
   }
 })
 
+function requiredWebhookSecret(value, variableName) {
+  if (!value) {
+    const error = new Error(`${variableName} must be configured before this webhook can be used`)
+    error.code = 'WEBHOOK_SECRET_MISSING'
+    throw error
+  }
+  return value
+}
+
+function rejectInvalidWebhook(req, res, provider, verification) {
+  if (verification.ok) return false
+  logger.warn({ provider, path: req.path, error: verification.error }, 'Rejected unverified webhook')
+  res.sendStatus(401)
+  return true
+}
+
+async function claimWebhookDelivery(provider, externalId) {
+  if (!externalId) return true
+  const rows = await query(
+    `INSERT INTO public.webhook_delivery_log (provider, external_id)
+     VALUES ($1, $2)
+     ON CONFLICT (provider, external_id) DO NOTHING
+     RETURNING id`,
+    [provider, String(externalId)],
+  )
+  return rows.length === 1
+}
+
+function webhookEventId(event) {
+  const id = event.external_id || event.delivery_id || event.event_id || event.message_id
+  if (!id) return null
+  return event.type === 'status' ? `${id}:status:${event.status || 'unknown'}` : String(id)
+}
+
+function requestPublicUrl(req) {
+  if (process.env.TWILIO_SMS_WEBHOOK_URL) return process.env.TWILIO_SMS_WEBHOOK_URL
+  const base = process.env.PUBLIC_API_URL || `${req.protocol}://${req.get('host')}`
+  return new URL(req.originalUrl, base.endsWith('/') ? base : `${base}/`).toString()
+}
+
 app.get('/api/webhooks/whatsapp', (req, res) => {
   const mode = req.query['hub.mode']
   const token = req.query['hub.verify_token']
@@ -5479,6 +5529,20 @@ app.get('/api/webhooks/whatsapp', (req, res) => {
 app.post('/api/webhooks/whatsapp', async (req, res) => {
   try {
     const signature = req.headers['x-hub-signature-256'] || ''
+    const secret = requiredWebhookSecret(
+      process.env.META_APP_SECRET,
+      'META_APP_SECRET',
+    )
+    const verification = verifyMetaSignature({ rawBody: req.rawBody, signature, appSecret: secret })
+    if (rejectInvalidWebhook(req, res, 'whatsapp', verification)) return
+
+    const parsedEvents = parseIncomingWhatsAppWebhook(req.body)
+    const acceptedIds = new Set()
+    for (const event of parsedEvents) {
+      const externalId = webhookEventId(event)
+      if (await claimWebhookDelivery('whatsapp', externalId)) acceptedIds.add(externalId)
+    }
+
     let moduleResult = null
     if (whatsAppListingsModule.enabled) {
       try {
@@ -5492,12 +5556,20 @@ app.post('/api/webhooks/whatsapp', async (req, res) => {
       }
     }
 
+    if (moduleResult?.signature_ok === false) {
+      logger.warn({ provider: 'whatsapp' }, 'WhatsApp module rejected webhook signature')
+      res.sendStatus(401)
+      return
+    }
+
     // Fallback to conversation orchestrator for messages the module did not handle.
-    const events = parseIncomingWhatsAppWebhook(req.body)
+    const events = parsedEvents
+      .map((event, originalIndex) => ({ event, originalIndex }))
+      .filter(({ event }) => acceptedIds.has(webhookEventId(event)))
     const results = moduleResult?.results || []
     for (let i = 0; i < events.length; i++) {
-      const event = events[i]
-      const moduleHandled = moduleResult?.results?.[i]?.handled
+      const { event, originalIndex } = events[i]
+      const moduleHandled = moduleResult?.results?.[originalIndex]?.handled
       if (moduleHandled) continue
 
       if (event.type === 'message' && (event.text || event.media?.length)) {
@@ -5556,6 +5628,7 @@ app.post('/api/webhooks/whatsapp', async (req, res) => {
       res.json({ received: true, results })
     }
   } catch (e) {
+    if (e.code === 'WEBHOOK_SECRET_MISSING') throw e
     logger.error({ error: e.message }, 'WhatsApp webhook processing error')
     res.status(200).json({ received: true, error: e.message })
   }
@@ -5564,12 +5637,20 @@ app.post('/api/webhooks/whatsapp', async (req, res) => {
 // ==================== SMS WEBHOOKS ====================
 app.post('/api/webhooks/sms', async (req, res) => {
   try {
+    const verification = verifySmsSignature({
+      rawBody: req.rawBody,
+      signature: req.get('x-twilio-signature'),
+      twilioAuthToken: requiredWebhookSecret(process.env.TWILIO_AUTH_TOKEN, 'TWILIO_AUTH_TOKEN'),
+      url: requestPublicUrl(req),
+    })
+    if (rejectInvalidWebhook(req, res, 'twilio', verification)) return
     const events = parseIncomingSMSWebhook(req.body)
     const statusEvents = parseSMSStatusWebhook(req.body)
     const allEvents = [...events, ...statusEvents]
     const results = []
 
     for (const event of allEvents) {
+      if (!await claimWebhookDelivery('twilio', webhookEventId(event))) continue
       if (event.type === 'message' && event.text) {
         try {
           const result = await ingestInboundMessage({
@@ -5613,6 +5694,7 @@ app.post('/api/webhooks/sms', async (req, res) => {
       res.json({ received: true, results })
     }
   } catch (e) {
+    if (e.code === 'WEBHOOK_SECRET_MISSING') throw e
     logger.error({ error: e.message }, 'SMS webhook processing error')
     res.status(200).json({ received: true, error: e.message })
   }
@@ -5621,12 +5703,22 @@ app.post('/api/webhooks/sms', async (req, res) => {
 // ==================== EMAIL WEBHOOKS ====================
 app.post('/api/webhooks/email', async (req, res) => {
   try {
+    const provider = String(process.env.EMAIL_WEBHOOK_PROVIDER || 'sendgrid').toLowerCase()
+    const secretName = provider === 'postmark' ? 'POSTMARK_WEBHOOK_SECRET' : 'SENDGRID_WEBHOOK_SECRET'
+    const verification = verifyEmailSignature({
+      headers: req.headers,
+      body: req.rawBody,
+      providerSecret: requiredWebhookSecret(process.env[secretName], secretName),
+      provider,
+    })
+    if (rejectInvalidWebhook(req, res, provider, verification)) return
     const events = parseIncomingEmailWebhook(req.body)
     const statusEvents = parseEmailStatusWebhook(req.body)
     const allEvents = [...events, ...statusEvents]
     const results = []
 
     for (const event of allEvents) {
+      if (!await claimWebhookDelivery(provider, webhookEventId(event))) continue
       if (event.type === 'message' && event.text) {
         try {
           const result = await ingestInboundMessage({
@@ -5671,6 +5763,7 @@ app.post('/api/webhooks/email', async (req, res) => {
       res.json({ received: true, results })
     }
   } catch (e) {
+    if (e.code === 'WEBHOOK_SECRET_MISSING') throw e
     logger.error({ error: e.message }, 'Email webhook processing error')
     res.status(200).json({ received: true, error: e.message })
   }
@@ -5689,14 +5782,21 @@ app.get('/api/webhooks/instagram', (req, res) => {
 })
 
 app.post('/api/webhooks/instagram', async (req, res) => {
-  emitUsageEventAsync({ actionKey: 'webhook.received', tenantId: 'platform', channel: 'instagram' })
   try {
+    const verification = verifyMetaSignature({
+      rawBody: req.rawBody,
+      signature: req.get('x-hub-signature-256'),
+      appSecret: requiredWebhookSecret(process.env.META_APP_SECRET, 'META_APP_SECRET'),
+    })
+    if (rejectInvalidWebhook(req, res, 'instagram', verification)) return
     const dmEvents = parseIncomingInstagramDMWebhook(req.body)
     const commentEvents = parseIncomingInstagramCommentWebhook(req.body)
     const allEvents = [...dmEvents, ...commentEvents]
     const results = []
 
     for (const event of allEvents) {
+      if (!await claimWebhookDelivery('instagram', webhookEventId(event))) continue
+      emitUsageEventAsync({ actionKey: 'webhook.received', tenantId: 'platform', channel: 'instagram' })
       if (event.type === 'dm' && event.text) {
         try {
           const result = await ingestInboundMessage({
@@ -5764,6 +5864,7 @@ app.post('/api/webhooks/instagram', async (req, res) => {
       res.json({ received: true, results })
     }
   } catch (e) {
+    if (e.code === 'WEBHOOK_SECRET_MISSING') throw e
     logger.error({ error: e.message }, 'Instagram webhook processing error')
     res.status(200).json({ received: true, error: e.message })
   }
@@ -5782,12 +5883,19 @@ app.get('/api/webhooks/facebook', (req, res) => {
 })
 
 app.post('/api/webhooks/facebook', async (req, res) => {
-  emitUsageEventAsync({ actionKey: 'webhook.received', tenantId: 'platform', channel: 'facebook' })
   try {
+    const verification = verifyMetaSignature({
+      rawBody: req.rawBody,
+      signature: req.get('x-hub-signature-256'),
+      appSecret: requiredWebhookSecret(process.env.META_APP_SECRET, 'META_APP_SECRET'),
+    })
+    if (rejectInvalidWebhook(req, res, 'facebook', verification)) return
     const events = parseIncomingFacebookWebhook(req.body)
     const results = []
 
     for (const event of events) {
+      if (!await claimWebhookDelivery('facebook', webhookEventId(event))) continue
+      emitUsageEventAsync({ actionKey: 'webhook.received', tenantId: 'platform', channel: 'facebook' })
       if (!event.text) continue
       const channel = event.type === 'dm' ? 'facebook_messenger' : 'facebook_comment'
       try {
@@ -5827,6 +5935,7 @@ app.post('/api/webhooks/facebook', async (req, res) => {
       res.json({ received: true, results })
     }
   } catch (e) {
+    if (e.code === 'WEBHOOK_SECRET_MISSING') throw e
     logger.error({ error: e.message }, 'Facebook webhook processing error')
     res.status(200).json({ received: true, error: e.message })
   }
@@ -5834,12 +5943,20 @@ app.post('/api/webhooks/facebook', async (req, res) => {
 
 // ==================== TIKTOK WEBHOOKS ====================
 app.post('/api/webhooks/tiktok', async (req, res) => {
-  emitUsageEventAsync({ actionKey: 'webhook.received', tenantId: 'platform', channel: 'tiktok' })
   try {
+    const verification = verifyTikTokSignature({
+      rawBody: req.rawBody,
+      signature: req.get('tiktok-signature'),
+      timestamp: req.get('tiktok-timestamp'),
+      appSecret: requiredWebhookSecret(process.env.TIKTOK_WEBHOOK_SECRET, 'TIKTOK_WEBHOOK_SECRET'),
+    })
+    if (rejectInvalidWebhook(req, res, 'tiktok', verification)) return
     const events = parseIncomingTikTokWebhook(req.body)
     const results = []
 
     for (const event of events) {
+      if (!await claimWebhookDelivery('tiktok', webhookEventId(event))) continue
+      emitUsageEventAsync({ actionKey: 'webhook.received', tenantId: 'platform', channel: 'tiktok' })
       if (!event.text) continue
       try {
         const result = await ingestInboundMessage({
@@ -5878,6 +5995,7 @@ app.post('/api/webhooks/tiktok', async (req, res) => {
       res.json({ received: true, results })
     }
   } catch (e) {
+    if (e.code === 'WEBHOOK_SECRET_MISSING') throw e
     logger.error({ error: e.message }, 'TikTok webhook processing error')
     res.status(200).json({ received: true, error: e.message })
   }
@@ -5885,12 +6003,20 @@ app.post('/api/webhooks/tiktok', async (req, res) => {
 
 // ==================== X (TWITTER) WEBHOOKS ====================
 app.post('/api/webhooks/x', async (req, res) => {
-  emitUsageEventAsync({ actionKey: 'webhook.received', tenantId: 'platform', channel: 'x' })
   try {
+    const verification = verifyXSignature({
+      rawBody: req.rawBody,
+      signature: req.get('x-twitter-webhooks-signature'),
+      timestamp: req.get('x-twitter-webhooks-timestamp'),
+      appSecret: requiredWebhookSecret(process.env.X_WEBHOOK_SECRET, 'X_WEBHOOK_SECRET'),
+    })
+    if (rejectInvalidWebhook(req, res, 'x', verification)) return
     const events = parseIncomingXWebhook(req.body)
     const results = []
 
     for (const event of events) {
+      if (!await claimWebhookDelivery('x', webhookEventId(event))) continue
+      emitUsageEventAsync({ actionKey: 'webhook.received', tenantId: 'platform', channel: 'x' })
       if (!event.text) continue
       try {
         const result = await ingestInboundMessage({
@@ -5929,6 +6055,7 @@ app.post('/api/webhooks/x', async (req, res) => {
       res.json({ received: true, results })
     }
   } catch (e) {
+    if (e.code === 'WEBHOOK_SECRET_MISSING') throw e
     logger.error({ error: e.message }, 'X webhook processing error')
     res.status(200).json({ received: true, error: e.message })
   }
@@ -7563,6 +7690,18 @@ app.use((err, req, res, _next) => {
 // ==================== START ====================
 const startServer = async () => {
   const port = await resolveServerPort()
+  const unverifiableWebhookChannels = [
+    [!process.env.META_APP_SECRET, 'whatsapp'],
+    [!process.env.META_APP_SECRET, 'instagram'],
+    [!process.env.META_APP_SECRET, 'facebook'],
+    [!process.env.TIKTOK_WEBHOOK_SECRET, 'tiktok'],
+    [!process.env.X_WEBHOOK_SECRET, 'x'],
+    [!process.env.TWILIO_AUTH_TOKEN, 'sms'],
+    [!process.env.SENDGRID_WEBHOOK_SECRET && !process.env.POSTMARK_WEBHOOK_SECRET, 'email'],
+  ].filter(([missing]) => missing).map(([, channel]) => channel)
+  if (unverifiableWebhookChannels.length) {
+    logger.warn({ channels: unverifiableWebhookChannels }, 'Webhook channels are unverifiable until their secrets are configured')
+  }
 
   app.listen(port, () => {
     logger.info({
