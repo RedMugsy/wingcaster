@@ -18,6 +18,12 @@ import { findAll, findOne } from '../db.js'
 import { CAST_RATES_V1, CAST_VALUE_MINOR_SEED, RATE_CARD_LATEST_VERSION } from './rate-card.js'
 import { periodSummary, currentBillingPeriod } from './ledger.js'
 import { resolveActiveSubscription } from './entitlements.js'
+import {
+  effectiveCastValueMinor,
+  getActiveRateCard,
+  resolveEffectivePrice,
+  resolveMarketContext,
+} from './pricing/index.js'
 
 export function registerBillingRoutes(app, { authMiddleware, requirePlatformAdmin }) {
   const auth = authMiddleware || ((_req, _res, next) => next())
@@ -25,14 +31,80 @@ export function registerBillingRoutes(app, { authMiddleware, requirePlatformAdmi
 
   app.get('/api/billing/rate-card', auth, async (req, res) => {
     const active = await resolveActiveSubscription(req.user.id)
-    const rateCardVersion = active?.subscription?.rate_card_version || RATE_CARD_LATEST_VERSION
-    const castValueMinor = active?.subscription?.cast_value_minor || CAST_VALUE_MINOR_SEED
-    res.json({
-      rate_card_version: rateCardVersion,
-      cast_value_minor: castValueMinor,
-      cast_value_display: `$${(castValueMinor / 100).toFixed(2)}`,
+    const runtimeRateCard = await getActiveRateCard()
+    const rateCard = runtimeRateCard || {
+      version: RATE_CARD_LATEST_VERSION,
+      name: 'Wingcaster Core Rate Card v1',
+      cast_value_minor: CAST_VALUE_MINOR_SEED,
       rates: CAST_RATES_V1,
-      note: 'Casts × cast_value_minor / 100 = retail price per action in USD. Zero-rate actions are always emitted for telemetry but never charged.',
+    }
+    const subscription = active?.subscription || null
+    const territoryId = subscription?.territory_id || null
+    const zoneId = subscription?.zone_id || null
+    const market = territoryId
+      ? await resolveMarketContext({ territoryId, zoneId })
+      : { territory: null, zone: null }
+    const effectiveCastValue = effectiveCastValueMinor({
+      core: rateCard,
+      territory: market.territory,
+      zone: market.zone,
+    })
+    const priceLockedMinor = subscription?.price_locked_minor ?? null
+    const priceLocked = Number(priceLockedMinor) > 0
+    const rates = {}
+
+    if (priceLocked) {
+      const resolvedRates = await Promise.all(Object.entries(rateCard.rates).map(async ([actionKey, casts]) => {
+        const price = await resolveEffectivePrice({
+          actionKey,
+          territoryId,
+          zoneId,
+          priceLockedMinor,
+        })
+        return [actionKey, {
+          casts: Number(casts),
+          price_minor: price.price_minor,
+          price_display: formatUsd(price.price_minor),
+        }]
+      }))
+      Object.assign(rates, Object.fromEntries(resolvedRates))
+    } else {
+      for (const [actionKey, castsValue] of Object.entries(rateCard.rates)) {
+        const casts = Number(castsValue)
+        const priceMinor = casts * effectiveCastValue
+        rates[actionKey] = {
+          casts,
+          price_minor: priceMinor,
+          price_display: formatUsd(priceMinor),
+        }
+      }
+    }
+
+    const marketContext = market.territory ? {
+      territory_id: market.territory.id,
+      territory_code: market.territory.code,
+      territory_name: market.territory.name,
+      zone_id: market.zone?.id || null,
+      zone_name: market.zone?.name || null,
+      territory_multiplier: Number(market.territory.pricing_multiplier),
+      zone_multiplier: market.zone ? Number(market.zone.pricing_multiplier) : 1,
+      effective_cast_value_minor: effectiveCastValue,
+      effective_cast_value_display: formatUsd(effectiveCastValue),
+    } : null
+
+    res.json({
+      rate_card: {
+        version: Number(rateCard.version),
+        name: rateCard.name,
+        cast_value_minor: Number(rateCard.cast_value_minor),
+        cast_value_display: formatUsd(Number(rateCard.cast_value_minor)),
+      },
+      market_context: marketContext,
+      rates,
+      price_locked: priceLocked,
+      note: runtimeRateCard
+        ? 'Prices reflect the active runtime rate card and the tenant market. Zero-rate actions are emitted for telemetry but never charged.'
+        : 'Warning: no active runtime rate card was found; seed pricing is shown.',
     })
   })
 
@@ -144,6 +216,10 @@ export function registerBillingRoutes(app, { authMiddleware, requirePlatformAdmi
       per_action: perAction,
     })
   })
+}
+
+function formatUsd(minor) {
+  return `$${(minor / 100).toFixed(2)}`
 }
 
 /**
