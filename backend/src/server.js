@@ -172,6 +172,13 @@ import {
   CLOSE_REASONS,
 } from './closed-transactions.js'
 import {
+  resolveContact360Feed,
+  computeLeadScore,
+  getLeadSummary,
+  regenerateLeadSummary,
+  CATEGORY_WEIGHTS,
+} from './contact-360.js'
+import {
   isXEnabled,
   parseIncomingXWebhook,
   publishXTweet,
@@ -4037,6 +4044,77 @@ app.delete('/api/closed-transactions/:id', authMiddleware, async (req, res) => {
   if (row.agent_id !== req.user.id) return res.status(403).json({ error: 'Forbidden' })
   await deleteClosedTransaction(row.id)
   res.json({ ok: true })
+})
+
+/* ==============================================================
+ * Contact 360 — unified per-contact conversation view + AI lead
+ * summary + score + next steps (Phase 4.8).
+ *
+ * Uses Phase 4.7 per-message categorisation and the Phase 3
+ * multi-provider AI adapter. Score is deterministic (weighted
+ * category rollup, cache-free). Summary + next steps are cached
+ * in contact_lead_summaries with staleness detection.
+ * ============================================================== */
+
+app.get('/api/contact-360/config', authMiddleware, (_req, res) => {
+  res.json({ category_weights: CATEGORY_WEIGHTS })
+})
+
+app.get('/api/contacts/:id/conversations-360', authMiddleware, async (req, res) => {
+  const feed = await resolveContact360Feed(req.params.id, req.user.id)
+  if (feed.error) {
+    const code = feed.error === 'Contact not found' ? 404 : 403
+    return res.status(code).json({ error: feed.error })
+  }
+  res.json(feed)
+})
+
+app.get('/api/contacts/:id/lead-score', authMiddleware, async (req, res) => {
+  const contact = await findOne('contacts', (c) => c.id === req.params.id)
+  if (!contact) return res.status(404).json({ error: 'Contact not found' })
+  if (contact.assigned_agent_id !== req.user.id) return res.status(403).json({ error: 'Not authorised' })
+  const score = await computeLeadScore(req.params.id)
+  res.json(score)
+})
+
+app.get('/api/contacts/:id/lead-summary', authMiddleware, async (req, res) => {
+  const bundle = await getLeadSummary({ contactId: req.params.id, requesterAgentId: req.user.id })
+  if (bundle.error) {
+    const code = bundle.error === 'Contact not found' ? 404 : 403
+    return res.status(code).json({ error: bundle.error })
+  }
+  res.json(bundle)
+})
+
+app.post('/api/contacts/:id/regenerate-summary', authMiddleware, async (req, res) => {
+  const aiAdapter = listingsAiModule?.enabled ? listingsAiModule.aiAdapter : null
+  if (!aiAdapter) {
+    return res.status(400).json({
+      error: 'AI adapter not configured. Set at least one provider API key (WHATSAPP_LISTINGS_CLAUDE_API_KEY / OPENAI / GEMINI / etc.) and enable listings-ai.',
+    })
+  }
+  try {
+    const bundle = await regenerateLeadSummary({
+      contactId: req.params.id,
+      requesterAgentId: req.user.id,
+      aiAdapter,
+      provider: listingsAiModule.config?.aiProvider,
+      logger,
+    })
+    if (bundle.error) {
+      const code = bundle.error === 'Contact not found' ? 404 : 403
+      return res.status(code).json({ error: bundle.error })
+    }
+    await logActivity({
+      type: 'contact_lead_summary_regenerated',
+      agent_id: req.user.id,
+      meta: { contact_id: req.params.id, score: bundle.score?.score, steps_count: bundle.summary?.next_steps?.length || 0 },
+    })
+    res.json(bundle)
+  } catch (err) {
+    logger.error({ err: err.message, contact_id: req.params.id }, 'Lead summary regeneration failed')
+    res.status(502).json({ error: err.message })
+  }
 })
 
 app.post('/api/closed-transactions/import', authMiddleware, async (req, res) => {

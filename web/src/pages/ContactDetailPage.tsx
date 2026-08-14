@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { ArrowLeft, Check, Clock, Loader2, Mail, MessageSquare, Phone, Plus, Tag, User } from 'lucide-react'
+import { ArrowLeft, Check, Clock, Loader2, Mail, MessageSquare, Phone, Plus, Sparkles, Tag, User } from 'lucide-react'
+import { Contact360Panel } from '@/components/contact-360/Contact360Panel'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -223,13 +224,21 @@ export function ContactDetailPage() {
             </CardContent>
           </Card>
 
-          <Tabs defaultValue="timeline">
+          <Tabs defaultValue="contact360">
             <TabsList className="mb-4">
+              <TabsTrigger value="contact360" className="gap-1">
+                <Sparkles className="h-3.5 w-3.5 text-amber-500" />
+                Contact 360
+              </TabsTrigger>
               <TabsTrigger value="timeline">Timeline</TabsTrigger>
               <TabsTrigger value="tasks">Tasks ({tasks.length})</TabsTrigger>
               <TabsTrigger value="opportunities">Deals ({opportunities.length})</TabsTrigger>
               <TabsTrigger value="notes">Notes ({notes.length})</TabsTrigger>
             </TabsList>
+
+            <TabsContent value="contact360">
+              <Contact360Panel contactId={contact.id} />
+            </TabsContent>
 
             <TabsContent value="timeline">
               <Card>

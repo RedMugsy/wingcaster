@@ -607,6 +607,56 @@ export const api = {
     method: 'POST',
     body: JSON.stringify({ csv_text: csvText }),
   }),
+
+  /* -------- Contact 360 (Phase 4.8) -------- */
+  getContact360Config: (): Promise<{ category_weights: Record<string, number> }> =>
+    fetchJson('/contact-360/config'),
+  getContactConversations360: (contactId: string): Promise<{
+    contact: Record<string, unknown>
+    channels: string[]
+    listings: Array<{ id: string; title: string; city: string | null; price: number | null; price_unit: string | null }>
+    messages: Array<{
+      id: string
+      conversation_id: string
+      channel: string
+      platform: string | null
+      listing_id: string | null
+      direction: 'inbound' | 'outbound'
+      content: string
+      created_at: string
+      status: string
+      author_name: string | null
+      category: string | null
+      sentiment: 'positive' | 'neutral' | 'negative' | null
+      category_confidence: number | null
+      suggested_reply: string | null
+      needs_agent_attention: boolean
+    }>
+    message_count: number
+  }> => fetchJson(`/contacts/${contactId}/conversations-360`),
+  getContactLeadScore: (contactId: string): Promise<{
+    score: number
+    message_count: number
+    category_counts: Record<string, number>
+    weighted_sum: number
+    reasoning: string
+  }> => fetchJson(`/contacts/${contactId}/lead-score`),
+  getContactLeadSummary: (contactId: string): Promise<{
+    contact_id: string
+    score: { score: number; message_count: number; category_counts: Record<string, number>; weighted_sum: number; reasoning: string }
+    summary: {
+      text: string
+      next_steps: Array<{ action: string; reason: string; params: { listing_id: string | null; template_hint: string | null; priority: string } }>
+      generated_at: string
+      provider: string
+      message_count_at_generation: number
+      is_stale: boolean
+    } | null
+    has_cached: boolean
+    is_stale: boolean
+  }> => fetchJson(`/contacts/${contactId}/lead-summary`),
+  regenerateContactLeadSummary: (contactId: string) =>
+    fetchJson(`/contacts/${contactId}/regenerate-summary`, { method: 'POST', body: '{}' }),
   retryDistribution: (distributionId: string) =>
     fetchJson(`/distributions/${distributionId}/retry`, { method: 'POST', body: '{}' }),
   retryPendingDistributions: (limit = 20) =>
