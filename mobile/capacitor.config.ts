@@ -7,8 +7,8 @@ import type { CapacitorConfig } from '@capacitor/cli'
 //
 // To rebuild for a white-labeled tenant, override appId/appName here and rebuild.
 const config: CapacitorConfig = {
-  appId: 'com.listingclarion.app',
-  appName: 'ListingClarion',
+  appId: 'com.wingcaster.app',
+  appName: 'Wingcaster',
   webDir: '../web/dist',
   server: {
     // In dev, uncomment to point the shell at the running Vite dev server on the same LAN.

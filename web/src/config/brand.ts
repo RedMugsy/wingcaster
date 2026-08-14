@@ -9,7 +9,7 @@ export interface BrandConfig {
 }
 
 export const DEFAULT_BRAND: BrandConfig = {
-  name: 'ListingClarion',
+  name: 'Wingcaster',
   tagline: 'The clarion call for every listing.',
   logoUrl: '/brand-logo.svg',
   iconUrl: '/brand-icon.svg',

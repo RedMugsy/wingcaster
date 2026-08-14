@@ -33,7 +33,7 @@ const EDITORIAL = {
   layers: [
     { id: 'hero',       type: 'photo', bind: 'listing.photos[0]',
       x: 0, y: 0, w: 1080, h: 670, fit: 'cover' },
-    { id: 'brand',      type: 'text',  bind: '{{upper brand.name | default: "LISTINGCLARION"}}',
+    { id: 'brand',      type: 'text',  bind: '{{upper brand.name | default: "WINGCASTER"}}',
       x: 1020, y: 630, size: 22, weight: 700, color: '#FFFFFF', font: "'Georgia', 'Times New Roman', serif", align: 'right',
       letter_spacing: '0.24em', stroke_color: 'rgba(0,0,0,0.35)', stroke_width: 2 },
     { id: 'title',      type: 'text',  bind: '{{truncate listing.title 40}}',
@@ -93,7 +93,7 @@ const BOLD_MODERN = {
   layers: [
     { id: 'accent_band', type: 'rect',
       x: 0, y: 0, w: 1080, h: 130, color: '{{brand.accent_color | default: "#EAB308"}}' },
-    { id: 'brand',       type: 'text', bind: '{{upper brand.name | default: "LISTINGCLARION"}}',
+    { id: 'brand',       type: 'text', bind: '{{upper brand.name | default: "WINGCASTER"}}',
       x: 55, y: 85, size: 30, weight: 900, color: '#0F0F0F', letter_spacing: '0.28em' },
     { id: 'type_label',  type: 'text', bind: 'FOR {{upper listing.type}}',
       x: 1025, y: 85, size: 22, weight: 700, color: '#0F0F0F', align: 'right', letter_spacing: '0.24em' },
@@ -136,7 +136,7 @@ const LUXURY_DARK = {
   base_canvas: { width: 1080, height: 1080 },
   background: { color: '#0B1220' },
   layers: [
-    { id: 'brand',      type: 'text', bind: '{{upper brand.name | default: "LISTINGCLARION"}}',
+    { id: 'brand',      type: 'text', bind: '{{upper brand.name | default: "WINGCASTER"}}',
       x: 540, y: 90, size: 22, weight: 700, color: '#C7A051', font: "'Georgia', 'Times New Roman', serif", align: 'center', letter_spacing: '0.34em' },
     { id: 'brand_rule', type: 'line', x: 460, y: 105, x2: 620, y2: 105, color: '#C7A051', weight: 1 },
     { id: 'photo_bg',   type: 'rect', x: 60, y: 160, w: 960, h: 620, color: '#0F1930', border_color: '#C7A051', border_width: 3 },
@@ -203,7 +203,7 @@ const STORE_SOLD = {
       x: 540, y: 570, size: 140, weight: 900, color: '#EA3B34', align: 'center', letter_spacing: '0.05em' },
     { id: 'agent',   type: 'text', bind: 'Thank you to our client — brokered by {{agent.name}}',
       show_if: 'agent.name', x: 540, y: 780, size: 26, weight: 500, color: '#FFFFFF', align: 'center' },
-    { id: 'brand',   type: 'text', bind: '{{upper brand.name | default: "LISTINGCLARION"}}',
+    { id: 'brand',   type: 'text', bind: '{{upper brand.name | default: "WINGCASTER"}}',
       x: 540, y: 1010, size: 22, weight: 700, color: '#EAB308', align: 'center', letter_spacing: '0.28em' },
   ],
 }
@@ -282,7 +282,7 @@ const STORE_AGENT_INTRO = {
     { id: 'agency',  type: 'text',  bind: '{{agent.agency_name}}', x: 540, y: 810, size: 30, weight: 500, color: '#0F0F0F', align: 'center' },
     { id: 'contact', type: 'text',  bind: '{{agent.phone}}  ·  {{agent.email}}',
       x: 540, y: 890, size: 24, weight: 500, color: '#5C574E', align: 'center' },
-    { id: 'brand',   type: 'text',  bind: '{{upper brand.name | default: "LISTINGCLARION"}}',
+    { id: 'brand',   type: 'text',  bind: '{{upper brand.name | default: "WINGCASTER"}}',
       x: 540, y: 1010, size: 22, weight: 700, color: '#C7A051', align: 'center', letter_spacing: '0.28em' },
   ],
 }

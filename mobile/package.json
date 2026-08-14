@@ -1,8 +1,8 @@
 {
-  "name": "listingclarion-mobile",
+  "name": "wingcaster-mobile",
   "version": "0.0.0",
   "private": true,
-  "description": "Capacitor shell wrapping the ListingClarion web app for iOS + Android.",
+  "description": "Capacitor shell wrapping the Wingcaster web app for iOS + Android.",
   "scripts": {
     "sync": "cap sync",
     "sync:android": "cap sync android",

@@ -13,7 +13,7 @@ const BrandContext = createContext<BrandContextValue>({
   loading: false,
 })
 
-const STORAGE_KEY = 'companion.brand'
+const STORAGE_KEY = 'wingcaster.brand'
 
 function loadCached(): BrandConfig {
   try {

@@ -70,7 +70,7 @@ export function SocialChannelsPage() {
   // Listen for OAuth completion messages from the popup.
   useEffect(() => {
     function onMessage(evt: MessageEvent) {
-      if (evt.data?.type === 'listingclarion:oauth:done') {
+      if (evt.data?.type === 'wingcaster:oauth:done') {
         addToast({ title: `Connected to ${evt.data.platform}`, variant: 'success' })
         load()
       }
@@ -115,7 +115,7 @@ export function SocialChannelsPage() {
       <div className="mb-6">
         <h1 className="text-2xl font-semibold tracking-tight">Social channels</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Each channel is per-tenant. Facebook, Instagram, LinkedIn, and WhatsApp use ListingClarion's
+          Each channel is per-tenant. Facebook, Instagram, LinkedIn, and WhatsApp use Wingcaster's
           enterprise access — you provide your platform IDs so posts publish under your identity.
           X and TikTok use per-agent OAuth — click "Connect" to authorise your own account.
         </p>

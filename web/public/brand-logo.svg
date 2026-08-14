@@ -2,5 +2,5 @@
   <rect width="52" height="52" x="6" y="6" rx="12" fill="#0F0F0F"/>
   <path d="M18 30 L32 18 L46 30 V46 A2 2 0 0 1 44 48 H36 V38 H28 V48 H20 A2 2 0 0 1 18 46 Z" fill="#FFFFFF"/>
   <circle cx="46" cy="18" r="5" fill="#EAB308"/>
-  <text x="72" y="40" font-family="'DM Sans', system-ui, sans-serif" font-weight="700" font-size="20" fill="#0F0F0F">LISTINGCLARION</text>
+  <text x="72" y="40" font-family="'DM Sans', system-ui, sans-serif" font-weight="700" font-size="20" fill="#0F0F0F">WINGCASTER</text>
 </svg>

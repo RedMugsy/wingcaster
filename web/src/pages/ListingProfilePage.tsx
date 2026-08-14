@@ -1581,7 +1581,7 @@ function CommentsSection({ listingId }: { listingId: string }) {
           <p className="rounded-md border border-dashed bg-slate-50 p-4 text-sm text-muted-foreground">
             {categoryFilter.size > 0
               ? 'No comments match the current filter. Clear filters to see everything.'
-              : 'No comments yet. Once your published posts start getting engagement, comment threads will appear here — reply inline without leaving ListingClarion.'}
+              : 'No comments yet. Once your published posts start getting engagement, comment threads will appear here — reply inline without leaving Wingcaster.'}
           </p>
         ) : (
           <ul className="space-y-4">

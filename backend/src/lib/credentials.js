@@ -33,7 +33,7 @@ function getKey() {
       warned = true
     }
     // Deterministic dev key so encrypted values survive a restart in dev.
-    return Buffer.from('listingclarion-dev-key-do-not-use-in-prod-XXXX'.padEnd(KEY_BYTES, '0').slice(0, KEY_BYTES), 'utf8')
+    return Buffer.from('wingcaster-dev-key-do-not-use-in-prod-XXXX'.padEnd(KEY_BYTES, '0').slice(0, KEY_BYTES), 'utf8')
   }
   const buf = Buffer.from(raw, 'base64')
   if (buf.length !== KEY_BYTES) {
@@ -80,7 +80,7 @@ export function tryDecrypt(ciphertext) {
 /**
  * Which platforms use which integration model.
  *
- * enterprise = ListingClarion holds an enterprise API token (env-configured);
+ * enterprise = Wingcaster holds an enterprise API token (env-configured);
  *              the tenant provides their platform-specific target id
  *              (fb_page_id / ig_business_account_id / li_author_urn /
  *              wa_phone_number_id) so posts appear under the tenant's identity.

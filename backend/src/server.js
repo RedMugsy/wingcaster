@@ -4311,7 +4311,7 @@ app.get('/api/fi-accounts', async (req, res) => {
  * Social Channels — multi-tenant credentials
  *
  * Enterprise-model platforms (Facebook, Instagram, LinkedIn, WhatsApp):
- *   ListingClarion holds the enterprise access token in env vars. Each tenant
+ *   Wingcaster holds the enterprise access token in env vars. Each tenant
  *   provides their platform target IDs (fb_page_id, ig_business_account_id,
  *   li_author_urn, wa_phone_number_id) so posts appear under the tenant's
  *   identity. Optional per-tenant token overrides are supported (encrypted).
@@ -4627,8 +4627,8 @@ app.get('/api/social-channels/oauth/:platform/callback', async (req, res) => {
   // Return a small HTML page that closes the popup window and signals success.
   res.send(`<!doctype html><html><body style="font-family:system-ui;padding:2rem;text-align:center;">
 <h2>Connected to ${platform}</h2>
-<p>You can close this window and return to ListingClarion.</p>
-<script>try { window.opener && window.opener.postMessage({ type: 'listingclarion:oauth:done', platform: '${platform}' }, '*'); } catch(e){}
+<p>You can close this window and return to Wingcaster.</p>
+<script>try { window.opener && window.opener.postMessage({ type: 'wingcaster:oauth:done', platform: '${platform}' }, '*'); } catch(e){}
 setTimeout(() => { window.close() }, 800)</script>
 </body></html>`)
 })
@@ -4976,7 +4976,7 @@ app.post('/api/listings/:id/publish-social', authMiddleware, async (req, res) =>
       continue
     }
 
-    // Resolve per-tenant creds. Enterprise platforms use ListingClarion's env
+    // Resolve per-tenant creds. Enterprise platforms use Wingcaster's env
     // token + the tenant's target ID; OAuth platforms use the tenant's own
     // stored access token.
     const creds = resolveConnectionCredentials(conn)
