@@ -30,6 +30,7 @@ import { WhiteLabelBuilderPage } from '@/pages/WhiteLabelBuilderPage'
 import { WidgetBuilderPage } from '@/pages/WidgetBuilderPage'
 import { IntegrationSettingsPage } from '@/pages/IntegrationSettingsPage'
 import { SocialChannelsPage } from '@/pages/SocialChannelsPage'
+import { NeighborhoodValuatorPage } from '@/pages/NeighborhoodValuatorPage'
 import { CommandCenterPage } from '@/pages/CommandCenterPage'
 import { RoutingSettingsPage } from '@/pages/RoutingSettingsPage'
 import { MessageTemplatesPage } from '@/pages/MessageTemplatesPage'
@@ -61,6 +62,7 @@ function AppShell() {
           <Route path="/dashboard" element={<AgentDashboardPage />} />
           <Route path="/listings" element={<ListingsPage />} />
           <Route path="/listings/:id" element={<ListingProfilePage />} />
+          <Route path="/listings/:id/neighborhood-valuator" element={<NeighborhoodValuatorPage />} />
           <Route path="/agent/:id" element={<AgentProfilePage />} />
           <Route path="/register" element={<AgentRegisterPage />} />
           <Route path="/agent/pricing" element={<AgentPricingPage />} />

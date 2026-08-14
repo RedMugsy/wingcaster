@@ -5659,6 +5659,43 @@ app.get('/api/properties/:propertyId/distributions', authMiddleware, async (req,
 })
 
 /**
+ * Resolve which scored area a listing belongs to so the frontend can
+ * chain into the existing /api/areas/:slug endpoint to fetch the full
+ * Neighborhood Valuator payload. Returns null when nothing matches so
+ * the UI can show a "no data yet" empty state.
+ *
+ * Match order (best-effort):
+ *   1. Direct area_id link (set at listing creation for tenants who
+ *      wired it up)
+ *   2. Exact case-insensitive match against listing.neighborhood
+ *   3. Exact case-insensitive match against listing.city
+ *
+ * Owner-scoped — only the listing's own agent can resolve.
+ */
+app.get('/api/listings/:id/area', authMiddleware, async (req, res) => {
+  const property = await findOne('properties', (p) => p.id === req.params.id)
+  if (!property) return res.status(404).json({ error: 'Listing not found' })
+  if (property.agent_id !== req.user.id) {
+    return res.status(403).json({ error: 'Only the listing owner can look this up' })
+  }
+  const wantedName = (property.neighborhood || property.city || '').toLowerCase().trim()
+
+  const areas = await findAll('areas', (a) => a.status === 'scoring_enabled')
+  let match = null
+  if (property.area_id) {
+    match = areas.find((a) => a.id === property.area_id) || null
+  }
+  if (!match && wantedName) {
+    match = areas.find((a) => String(a.name || '').toLowerCase().trim() === wantedName) || null
+  }
+  if (!match && property.city) {
+    match = areas.find((a) => String(a.name || '').toLowerCase().trim() === property.city.toLowerCase().trim()) || null
+  }
+  if (!match) return res.json({ area: null })
+  res.json({ area: { id: match.id, slug: match.slug, name: match.name, name_ar: match.name_ar || null } })
+})
+
+/**
  * List public comment threads across every published post for this listing.
  *
  * Iterates the listing's distributions (per-platform published posts),

@@ -939,6 +939,9 @@ export const api = {
   getArea: (slug: string) => fetchJson(`/areas/${slug}`),
   getAreaScores: (slug: string) => fetchJson(`/areas/${slug}/scores`),
   getAreaGoogleScores: (slug: string) => fetchJson(`/areas/${slug}/google-scores`),
+  getListingArea: (listingId: string): Promise<{
+    area: { id: string; slug: string; name: string; name_ar: string | null } | null
+  }> => fetchJson(`/listings/${listingId}/area`),
   getAreaProperties: (slug: string, params?: Record<string, string>) => {
     const qs = params ? '?' + new URLSearchParams(params).toString() : ''
     return fetchJson(`/areas/${slug}/properties${qs}`)

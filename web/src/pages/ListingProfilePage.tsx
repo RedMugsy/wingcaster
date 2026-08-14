@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
-  ArrowLeft, Bath, Bed, Building2, Calendar, Camera, Copy, Edit3, ExternalLink,
+  ArrowLeft, Bath, Bed, Building2, Calendar, Camera, ChevronRight, Copy, Edit3, ExternalLink,
   Globe2, Loader2, Mail, MapPin, Maximize, Megaphone, MessageCircle, MoreHorizontal,
   Phone, Share2, Sparkles, Trash2, Video, X, PlusCircle,
 } from 'lucide-react'
@@ -310,10 +310,7 @@ export function ListingProfilePage() {
           </TabsTrigger>
           <TabsTrigger value="email">Email</TabsTrigger>
           <TabsTrigger value="viewings">Viewings</TabsTrigger>
-          <TabsTrigger value="area">
-            Area
-            <Badge variant="outline" className="ml-2 text-[10px]">Phase 6</Badge>
-          </TabsTrigger>
+          <TabsTrigger value="area">Property Score</TabsTrigger>
         </TabsList>
 
         <TabsContent value="overview" className="space-y-6">
@@ -434,12 +431,7 @@ export function ListingProfilePage() {
         </TabsContent>
 
         <TabsContent value="area">
-          <StubTab
-            icon={Building2}
-            title="Area research"
-            phase="Phase 6"
-            body="On-site research tool — GPS-anchored area scoring while walking the property. Reuses the area-intelligence engine. Ships in Phase 6."
-          />
+          <PropertyScorePanel listingId={property.id} />
         </TabsContent>
       </Tabs>
 
@@ -1344,6 +1336,94 @@ const SENTIMENT_DOT: Record<string, string> = {
   positive: 'bg-emerald-500',
   neutral:  'bg-slate-400',
   negative: 'bg-rose-500',
+}
+
+function PropertyScorePanel({ listingId }: { listingId: string }) {
+  const [loading, setLoading] = useState(true)
+  const [area, setArea] = useState<{ id: string; slug: string; name: string } | null>(null)
+  const [livability, setLivability] = useState<number | null>(null)
+  const [scoreCount, setScoreCount] = useState(0)
+
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true)
+    ;(async () => {
+      try {
+        const r = await api.getListingArea(listingId) as { area: any }
+        if (cancelled) return
+        if (!r.area) { setArea(null); setLoading(false); return }
+        setArea(r.area)
+        const full = await api.getArea(r.area.slug) as { area: any; scores: Array<{ score: number | null }> }
+        if (cancelled) return
+        setScoreCount(full.scores.length)
+        const nums = full.scores.map((s) => s.score).filter((v): v is number => v != null && Number.isFinite(v))
+        setLivability(nums.length ? nums.reduce((a, b) => a + b, 0) / nums.length : null)
+      } catch {
+        if (!cancelled) setArea(null)
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [listingId])
+
+  if (loading) {
+    return (
+      <Card><CardContent className="flex items-center justify-center py-6">
+        <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+      </CardContent></Card>
+    )
+  }
+
+  if (!area) {
+    return (
+      <Card>
+        <CardHeader><CardTitle className="text-lg">Property Score</CardTitle></CardHeader>
+        <CardContent className="space-y-2 text-sm text-muted-foreground">
+          <p>No scored neighborhood matches this listing yet.</p>
+          <Link to={`/listings/${listingId}/neighborhood-valuator`}>
+            <Button variant="outline" size="sm" className="gap-1.5">
+              Open Neighborhood Valuator
+            </Button>
+          </Link>
+        </CardContent>
+      </Card>
+    )
+  }
+
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
+        <div>
+          <CardTitle className="text-lg">Property Score</CardTitle>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            Scored area: <span className="font-medium">{area.name}</span> · {scoreCount} dimension{scoreCount === 1 ? '' : 's'}
+          </p>
+        </div>
+        <Link to={`/listings/${listingId}/neighborhood-valuator`}>
+          <Button size="sm" className="gap-1.5">
+            Open Neighborhood Valuator
+            <ChevronRight className="h-4 w-4" />
+          </Button>
+        </Link>
+      </CardHeader>
+      <CardContent>
+        <div className="flex items-center gap-4 rounded-lg border bg-slate-50 p-4">
+          <div className="text-center">
+            <div className="text-4xl font-semibold text-slate-900">
+              {livability == null ? '—' : livability.toFixed(1)}
+            </div>
+            <div className="text-[10px] uppercase tracking-wide text-muted-foreground">Livability / 10</div>
+          </div>
+          <div className="flex-1 text-sm text-muted-foreground">
+            Overall neighborhood score based on {scoreCount} scored dimension{scoreCount === 1 ? '' : 's'}
+            (schools, transport, safety, amenities). Open the full report to see per-dimension scores,
+            proximity to key places, and Google Places signals.
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  )
 }
 
 function CommentsSection({ listingId }: { listingId: string }) {
