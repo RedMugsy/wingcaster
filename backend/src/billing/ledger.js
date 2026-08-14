@@ -1,9 +1,7 @@
 /**
  * Append-only event-sourced ledger. Spec §5 requires ACID; we get
- * transactional correctness on the current Postgres persistence layer
- * because every ledger write is a single INSERT with no read-then-write
- * cycle. Balance queries are SUM aggregates over the log, not counter
- * decrements — no race conditions on inserts, no lost updates.
+ * transactional correctness on the current Postgres persistence layer.
+ * Balance queries are SUM aggregates over the log, not counter decrements.
  *
  * Do NOT expose an update or delete surface on LedgerEntry. Corrections
  * are new entries of type='adjustment' with a signed amount.
@@ -13,7 +11,7 @@
  */
 
 import { v4 as uuidv4 } from 'uuid'
-import { findAll, insert } from '../db.js'
+import { findAll, insert, transaction } from '../db.js'
 
 export const LEDGER_ENTRY_TYPES = ['allowance_grant', 'consumption', 'overage', 'topup', 'adjustment']
 
@@ -104,23 +102,39 @@ export async function grantAllowance({ tenantId, subscriptionId, billingPeriod, 
 export async function recordConsumption({ tenantId, subscriptionId, billingPeriod, quotaKey, amount, sourceEventId, metadata }) {
   const q = Math.max(0, Number(amount) || 0)
   if (q === 0) return null
-  const preBalance = await quotaBalance({ tenantId, quotaKey, billingPeriod })
-  const withinAllowance = Math.min(q, Math.max(0, preBalance))
-  const overage = q - withinAllowance
-  const writes = []
-  if (withinAllowance > 0) {
-    writes.push(await writeLedgerEntry({
-      tenantId, subscriptionId, billingPeriod, type: 'consumption', quotaKey,
-      amount: -withinAllowance, sourceEventId, metadata,
-    }))
-  }
-  if (overage > 0) {
-    writes.push(await writeLedgerEntry({
-      tenantId, subscriptionId, billingPeriod, type: 'overage', quotaKey,
-      amount: -overage, sourceEventId, metadata: { ...metadata, overage_units: overage },
-    }))
-  }
-  return { withinAllowance, overage, entries: writes }
+  if (!tenantId) throw new Error('tenantId required')
+  if (!quotaKey) throw new Error('quotaKey required')
+  const period = billingPeriod || currentBillingPeriod()
+  return transaction(async (client) => {
+    const { rows } = await client.query(
+      `SELECT within_allowance, overage, entry_ids
+         FROM commercial.record_consumption($1, $2, $3, $4, $5, $6, $7::jsonb)`,
+      [tenantId, subscriptionId || null, period, quotaKey, q, sourceEventId || null, JSON.stringify(metadata || {})],
+    )
+    const result = rows[0]
+    const entryIds = result.entry_ids || []
+    let entries = []
+    if (entryIds.length) {
+      const inserted = await client.query(
+        `SELECT id, tenant_id, subscription_id, billing_period, type, quota_key,
+                amount, source_event_id, metadata, created_at
+           FROM commercial.ledger_entries
+          WHERE id = ANY($1::text[])
+          ORDER BY array_position($1::text[], id)`,
+        [entryIds],
+      )
+      entries = inserted.rows.map((entry) => ({
+        ...entry,
+        amount: Number(entry.amount),
+        created_at: new Date(entry.created_at).toISOString(),
+      }))
+    }
+    return {
+      withinAllowance: Number(result.within_allowance),
+      overage: Number(result.overage),
+      entries,
+    }
+  })
 }
 
 /**
