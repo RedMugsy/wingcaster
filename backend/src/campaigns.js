@@ -330,8 +330,8 @@ async function advanceEnrollment(enrollment, campaign) {
  * Advance active enrollments that are due. This is called by the scheduler.
  * Returns a summary of processed enrollments and any errors.
  */
-export async function runCampaignScheduler({ now = nowIso(), maxEnrollments = 50 } = {}) {
-  const due = (await getEnrollments({ status: 'active', dueBefore: now })).slice(0, maxEnrollments)
+export async function runCampaignScheduler({ now = nowIso(), maxEnrollments = 50, assignedAgentId } = {}) {
+  const due = (await getEnrollments({ status: 'active', dueBefore: now, assignedAgentId })).slice(0, maxEnrollments)
   const summary = { processed: 0, sent: 0, errors: 0, skipped: 0, details: [] }
 
   for (const enrollment of due) {
@@ -476,12 +476,13 @@ export async function runCampaignScheduler({ now = nowIso(), maxEnrollments = 50
 /**
  * Enroll contacts matching a campaign's trigger/tags automatically.
  */
-export async function autoEnrollContactsForCampaign(campaignId, { maxContacts = 100 } = {}) {
+export async function autoEnrollContactsForCampaign(campaignId, { maxContacts = 100, requesterAgentId } = {}) {
+  if (!requesterAgentId) throw new Error('requesterAgentId is required')
   const campaign = await findOne('campaigns', (c) => c.id === campaignId && c.status === 'active')
   if (!campaign) throw new Error('Active campaign not found')
 
   const tags = new Set(campaign.tags_filter || [])
-  let contacts = await findAll('contacts')
+  let contacts = await findAll('contacts', (contact) => contact.assigned_agent_id === requesterAgentId)
   if (tags.size > 0) {
     contacts = contacts.filter((c) => Array.isArray(c.tags) && c.tags.some((t) => tags.has(t)))
   }

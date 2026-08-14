@@ -40,6 +40,18 @@ import { escapeXml } from './lib/xml.js'
 import { sendOtp } from './lib/otp.js'
 import { resolveServerPort } from './lib/port.js'
 import {
+  NotFoundError,
+  assertAssignableConversationAgent,
+  assertOwnsCampaign,
+  assertOwnsContact,
+  assertOwnsConversation,
+  assertOwnsDistribution,
+  assertOwnsOpportunity,
+  assertOwnsProperty,
+  assertOwnsTask,
+  assertOwnsViewing,
+} from './lib/authz.js'
+import {
   verifyEmailSignature,
   verifyMetaSignature,
   verifySmsSignature,
@@ -234,7 +246,6 @@ import { getCrmAnalytics, getCommunicationsAnalytics } from './analytics/crm.js'
 import {
   createCampaign,
   getCampaigns,
-  getCampaignById,
   updateCampaign,
   deleteCampaign,
   enrollContact,
@@ -1576,9 +1587,7 @@ app.post('/api/properties', authMiddleware, validate(propertyCreateSchema), asyn
 })
 
 app.put('/api/properties/:id', authMiddleware, validate(propertyUpdateSchema), async (req, res) => {
-  const prop = await findOne('properties', p => p.id === req.params.id)
-  if (!prop) return res.status(404).json({ error: 'Not found' })
-  if (prop.agent_id !== req.user.id) return res.status(403).json({ error: 'Forbidden' })
+  const prop = await assertOwnsProperty(req.user.id, req.params.id)
   let updates = { ...req.validated }
   if (updates.agency_tied !== undefined) {
     const affiliation = await resolveListingAffiliation({ agentId: req.user.id, agencyTiedRequested: updates.agency_tied })
@@ -1658,9 +1667,7 @@ app.post('/api/properties/:id/offers', authMiddleware, async (req, res) => {
 })
 
 app.delete('/api/properties/:id', authMiddleware, async (req, res) => {
-  const prop = await findOne('properties', p => p.id === req.params.id)
-  if (!prop) return res.status(404).json({ error: 'Not found' })
-  if (prop.agent_id !== req.user.id) return res.status(403).json({ error: 'Forbidden' })
+  const prop = await assertOwnsProperty(req.user.id, req.params.id)
   await remove('properties', p => p.id === req.params.id)
   await invalidatePricingForPropertyChange({ ...prop, status: 'deleted' })
   res.json({ success: true })
@@ -2094,9 +2101,7 @@ app.get('/api/viewings', authMiddleware, async (req, res) => {
 })
 
 app.get('/api/viewings/:id', authMiddleware, async (req, res) => {
-  const agentProps = (await findAll('properties', p => p.agent_id === req.user.id)).map(p => p.id)
-  const viewing = await findOne('viewings', (v) => v.id === req.params.id && (v.agent_id === req.user.id || agentProps.includes(v.property_id)))
-  if (!viewing) return res.status(404).json({ error: 'Viewing not found' })
+  const viewing = await assertOwnsViewing(req.user.id, req.params.id)
   res.json(viewing)
 })
 
@@ -2109,6 +2114,7 @@ app.post('/api/viewings', authMiddleware, validate(viewingCreateSchema), async (
   if (!agentProps.includes(inquiry.property_id) && inquiry.agent_id !== req.user.id) {
     return res.status(403).json({ error: 'Forbidden' })
   }
+  if (body.property_id) await assertOwnsProperty(req.user.id, body.property_id)
 
   const viewing = {
     id: uuidv4(),
@@ -2193,12 +2199,7 @@ async function dispatchClientViewingNotification({ viewing, clientNotified, chan
 }
 
 app.patch('/api/viewings/:id', authMiddleware, validate(viewingUpdateSchema), async (req, res) => {
-  const viewing = await findOne('viewings', (v) => v.id === req.params.id)
-  if (!viewing) return res.status(404).json({ error: 'Viewing not found' })
-  const agentProps = (await findAll('properties', p => p.agent_id === req.user.id)).map(p => p.id)
-  if (viewing.agent_id !== req.user.id && !agentProps.includes(viewing.property_id)) {
-    return res.status(403).json({ error: 'Forbidden' })
-  }
+  const viewing = await assertOwnsViewing(req.user.id, req.params.id)
 
   const patch = req.validated
   const now = new Date()
@@ -2516,14 +2517,12 @@ app.post('/api/campaigns', authMiddleware, async (req, res) => {
 })
 
 app.get('/api/campaigns/:id', authMiddleware, async (req, res) => {
-  const campaign = await getCampaignById(req.params.id)
-  if (!campaign || campaign.created_by !== req.user.id) return res.status(404).json({ error: 'Campaign not found' })
+  const campaign = await assertOwnsCampaign(req.user.id, req.params.id)
   res.json(campaign)
 })
 
 app.patch('/api/campaigns/:id', authMiddleware, async (req, res) => {
-  const campaign = await getCampaignById(req.params.id)
-  if (!campaign || campaign.created_by !== req.user.id) return res.status(404).json({ error: 'Campaign not found' })
+  await assertOwnsCampaign(req.user.id, req.params.id)
   try {
     const updated = await updateCampaign(req.params.id, req.body)
     await logActivity({ type: 'campaign_updated', agent_id: req.user.id, meta: { campaign_id: req.params.id } })
@@ -2534,8 +2533,7 @@ app.patch('/api/campaigns/:id', authMiddleware, async (req, res) => {
 })
 
 app.delete('/api/campaigns/:id', authMiddleware, async (req, res) => {
-  const campaign = await getCampaignById(req.params.id)
-  if (!campaign || campaign.created_by !== req.user.id) return res.status(404).json({ error: 'Campaign not found' })
+  await assertOwnsCampaign(req.user.id, req.params.id)
   try {
     await deleteCampaign(req.params.id)
     await logActivity({ type: 'campaign_deleted', agent_id: req.user.id, meta: { campaign_id: req.params.id } })
@@ -2546,8 +2544,8 @@ app.delete('/api/campaigns/:id', authMiddleware, async (req, res) => {
 })
 
 app.post('/api/campaigns/:id/enroll', authMiddleware, async (req, res) => {
-  const campaign = await getCampaignById(req.params.id)
-  if (!campaign || campaign.created_by !== req.user.id) return res.status(404).json({ error: 'Campaign not found' })
+  await assertOwnsCampaign(req.user.id, req.params.id)
+  await assertOwnsContact(req.user.id, req.body.contact_id)
   try {
     const enrollment = await enrollContact({
       campaignId: req.params.id,
@@ -2562,10 +2560,12 @@ app.post('/api/campaigns/:id/enroll', authMiddleware, async (req, res) => {
 })
 
 app.post('/api/campaigns/:id/auto-enroll', authMiddleware, async (req, res) => {
-  const campaign = await getCampaignById(req.params.id)
-  if (!campaign || campaign.created_by !== req.user.id) return res.status(404).json({ error: 'Campaign not found' })
+  await assertOwnsCampaign(req.user.id, req.params.id)
   try {
-    const enrolled = await autoEnrollContactsForCampaign(req.params.id, { maxContacts: req.body.max_contacts || 100 })
+    const enrolled = await autoEnrollContactsForCampaign(req.params.id, {
+      maxContacts: req.body.max_contacts || 100,
+      requesterAgentId: req.user.id,
+    })
     await logActivity({ type: 'campaign_auto_enroll', agent_id: req.user.id, meta: { campaign_id: req.params.id, enrolled_count: enrolled.length } })
     res.json({ enrolled_count: enrolled.length, enrollments: enrolled })
   } catch (e) {
@@ -2574,8 +2574,7 @@ app.post('/api/campaigns/:id/auto-enroll', authMiddleware, async (req, res) => {
 })
 
 app.get('/api/campaigns/:id/enrollments', authMiddleware, async (req, res) => {
-  const campaign = await getCampaignById(req.params.id)
-  if (!campaign || campaign.created_by !== req.user.id) return res.status(404).json({ error: 'Campaign not found' })
+  await assertOwnsCampaign(req.user.id, req.params.id)
   res.json(await getEnrollments({ campaignId: req.params.id }))
 })
 
@@ -2603,7 +2602,10 @@ app.patch('/api/enrollments/:id', authMiddleware, async (req, res) => {
 
 app.post('/api/campaigns/run-scheduler', authMiddleware, async (req, res) => {
   try {
-    const summary = await runCampaignScheduler({ maxEnrollments: req.body.limit || CAMPAIGN_SCHEDULER_BATCH_SIZE })
+    const summary = await runCampaignScheduler({
+      maxEnrollments: req.body.limit || CAMPAIGN_SCHEDULER_BATCH_SIZE,
+      assignedAgentId: req.user.id,
+    })
     await logActivity({ type: 'campaign_scheduler_manual_run', agent_id: req.user.id, meta: { processed: summary.processed } })
     res.json(summary)
   } catch (e) {
@@ -2626,11 +2628,7 @@ app.get('/api/analytics/communications', authMiddleware, async (req, res) => {
 })
 
 app.get('/api/properties/:id/analytics', authMiddleware, async (req, res) => {
-  const prop = await findOne('properties', p => p.id === req.params.id)
-  if (!prop) return res.status(404).json({ error: 'Not found' })
-  if (prop.agent_id !== req.user.id && !await isPlatformAdmin(req.user.id)) {
-    return res.status(403).json({ error: 'Forbidden' })
-  }
+  const prop = await assertOwnsProperty(req.user.id, req.params.id)
   await ensureListingEventSamples(prop)
   const events = await findAll('listing_events', e => e.property_id === prop.id)
   const agg = await aggregateListingEvents(events)
@@ -2649,9 +2647,8 @@ app.get('/api/properties/:id/analytics', authMiddleware, async (req, res) => {
   })
 })
 
-app.post('/api/properties/:id/events', async (req, res) => {
-  const prop = await findOne('properties', p => p.id === req.params.id)
-  if (!prop) return res.status(404).json({ error: 'Not found' })
+app.post('/api/properties/:id/events', authMiddleware, async (req, res) => {
+  const prop = await assertOwnsProperty(req.user.id, req.params.id)
   const ua = req.headers['user-agent'] || ''
   const device = await parseDeviceFromUa(ua)
   const geo = await inferGeoFromRequest(req, prop.id)
@@ -2676,20 +2673,14 @@ app.post('/api/properties/:id/events', async (req, res) => {
 })
 
 app.get('/api/properties/:id/notes', authMiddleware, async (req, res) => {
-  const prop = await findOne('properties', p => p.id === req.params.id)
-  if (!prop) return res.status(404).json({ error: 'Not found' })
-  if (prop.agent_id !== req.user.id && !await isPlatformAdmin(req.user.id)) {
-    return res.status(403).json({ error: 'Forbidden' })
-  }
+  const prop = await assertOwnsProperty(req.user.id, req.params.id)
   const notes = (await findAll('listing_notes', n => n.property_id === prop.id))
     .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
   res.json(notes)
 })
 
 app.post('/api/properties/:id/notes', authMiddleware, async (req, res) => {
-  const prop = await findOne('properties', p => p.id === req.params.id)
-  if (!prop) return res.status(404).json({ error: 'Not found' })
-  if (prop.agent_id !== req.user.id) return res.status(403).json({ error: 'Forbidden' })
+  const prop = await assertOwnsProperty(req.user.id, req.params.id)
   const body = String(req.body.body || req.body.note || '').trim()
   if (!body) return res.status(400).json({ error: 'Note body is required' })
   const visibility = req.body.visibility === 'team' ? 'team' : 'private'
@@ -2707,19 +2698,13 @@ app.post('/api/properties/:id/notes', authMiddleware, async (req, res) => {
 })
 
 app.delete('/api/properties/:id/notes/:noteId', authMiddleware, async (req, res) => {
-  const prop = await findOne('properties', p => p.id === req.params.id)
-  if (!prop) return res.status(404).json({ error: 'Not found' })
-  if (prop.agent_id !== req.user.id) return res.status(403).json({ error: 'Forbidden' })
+  const prop = await assertOwnsProperty(req.user.id, req.params.id)
   await remove('listing_notes', n => n.id === req.params.noteId && n.property_id === prop.id)
   res.json({ success: true })
 })
 
 app.get('/api/properties/:id/report', authMiddleware, async (req, res) => {
-  const prop = await findOne('properties', p => p.id === req.params.id)
-  if (!prop) return res.status(404).json({ error: 'Not found' })
-  if (prop.agent_id !== req.user.id && !await isPlatformAdmin(req.user.id)) {
-    return res.status(403).json({ error: 'Forbidden' })
-  }
+  const prop = await assertOwnsProperty(req.user.id, req.params.id)
   await ensureListingEventSamples(prop)
   const events = await findAll('listing_events', e => e.property_id === prop.id)
   const agg = await aggregateListingEvents(events)
@@ -3454,8 +3439,7 @@ app.get('/api/contacts', authMiddleware, async (req, res) => {
 })
 
 app.get('/api/contacts/:id', authMiddleware, async (req, res) => {
-  const contact = await findOne('contacts', (c) => c.id === req.params.id && c.assigned_agent_id === req.user.id)
-  if (!contact) return res.status(404).json({ error: 'Contact not found' })
+  const contact = await assertOwnsContact(req.user.id, req.params.id)
   const inquiries = await findAll('inquiries', (i) => i.contact_id === contact.id)
   const viewings = await findAll('viewings', (v) => v.contact_id === contact.id)
   const conversations = await findAll('conversations', (c) => c.contact_id === contact.id)
@@ -3463,13 +3447,16 @@ app.get('/api/contacts/:id', authMiddleware, async (req, res) => {
 })
 
 app.patch('/api/contacts/:id', authMiddleware, async (req, res) => {
-  const contact = await findOne('contacts', (c) => c.id === req.params.id && c.assigned_agent_id === req.user.id)
-  if (!contact) return res.status(404).json({ error: 'Contact not found' })
+  const contact = await assertOwnsContact(req.user.id, req.params.id)
   const allowed = ['name', 'email', 'phone', 'tags', 'status', 'assigned_agent_id']
   const patch = {}
   for (const key of allowed) {
     if (req.body[key] !== undefined) patch[key] = req.body[key]
   }
+  if (patch.assigned_agent_id && !await assertAssignableConversationAgent(req.user.id, {
+    assigned_agent_id: contact.assigned_agent_id,
+    agency_id: contact.agency_id,
+  }, patch.assigned_agent_id)) return res.status(403).json({ error: 'Forbidden' })
   if (patch.email) patch.email = normalizeEmail(patch.email)
   if (patch.phone) patch.phone = normalizePhone(patch.phone)
   await update('contacts', (c) => c.id === contact.id, (c) => ({ ...c, ...patch, updated_at: new Date().toISOString() }))
@@ -3477,9 +3464,8 @@ app.patch('/api/contacts/:id', authMiddleware, async (req, res) => {
 })
 
 app.post('/api/contacts/:id/merge', authMiddleware, async (req, res) => {
-  const source = await findOne('contacts', (c) => c.id === req.params.id && c.assigned_agent_id === req.user.id)
-  const target = await findOne('contacts', (c) => c.id === req.body.target_contact_id && c.assigned_agent_id === req.user.id)
-  if (!source || !target) return res.status(404).json({ error: 'Source or target contact not found' })
+  const source = await assertOwnsContact(req.user.id, req.params.id)
+  const target = await assertOwnsContact(req.user.id, req.body.target_contact_id)
   try {
     const merged = await mergeContacts(source.id, target.id)
     await logActivity({
@@ -3522,16 +3508,14 @@ async function deleteContactData(contactId) {
 }
 
 app.delete('/api/contacts/:id', authMiddleware, async (req, res) => {
-  const contact = await findOne('contacts', (c) => c.id === req.params.id && c.assigned_agent_id === req.user.id)
-  if (!contact) return res.status(404).json({ error: 'Contact not found' })
+  const contact = await assertOwnsContact(req.user.id, req.params.id)
   const result = await deleteContactData(contact.id)
   await logActivity({ type: 'contact_deleted', agent_id: req.user.id, meta: { contact_id: contact.id } })
   res.json(result)
 })
 
 app.get('/api/contacts/:id/export', authMiddleware, async (req, res) => {
-  const contact = await findOne('contacts', (c) => c.id === req.params.id && c.assigned_agent_id === req.user.id)
-  if (!contact) return res.status(404).json({ error: 'Contact not found' })
+  const contact = await assertOwnsContact(req.user.id, req.params.id)
   const exportData = await exportContactData(contact.id)
   await logActivity({ type: 'contact_exported', agent_id: req.user.id, meta: { contact_id: contact.id } })
   res.set('Content-Disposition', `attachment; filename="contact-${contact.id}-export.json"`)
@@ -3782,8 +3766,7 @@ app.get('/api/conversations', authMiddleware, async (req, res) => {
 })
 
 app.get('/api/conversations/:id', authMiddleware, async (req, res) => {
-  const conversation = await findOne('conversations', (c) => c.id === req.params.id && c.assigned_agent_id === req.user.id)
-  if (!conversation) return res.status(404).json({ error: 'Conversation not found' })
+  const conversation = await assertOwnsConversation(req.user.id, req.params.id)
   const messages = (await findAll('conversation_messages', (m) => m.conversation_id === conversation.id))
     .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
   const contact = await findOne('contacts', (c) => c.id === conversation.contact_id)
@@ -3791,8 +3774,7 @@ app.get('/api/conversations/:id', authMiddleware, async (req, res) => {
 })
 
 app.post('/api/conversations/:id/messages', authMiddleware, async (req, res) => {
-  const conversation = await findOne('conversations', (c) => c.id === req.params.id && c.assigned_agent_id === req.user.id)
-  if (!conversation) return res.status(404).json({ error: 'Conversation not found' })
+  const conversation = await assertOwnsConversation(req.user.id, req.params.id)
   const content = String(req.body.content || '').trim()
   if (!content) return res.status(400).json({ error: 'Message content is required' })
 
@@ -3817,9 +3799,11 @@ app.post('/api/conversations/:id/messages', authMiddleware, async (req, res) => 
 })
 
 app.post('/api/conversations/:id/assign', authMiddleware, async (req, res) => {
-  const conversation = await findOne('conversations', (c) => c.id === req.params.id)
-  if (!conversation) return res.status(404).json({ error: 'Conversation not found' })
+  const conversation = await assertOwnsConversation(req.user.id, req.params.id)
   const agentId = req.body.agent_id || req.user.id
+  if (!await assertAssignableConversationAgent(req.user.id, conversation, agentId)) {
+    return res.status(403).json({ error: 'Forbidden' })
+  }
   const updated = await assignConversation(conversation.id, agentId)
   await logActivity({
     type: 'conversation_assigned',
@@ -3830,8 +3814,7 @@ app.post('/api/conversations/:id/assign', authMiddleware, async (req, res) => {
 })
 
 app.patch('/api/conversations/:id', authMiddleware, async (req, res) => {
-  const conversation = await findOne('conversations', (c) => c.id === req.params.id && c.assigned_agent_id === req.user.id)
-  if (!conversation) return res.status(404).json({ error: 'Conversation not found' })
+  const conversation = await assertOwnsConversation(req.user.id, req.params.id)
   const allowed = ['status', 'priority', 'subject']
   const patch = {}
   for (const key of allowed) {
@@ -3842,8 +3825,7 @@ app.patch('/api/conversations/:id', authMiddleware, async (req, res) => {
 })
 
 app.post('/api/conversations/:id/close', authMiddleware, async (req, res) => {
-  const conversation = await findOne('conversations', (c) => c.id === req.params.id && c.assigned_agent_id === req.user.id)
-  if (!conversation) return res.status(404).json({ error: 'Conversation not found' })
+  const conversation = await assertOwnsConversation(req.user.id, req.params.id)
   const updated = await closeConversation(conversation.id, req.body.reason || '')
   await logActivity({
     type: 'conversation_closed',
@@ -3854,8 +3836,7 @@ app.post('/api/conversations/:id/close', authMiddleware, async (req, res) => {
 })
 
 app.post('/api/conversations/:id/read', authMiddleware, async (req, res) => {
-  const conversation = await findOne('conversations', (c) => c.id === req.params.id && c.assigned_agent_id === req.user.id)
-  if (!conversation) return res.status(404).json({ error: 'Conversation not found' })
+  const conversation = await assertOwnsConversation(req.user.id, req.params.id)
   const updated = await markConversationReadByAgent(conversation.id)
   res.json(updated)
 })
@@ -3877,12 +3858,19 @@ app.get('/api/tasks', authMiddleware, validateQuery(taskQuerySchema), async (req
 
 app.post('/api/tasks', authMiddleware, validate(taskCreateSchema), async (req, res) => {
   const body = req.validated
+  if (body.contact_id) await assertOwnsContact(req.user.id, body.contact_id)
+  if (body.opportunity_id) await assertOwnsOpportunity(req.user.id, body.opportunity_id)
+  if (body.conversation_id) await assertOwnsConversation(req.user.id, body.conversation_id)
+  const assignedTo = body.assigned_to || req.user.id
+  if (!await assertAssignableConversationAgent(req.user.id, { assigned_agent_id: req.user.id }, assignedTo)) {
+    return res.status(403).json({ error: 'Forbidden' })
+  }
   const task = await createTask({
     contactId: body.contact_id,
     inquiryId: body.inquiry_id,
     opportunityId: body.opportunity_id,
     conversationId: body.conversation_id,
-    assignedTo: body.assigned_to || req.user.id,
+    assignedTo,
     type: body.type,
     title: body.title,
     notes: body.notes,
@@ -3900,14 +3888,12 @@ app.post('/api/tasks', authMiddleware, validate(taskCreateSchema), async (req, r
 })
 
 app.get('/api/tasks/:id', authMiddleware, async (req, res) => {
-  const task = await findOne('tasks', (t) => t.id === req.params.id && t.assigned_to === req.user.id)
-  if (!task) return res.status(404).json({ error: 'Task not found' })
+  const task = await assertOwnsTask(req.user.id, req.params.id)
   res.json(task)
 })
 
 app.patch('/api/tasks/:id', authMiddleware, validate(taskUpdateSchema), async (req, res) => {
-  const task = await findOne('tasks', (t) => t.id === req.params.id && t.assigned_to === req.user.id)
-  if (!task) return res.status(404).json({ error: 'Task not found' })
+  const task = await assertOwnsTask(req.user.id, req.params.id)
   const updated = await updateTask(task.id, req.validated)
   if (updated?.inquiry_id) await syncInquiryNextFollowUp(updated.inquiry_id)
   await logActivity({
@@ -3919,8 +3905,7 @@ app.patch('/api/tasks/:id', authMiddleware, validate(taskUpdateSchema), async (r
 })
 
 app.post('/api/tasks/:id/complete', authMiddleware, async (req, res) => {
-  const task = await findOne('tasks', (t) => t.id === req.params.id && t.assigned_to === req.user.id)
-  if (!task) return res.status(404).json({ error: 'Task not found' })
+  const task = await assertOwnsTask(req.user.id, req.params.id)
   const updated = await completeTask(task.id, { completedBy: req.user.id })
   if (updated?.inquiry_id) await syncInquiryNextFollowUp(updated.inquiry_id)
   await logActivity({
@@ -3932,8 +3917,7 @@ app.post('/api/tasks/:id/complete', authMiddleware, async (req, res) => {
 })
 
 app.delete('/api/tasks/:id', authMiddleware, async (req, res) => {
-  const task = await findOne('tasks', (t) => t.id === req.params.id && t.assigned_to === req.user.id)
-  if (!task) return res.status(404).json({ error: 'Task not found' })
+  const task = await assertOwnsTask(req.user.id, req.params.id)
   await deleteTask(task.id)
   if (task.inquiry_id) await syncInquiryNextFollowUp(task.inquiry_id)
   res.json({ success: true })
@@ -3947,6 +3931,8 @@ app.get('/api/opportunities', authMiddleware, async (req, res) => {
 
 app.post('/api/opportunities', authMiddleware, validate(opportunityCreateSchema), async (req, res) => {
   const body = req.validated
+  if (body.contact_id) await assertOwnsContact(req.user.id, body.contact_id)
+  if (body.property_id) await assertOwnsProperty(req.user.id, body.property_id)
   const agent = await findOne('agents', (a) => a.id === req.user.id)
   const opp = await createOpportunity({
     contactId: body.contact_id,
@@ -3970,14 +3956,12 @@ app.post('/api/opportunities', authMiddleware, validate(opportunityCreateSchema)
 })
 
 app.get('/api/opportunities/:id', authMiddleware, async (req, res) => {
-  const opp = await findOne('opportunities', (o) => o.id === req.params.id && o.agent_id === req.user.id)
-  if (!opp) return res.status(404).json({ error: 'Opportunity not found' })
+  const opp = await assertOwnsOpportunity(req.user.id, req.params.id)
   res.json({ ...opp, stage_history: await getStageHistory(opp.id) })
 })
 
 app.patch('/api/opportunities/:id', authMiddleware, validate(opportunityUpdateSchema), async (req, res) => {
-  const opp = await findOne('opportunities', (o) => o.id === req.params.id && o.agent_id === req.user.id)
-  if (!opp) return res.status(404).json({ error: 'Opportunity not found' })
+  const opp = await assertOwnsOpportunity(req.user.id, req.params.id)
   const updated = await updateOpportunity(opp.id, req.validated, { changedBy: req.user.id })
   await logActivity({
     type: 'opportunity_updated',
@@ -4110,6 +4094,7 @@ app.get('/api/listings/:id/performance', authMiddleware, async (req, res) => {
 })
 
 app.get('/api/contacts/:id/conversations-360', authMiddleware, async (req, res) => {
+  await assertOwnsContact(req.user.id, req.params.id)
   const feed = await resolveContact360Feed(req.params.id, req.user.id)
   if (feed.error) {
     const code = feed.error === 'Contact not found' ? 404 : 403
@@ -4119,14 +4104,13 @@ app.get('/api/contacts/:id/conversations-360', authMiddleware, async (req, res) 
 })
 
 app.get('/api/contacts/:id/lead-score', authMiddleware, async (req, res) => {
-  const contact = await findOne('contacts', (c) => c.id === req.params.id)
-  if (!contact) return res.status(404).json({ error: 'Contact not found' })
-  if (contact.assigned_agent_id !== req.user.id) return res.status(403).json({ error: 'Not authorised' })
+  await assertOwnsContact(req.user.id, req.params.id)
   const score = await computeLeadScore(req.params.id)
   res.json(score)
 })
 
 app.get('/api/contacts/:id/lead-summary', authMiddleware, async (req, res) => {
+  await assertOwnsContact(req.user.id, req.params.id)
   const bundle = await getLeadSummary({ contactId: req.params.id, requesterAgentId: req.user.id })
   if (bundle.error) {
     const code = bundle.error === 'Contact not found' ? 404 : 403
@@ -4136,6 +4120,7 @@ app.get('/api/contacts/:id/lead-summary', authMiddleware, async (req, res) => {
 })
 
 app.post('/api/contacts/:id/regenerate-summary', authMiddleware, async (req, res) => {
+  await assertOwnsContact(req.user.id, req.params.id)
   emitUsageEventAsync({
     actionKey: 'ai.chat.turn',
     tenantId: req.user.id,
@@ -4201,22 +4186,19 @@ app.post('/api/closed-transactions/import', authMiddleware, async (req, res) => 
 
 // ==================== CONTACT TIMELINE & NOTES ====================
 app.get('/api/contacts/:id/timeline', authMiddleware, async (req, res) => {
-  const contact = await findOne('contacts', (c) => c.id === req.params.id && c.assigned_agent_id === req.user.id)
-  if (!contact) return res.status(404).json({ error: 'Contact not found' })
+  const contact = await assertOwnsContact(req.user.id, req.params.id)
   res.json(await buildContactTimeline(contact.id))
 })
 
 app.get('/api/contacts/:id/notes', authMiddleware, async (req, res) => {
-  const contact = await findOne('contacts', (c) => c.id === req.params.id && c.assigned_agent_id === req.user.id)
-  if (!contact) return res.status(404).json({ error: 'Contact not found' })
+  const contact = await assertOwnsContact(req.user.id, req.params.id)
   const notes = (await findAll('contact_notes', (n) => n.contact_id === contact.id))
     .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
   res.json(notes)
 })
 
 app.post('/api/contacts/:id/notes', authMiddleware, validate(contactNoteSchema), async (req, res) => {
-  const contact = await findOne('contacts', (c) => c.id === req.params.id && c.assigned_agent_id === req.user.id)
-  if (!contact) return res.status(404).json({ error: 'Contact not found' })
+  const contact = await assertOwnsContact(req.user.id, req.params.id)
   const note = {
     id: uuidv4(),
     contact_id: contact.id,
@@ -5047,9 +5029,7 @@ app.delete('/api/my-connections/:id', authMiddleware, async (req, res) => {
 })
 
 app.post('/api/properties/:propertyId/distribute-own', authMiddleware, async (req, res) => {
-  const prop = await findOne('properties', p => p.id === req.params.propertyId)
-  if (!prop) return res.status(404).json({ error: 'Property not found' })
-  if (prop.agent_id !== req.user.id) return res.status(403).json({ error: 'Forbidden' })
+  const prop = await assertOwnsProperty(req.user.id, req.params.propertyId)
   const { platforms, formats, mode, recipient, caption, intent } = req.body
   if (!platforms?.length) return res.status(400).json({ error: 'Select at least one platform' })
 
@@ -6062,7 +6042,8 @@ app.post('/api/webhooks/x', async (req, res) => {
 })
 
 app.get('/api/properties/:propertyId/distributions', authMiddleware, async (req, res) => {
-  res.json(await findAll('distributions', d => d.property_id === req.params.propertyId && d.agent_id === req.user.id))
+  await assertOwnsProperty(req.user.id, req.params.propertyId)
+  res.json(await findAll('distributions', d => d.property_id === req.params.propertyId))
 })
 
 /**
@@ -6509,11 +6490,7 @@ app.post('/api/listings/:id/comments/backfill-categories', authMiddleware, async
  * platform-specific insight fetcher, persists the metrics on the row.
  */
 app.post('/api/distributions/:id/refresh-insights', authMiddleware, async (req, res) => {
-  const dist = await findOne('distributions', (d) => d.id === req.params.id)
-  if (!dist) return res.status(404).json({ error: 'Distribution not found' })
-  if (dist.agent_id !== req.user.id) {
-    return res.status(403).json({ error: 'Only the distribution owner can refresh its insights' })
-  }
+  const dist = await assertOwnsDistribution(req.user.id, req.params.id)
   if (dist.status !== 'published' || !dist.external_id) {
     return res.status(400).json({ error: 'Distribution has no published external id yet' })
   }
@@ -6605,11 +6582,7 @@ app.post('/api/distributions/:id/refresh-insights', authMiddleware, async (req, 
 })
 
 app.post('/api/distributions/:id/retry', authMiddleware, async (req, res) => {
-  const row = await findOne('distributions', d => d.id === req.params.id)
-  if (!row) return res.status(404).json({ error: 'Distribution not found' })
-  if (row.agent_id !== req.user.id && !await isPlatformAdmin(req.user.id)) {
-    return res.status(403).json({ error: 'Forbidden' })
-  }
+  const row = await assertOwnsDistribution(req.user.id, req.params.id)
 
   const retriableStatuses = ['pending_retry', 'failed', 'draft']
   if (!retriableStatuses.includes(row.status)) {
@@ -6657,9 +6630,7 @@ app.post('/api/distributions/retry-worker/run', authMiddleware, async (req, res)
 })
 
 app.post('/api/properties/:propertyId/submit-to-fi', authMiddleware, async (req, res) => {
-  const prop = await findOne('properties', p => p.id === req.params.propertyId)
-  if (!prop) return res.status(404).json({ error: 'Property not found' })
-  if (prop.agent_id !== req.user.id) return res.status(403).json({ error: 'Forbidden' })
+  const prop = await assertOwnsProperty(req.user.id, req.params.propertyId)
   const { platforms, message, formats } = req.body
   if (!platforms?.length) return res.status(400).json({ error: 'Select at least one REB channel' })
 
@@ -7681,6 +7652,10 @@ app.get('/api/ready', async (req, res) => {
 
 // ==================== ERROR HANDLING ====================
 app.use((err, req, res, _next) => {
+  if (err instanceof NotFoundError) {
+    logger.warn({ path: req.path, method: req.method }, 'Tenant resource not found or inaccessible')
+    return res.status(404).json({ error: 'Not found' })
+  }
   logger.error({ err: err.message, stack: err.stack, path: req.path, method: req.method }, 'Unhandled error')
   const status = err.status || err.statusCode || 500
   const message = isProduction ? 'Internal server error' : (err.message || 'Internal server error')
