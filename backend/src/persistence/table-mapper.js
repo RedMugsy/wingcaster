@@ -72,12 +72,18 @@ const TABLE_MAP = {
     ],
   },
 
-  // Listings
-  territories: {
-    schema: 'public',
+  // Listings — public.territories carries listing-disclosure metadata
+  // only. Commercial/billing columns live in commercial.territories,
+  // keyed by the same id. See migration 030.
+  territories: { schema: 'public', table: 'territories', columns: ['code', 'name', 'currency'] },
+  territory_disclosure_fields: { schema: 'public', table: 'territory_disclosure_fields', columns: ['territory_id', 'key', 'label', 'field_type', 'required', 'unit', 'sort_order'] },
+
+  // Commercial pricing hierarchy (Phase 7b). All under commercial.*.
+  commercial_territories: {
+    schema: 'commercial',
     table: 'territories',
     columns: [
-      'code', 'name', 'currency',
+      'code',
       'pricing_multiplier', 'launch_status', 'launch_wave',
       'data_residency_required', 'billing_mode', 'vat_percent',
       'regulator_id_type', 'default_zone_id',
@@ -85,9 +91,8 @@ const TABLE_MAP = {
       'sort_order', 'active',
     ],
   },
-  territory_disclosure_fields: { schema: 'public', table: 'territory_disclosure_fields', columns: ['territory_id', 'key', 'label', 'field_type', 'required', 'unit', 'sort_order'] },
   pricing_zones: {
-    schema: 'public',
+    schema: 'commercial',
     table: 'pricing_zones',
     columns: [
       'territory_id', 'code', 'name', 'name_ar',
@@ -95,7 +100,7 @@ const TABLE_MAP = {
     ],
   },
   pricing_cities: {
-    schema: 'public',
+    schema: 'commercial',
     table: 'pricing_cities',
     columns: [
       'territory_id', 'zone_id', 'name', 'name_ar', 'name_norm',
@@ -103,7 +108,7 @@ const TABLE_MAP = {
     ],
   },
   core_rate_cards: {
-    schema: 'public',
+    schema: 'commercial',
     table: 'core_rate_cards',
     columns: [
       'version', 'name', 'description', 'currency', 'cast_value_minor',
@@ -111,7 +116,7 @@ const TABLE_MAP = {
     ],
   },
   usage_events: {
-    schema: 'public',
+    schema: 'commercial',
     table: 'usage_events',
     columns: [
       'tenant_id', 'subscription_id', 'action_key', 'quantity', 'channel',
@@ -122,7 +127,7 @@ const TABLE_MAP = {
     ],
   },
   ledger_entries: {
-    schema: 'public',
+    schema: 'commercial',
     table: 'ledger_entries',
     columns: [
       'tenant_id', 'subscription_id', 'billing_period', 'type',
@@ -130,7 +135,7 @@ const TABLE_MAP = {
     ],
   },
   billing_products: {
-    schema: 'public',
+    schema: 'commercial',
     table: 'billing_products',
     columns: [
       'code', 'version', 'name', 'description', 'billing_cadence',
@@ -139,7 +144,7 @@ const TABLE_MAP = {
     ],
   },
   billing_subscriptions: {
-    schema: 'public',
+    schema: 'commercial',
     table: 'billing_subscriptions',
     columns: [
       'tenant_id', 'product_id', 'product_version', 'status',
@@ -150,7 +155,7 @@ const TABLE_MAP = {
   },
   // Aliases used by billing/entitlements.js and billing/ledger.js
   subscriptions: {
-    schema: 'public',
+    schema: 'commercial',
     table: 'billing_subscriptions',
     columns: [
       'tenant_id', 'product_id', 'product_version', 'status',
@@ -160,7 +165,7 @@ const TABLE_MAP = {
     ],
   },
   products: {
-    schema: 'public',
+    schema: 'commercial',
     table: 'billing_products',
     columns: [
       'code', 'version', 'name', 'description', 'billing_cadence',

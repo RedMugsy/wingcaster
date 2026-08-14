@@ -1,20 +1,21 @@
 /**
  * Territory CRUD — the country-level pricing + billing boundary.
  *
- * A Territory maps to an ISO country code. It carries:
- *   - pricing_multiplier: % markup applied to the Core Rate Card's
- *                         cast_value at this country level (0.4 = 40%
- *                         of base, 2.0 = 200%).
- *   - launch_status:      launched | planned | blocked | sunset
- *   - launch_wave:        integer bucket (1 = Lebanon-first, 2 = Wave 2,
- *                         3 = Wave 3, admin can add more)
- *   - data_residency_required, billing_mode, vat_percent,
- *     regulator_id_type, payment_gateway_primary/secondary — spec §7,8.
- *   - default_zone_id:    zone used when a tenant signs up without a
- *                         city or when their city is unmapped.
+ * Post-migration 030: the row is SPLIT across two tables that share
+ * the same id (a 1:1 by design):
  *
- * Because the existing public.territories table also drives listing
- * disclosure fields, we never delete a row — deactivate it instead.
+ *   public.territories        — code, name, currency (listing/disclosure)
+ *   commercial.territories    — pricing_multiplier, launch_status,
+ *                               launch_wave, data_residency_required,
+ *                               billing_mode, vat_percent,
+ *                               regulator_id_type, default_zone_id,
+ *                               payment_gateway_*, sort_order, active
+ *                               (billing/pricing)
+ *
+ * The pricing module is the OWNER of commercial.territories and only
+ * READS from public.territories. If a caller creates a commercial
+ * territory for a code that has no public row yet, we create the
+ * public row first so the FK holds.
  */
 
 import { v4 as uuidv4 } from 'uuid'
@@ -22,10 +23,21 @@ import { findAll, findOne, insert, update } from '../../db.js'
 
 const CODE_RE = /^[A-Z]{2}$/
 
+/**
+ * List territories with both listing (name, currency) and commercial
+ * (multiplier, status, ...) fields merged. Sorted by launch_wave then
+ * sort_order then name.
+ */
 export async function listTerritories({ includeInactive = false } = {}) {
-  const rows = await findAll('territories', () => true)
-  const filtered = includeInactive ? rows : rows.filter((r) => r.active !== false)
-  return filtered.sort((a, b) => {
+  const [pubRows, commRows] = await Promise.all([
+    findAll('territories', () => true),
+    findAll('commercial_territories', () => true),
+  ])
+  const pubById = new Map(pubRows.map((r) => [r.id, r]))
+  const merged = commRows
+    .filter((c) => (includeInactive ? true : c.active !== false))
+    .map((c) => mergeTerritory(pubById.get(c.id), c))
+  return merged.sort((a, b) => {
     const w = (a.launch_wave || 99) - (b.launch_wave || 99)
     if (w !== 0) return w
     const s = (a.sort_order || 0) - (b.sort_order || 0)
@@ -36,13 +48,21 @@ export async function listTerritories({ includeInactive = false } = {}) {
 
 export async function getTerritory(id) {
   if (!id) return null
-  return await findOne('territories', (r) => r.id === id)
+  const [pub, comm] = await Promise.all([
+    findOne('territories', (r) => r.id === id),
+    findOne('commercial_territories', (r) => r.id === id),
+  ])
+  if (!comm) return null
+  return mergeTerritory(pub, comm)
 }
 
 export async function getTerritoryByCode(code) {
   if (!code) return null
   const upper = String(code).toUpperCase()
-  return await findOne('territories', (r) => String(r.code || '').toUpperCase() === upper)
+  const comm = await findOne('commercial_territories', (r) => String(r.code || '').toUpperCase() === upper)
+  if (!comm) return null
+  const pub = await findOne('territories', (r) => r.id === comm.id)
+  return mergeTerritory(pub, comm)
 }
 
 export async function createTerritory(input) {
@@ -51,12 +71,24 @@ export async function createTerritory(input) {
   if (!input.name) throw new Error('name required')
   const existing = await getTerritoryByCode(code)
   if (existing) throw new Error(`Territory ${code} already exists`)
+
+  // Ensure a public.territories row exists first (FK target).
+  let pub = await findOne('territories', (r) => String(r.code || '').toUpperCase() === code)
+  if (!pub) {
+    const id = uuidv4()
+    pub = {
+      id,
+      code,
+      name: String(input.name),
+      currency: (input.currency || 'USD').toUpperCase().slice(0, 3),
+    }
+    await insert('territories', pub)
+  }
+
   const now = new Date().toISOString()
-  const row = {
-    id: uuidv4(),
+  const commRow = {
+    id: pub.id,
     code,
-    name: String(input.name),
-    currency: (input.currency || 'USD').toUpperCase().slice(0, 3),
     pricing_multiplier: clampMultiplier(input.pricing_multiplier),
     launch_status: normalizeLaunchStatus(input.launch_status),
     launch_wave: input.launch_wave != null ? Math.max(1, Number(input.launch_wave)) : null,
@@ -64,7 +96,7 @@ export async function createTerritory(input) {
     billing_mode: normalizeBillingMode(input.billing_mode),
     vat_percent: clampVat(input.vat_percent),
     regulator_id_type: input.regulator_id_type || null,
-    default_zone_id: null, // set later when zones exist
+    default_zone_id: null,
     payment_gateway_primary: input.payment_gateway_primary || null,
     payment_gateway_secondary: input.payment_gateway_secondary || null,
     sort_order: Number(input.sort_order) || 0,
@@ -72,16 +104,19 @@ export async function createTerritory(input) {
     created_at: now,
     updated_at: now,
   }
-  await insert('territories', row)
-  return row
+  await insert('commercial_territories', commRow)
+
+  // Best-effort partition creation for commercial.usage_events. Silent
+  // no-op if the DB user lacks DDL rights or the table isn't partitioned.
+  await ensureUsageEventsPartition(pub.id, code).catch(() => {})
+
+  return mergeTerritory(pub, commRow)
 }
 
 export async function updateTerritory(id, patch) {
   const existing = await getTerritory(id)
   if (!existing) throw new Error('territory not found')
   const changes = { updated_at: new Date().toISOString() }
-  if (patch.name != null) changes.name = String(patch.name)
-  if (patch.currency != null) changes.currency = String(patch.currency).toUpperCase().slice(0, 3)
   if (patch.pricing_multiplier != null) changes.pricing_multiplier = clampMultiplier(patch.pricing_multiplier)
   if (patch.launch_status != null) changes.launch_status = normalizeLaunchStatus(patch.launch_status)
   if (patch.launch_wave !== undefined) {
@@ -96,7 +131,15 @@ export async function updateTerritory(id, patch) {
   if (patch.payment_gateway_secondary !== undefined) changes.payment_gateway_secondary = patch.payment_gateway_secondary || null
   if (patch.sort_order != null) changes.sort_order = Number(patch.sort_order) || 0
   if (patch.active !== undefined) changes.active = Boolean(patch.active)
-  await update('territories', { id }, changes)
+  await update('commercial_territories', { id }, changes)
+
+  // Name / currency updates go to the public row (listing concern).
+  const pubChanges = {}
+  if (patch.name != null) pubChanges.name = String(patch.name)
+  if (patch.currency != null) pubChanges.currency = String(patch.currency).toUpperCase().slice(0, 3)
+  if (Object.keys(pubChanges).length) {
+    await update('territories', { id }, pubChanges)
+  }
   return await getTerritory(id)
 }
 
@@ -106,6 +149,39 @@ export async function updateTerritory(id, patch) {
  */
 export async function deactivateTerritory(id) {
   return await updateTerritory(id, { active: false, launch_status: 'sunset' })
+}
+
+/**
+ * Ensure a per-territory partition of commercial.usage_events exists.
+ * Called from createTerritory + from seedPricingHierarchy. Requires the
+ * DB user to have CREATE rights on the commercial schema.
+ *
+ * Naming convention: commercial.usage_events_<lowercase-code>. Postgres
+ * table names are 63 chars max; ISO-2 codes stay well under.
+ */
+export async function ensureUsageEventsPartition(territoryId, code) {
+  if (!territoryId || !code) return
+  const partitionName = `usage_events_${String(code).toLowerCase()}`
+  const { query } = await import('../../db.js')
+  const exists = await query(
+    `SELECT 1 FROM information_schema.tables
+      WHERE table_schema = 'commercial' AND table_name = $1
+      LIMIT 1`,
+    [partitionName],
+  ).catch(() => ({ rows: [] }))
+  if (exists.rows && exists.rows.length) return
+  // Wrap in try — partitioning may not be applied yet (e.g. old DB) or
+  // the DB user may lack DDL rights. Either case is a no-op.
+  try {
+    await query(
+      `CREATE TABLE commercial."${partitionName}"
+         PARTITION OF commercial.usage_events
+         FOR VALUES IN ($1)`,
+      [territoryId],
+    )
+  } catch (_err) {
+    // Silent — resolver still writes to the default partition.
+  }
 }
 
 function normalizeLaunchStatus(v) {
@@ -128,4 +204,28 @@ function clampVat(v) {
   const n = Number(v)
   if (!Number.isFinite(n) || n < 0) return 0
   return Math.round(n * 100) / 100
+}
+
+function mergeTerritory(pub, comm) {
+  if (!comm) return null
+  return {
+    id: comm.id,
+    code: comm.code || pub?.code || null,
+    name: pub?.name || null,
+    currency: pub?.currency || null,
+    pricing_multiplier: comm.pricing_multiplier,
+    launch_status: comm.launch_status,
+    launch_wave: comm.launch_wave,
+    data_residency_required: comm.data_residency_required,
+    billing_mode: comm.billing_mode,
+    vat_percent: comm.vat_percent,
+    regulator_id_type: comm.regulator_id_type,
+    default_zone_id: comm.default_zone_id,
+    payment_gateway_primary: comm.payment_gateway_primary,
+    payment_gateway_secondary: comm.payment_gateway_secondary,
+    sort_order: comm.sort_order,
+    active: comm.active,
+    created_at: comm.created_at,
+    updated_at: comm.updated_at,
+  }
 }

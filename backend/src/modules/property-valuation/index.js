@@ -25,7 +25,7 @@ import { registerPublicRoutes } from './interface/public-routes.js'
 import { registerRoleRoutes } from './interface/role-routes.js'
 import { seedMarketPricingDefaults } from './application/seed.js'
 
-export const MODULE_NAME = 'market-pricing'
+export const MODULE_NAME = 'property-valuation'
 
 export function createModule({ platformAdapter, config: configOverride, dal: dalOverride } = {}) {
   const config = configOverride || getConfig()

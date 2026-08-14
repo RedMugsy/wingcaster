@@ -140,8 +140,8 @@ import {
   createModule as createAreaIntelligenceModule,
 } from './modules/area-intelligence/index.js'
 import {
-  createModule as createMarketPricingModule,
-} from './modules/market-pricing/index.js'
+  createModule as createPropertyValuationModule,
+} from './modules/property-valuation/index.js'
 import {
   createModule as createListingsAiModule,
 } from './modules/listings-ai/index.js'
@@ -476,13 +476,13 @@ if (areaIntelligenceModule.enabled) {
   await areaIntelligenceModule.registerWorkers()
 }
 
-const marketPricingModule = createMarketPricingModule({
+const propertyValuationModule = createPropertyValuationModule({
   platformAdapter: null, // uses DefaultPlatformAdapter
 })
-if (marketPricingModule.enabled) {
-  await marketPricingModule.seed()
-  await marketPricingModule.registerRoutes(app)
-  await marketPricingModule.registerWorkers()
+if (propertyValuationModule.enabled) {
+  await propertyValuationModule.seed()
+  await propertyValuationModule.registerRoutes(app)
+  await propertyValuationModule.registerWorkers()
 }
 
 const PRICING_RELEVANT_PROPERTY_FIELDS = new Set([
@@ -492,9 +492,9 @@ const PRICING_RELEVANT_PROPERTY_FIELDS = new Set([
 ])
 
 async function invalidatePricingForPropertyChange(property) {
-  if (!marketPricingModule.enabled || !property) return
+  if (!propertyValuationModule.enabled || !property) return
   try {
-    await marketPricingModule.services.recalculationJobService.invalidateForPropertyChange(property)
+    await propertyValuationModule.services.recalculationJobService.invalidateForPropertyChange(property)
   } catch (err) {
     logger.error({ err: err.message, propertyId: property.id }, 'Failed to invalidate pricing after property change')
   }
@@ -502,8 +502,8 @@ async function invalidatePricingForPropertyChange(property) {
 
 const whatsAppListingsModule = createWhatsAppListingsModule({
   platformAdapter: createWhatsAppPlatformAdapter({
-    pricingContextBuilder: marketPricingModule.enabled
-      ? (property) => marketPricingModule.services.whatsAppContext.buildContext(property)
+    pricingContextBuilder: propertyValuationModule.enabled
+      ? (property) => propertyValuationModule.services.whatsAppContext.buildContext(property)
       : null,
   }),
 })
@@ -1663,10 +1663,10 @@ app.get('/api/properties/:id/price-history', async (req, res) => {
 
 app.get('/api/properties/:id/comps', async (req, res, next) => {
   try {
-    if (marketPricingModule?.enabled) {
+    if (propertyValuationModule?.enabled) {
       const property = await findOne('properties', p => p.id === req.params.id)
       if (!property) return res.status(404).json({ error: 'Not found' })
-      const comps = await marketPricingModule.services.comparableService.findComparables(property, {})
+      const comps = await propertyValuationModule.services.comparableService.findComparables(property, {})
       return res.json(comps)
     }
     // Legacy fallback
@@ -1681,8 +1681,8 @@ app.get('/api/properties/:id/comps', async (req, res, next) => {
 
 app.get('/api/properties/:id/zestimate', async (req, res, next) => {
   try {
-    if (marketPricingModule?.enabled) {
-      const analysis = await marketPricingModule.services.analysisService.getAnalysis(req.params.id)
+    if (propertyValuationModule?.enabled) {
+      const analysis = await propertyValuationModule.services.analysisService.getAnalysis(req.params.id)
       return res.json({
         zestimate: analysis.median_price,
         zestimate_low: analysis.percentile_25,
@@ -7541,7 +7541,7 @@ app.get('/api/ready', async (req, res) => {
       auth: 'ok',
       whatsapp: isWhatsAppConfigured() ? 'configured' : 'not_configured',
       whatsapp_listings: whatsAppListingsModule.health ? await whatsAppListingsModule.health() : { enabled: false },
-      market_pricing: marketPricingModule.health ? marketPricingModule.health() : { enabled: false },
+      market_pricing: propertyValuationModule.health ? propertyValuationModule.health() : { enabled: false },
       retry_worker: RETRY_WORKER_ENABLED ? 'enabled' : 'disabled',
       consumer_automation_worker: CONSUMER_AUTOMATION_ENABLED ? 'enabled' : 'disabled',
       notification_retry_worker: NOTIFICATION_RETRY_WORKER_ENABLED ? 'enabled' : 'disabled',

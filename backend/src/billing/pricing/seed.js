@@ -16,7 +16,7 @@
  */
 
 import { pino } from 'pino'
-import { getTerritoryByCode, createTerritory, updateTerritory } from './territories.js'
+import { getTerritoryByCode, createTerritory, updateTerritory, ensureUsageEventsPartition } from './territories.js'
 import { listZones, createZone } from './zones.js'
 import { findCityByName, createCity } from './cities.js'
 import { ensureSeedRateCard } from './core-rate-cards.js'
@@ -135,6 +135,11 @@ export async function seedPricingHierarchy() {
 
   for (const t of TERRITORY_SEED) {
     let territory = await getTerritoryByCode(t.code)
+    // Ensure the per-territory partition of commercial.usage_events
+    // exists even for territories seeded on a prior boot (idempotent).
+    if (territory) {
+      await ensureUsageEventsPartition(territory.id, territory.code).catch(() => {})
+    }
     if (!territory) {
       territory = await createTerritory({
         code: t.code,

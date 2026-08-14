@@ -18,6 +18,7 @@ export {
 export {
   listTerritories, getTerritory, getTerritoryByCode,
   createTerritory, updateTerritory, deactivateTerritory,
+  ensureUsageEventsPartition,
 } from './territories.js'
 export {
   listZones, getZone, createZone, updateZone, deactivateZone,
