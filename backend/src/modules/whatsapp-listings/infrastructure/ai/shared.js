@@ -6,56 +6,187 @@
  * by every adapter in this directory.
  */
 
-import { readFile } from 'node:fs/promises'
-import { fileURLToPath } from 'node:url'
-import { extname } from 'node:path'
+import { promises as dns } from 'node:dns'
+import ipaddr from 'ipaddr.js'
+import sharp from 'sharp'
+import { Agent } from 'undici'
 
-const EXT_TO_MIME = {
-  '.jpg': 'image/jpeg',
-  '.jpeg': 'image/jpeg',
-  '.png': 'image/png',
-  '.gif': 'image/gif',
-  '.webp': 'image/webp',
-  '.bmp': 'image/bmp',
-  '.svg': 'image/svg+xml',
+const BLOCKED_HOSTNAMES = new Set(['localhost', 'metadata', 'metadata.google.internal'])
+const FORMAT_TO_MIME = {
+  avif: 'image/avif', gif: 'image/gif', heif: 'image/heif', jpeg: 'image/jpeg',
+  jp2: 'image/jp2', jxl: 'image/jxl', png: 'image/png', tiff: 'image/tiff', webp: 'image/webp',
 }
 
-function guessMimeType(url, providedMimeType) {
-  if (providedMimeType) return providedMimeType
-  const cleanUrl = (url || '').split('?')[0]
-  const ext = extname(cleanUrl).toLowerCase()
-  return EXT_TO_MIME[ext] || 'image/jpeg'
+function positiveIntegerEnv(name, fallback) {
+  const value = Number(process.env[name] || fallback)
+  return Number.isSafeInteger(value) && value > 0 ? value : fallback
+}
+
+function isBlockedAddress(address) {
+  let parsed
+  try { parsed = ipaddr.parse(address) } catch { return true }
+  if (parsed.kind() === 'ipv6' && parsed.isIPv4MappedAddress()) parsed = parsed.toIPv4Address()
+  if (parsed.kind() === 'ipv4') {
+    return [
+      ['0.0.0.0', 8], ['10.0.0.0', 8], ['100.64.0.0', 10], ['127.0.0.0', 8],
+      ['169.254.0.0', 16], ['172.16.0.0', 12], ['192.168.0.0', 16],
+    ].some(([network, prefix]) => parsed.match(ipaddr.parse(network), prefix))
+  }
+  return parsed.match(ipaddr.parse('::1'), 128)
+    || parsed.match(ipaddr.parse('fe80::'), 10)
+    || parsed.match(ipaddr.parse('fc00::'), 7)
+}
+
+async function assertPublicDestination(target) {
+  const hostname = target.hostname.toLowerCase().replace(/\.$/, '')
+  if (BLOCKED_HOSTNAMES.has(hostname)) throw new Error('Image URL resolves to a blocked network address')
+  if (ipaddr.isValid(hostname)) {
+    if (isBlockedAddress(hostname)) throw new Error('Image URL resolves to a blocked network address')
+    return [{ address: hostname, family: ipaddr.parse(hostname).kind() === 'ipv4' ? 4 : 6 }]
+  }
+  const addresses = await dns.lookup(hostname, { all: true })
+  if (!addresses.length || addresses.some(({ address }) => isBlockedAddress(address))) {
+    throw new Error('Image URL resolves to a blocked network address')
+  }
+  return addresses
+}
+
+function pinnedDispatcher(addresses) {
+  return new Agent({
+    connect: {
+      lookup: (_hostname, options, callback) => {
+        const eligible = options?.family
+          ? addresses.filter(({ family }) => family === options.family)
+          : addresses
+        if (!eligible.length) return callback(new Error('No validated address matches the requested family'))
+        if (options?.all) return callback(null, eligible)
+        callback(null, eligible[0].address, eligible[0].family)
+      },
+    },
+  })
+}
+
+async function validateImage(buffer) {
+  let metadata
+  try { metadata = await sharp(buffer).metadata() } catch { throw new Error('Image payload is not a valid image') }
+  const mimeType = FORMAT_TO_MIME[metadata.format]
+  if (!mimeType) throw new Error('Image payload is not a valid image')
+  return mimeType
+}
+
+function withAbort(promise, signal) {
+  if (signal.aborted) return Promise.reject(signal.reason || new Error('Image fetch timed out'))
+  return new Promise((resolve, reject) => {
+    const abort = () => reject(signal.reason || new Error('Image fetch timed out'))
+    signal.addEventListener('abort', abort, { once: true })
+    promise.then(resolve, reject).finally(() => signal.removeEventListener('abort', abort))
+  })
+}
+
+async function rejectResponse(response, message) {
+  void response.body?.cancel().catch(() => {})
+  throw new Error(message)
+}
+
+async function readLimitedBody(response, declaredLength, maxBytes, controller) {
+  if (!response.body) throw new Error('Image response has no body')
+  const reader = response.body.getReader()
+  const chunks = []
+  let received = 0
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      received += value.byteLength
+      if (received > maxBytes || received > declaredLength) {
+        controller.abort()
+        throw new Error('Image response exceeds its declared or configured size limit')
+      }
+      chunks.push(Buffer.from(value))
+    }
+  } finally {
+    reader.releaseLock()
+  }
+  if (received !== declaredLength) throw new Error('Image response length does not match Content-Length')
+  return Buffer.concat(chunks, received)
 }
 
 /**
- * Fetch an image URL/path and return a base64 payload plus its MIME type.
- * Supports remote http(s) URLs, file:// URLs, and local filesystem paths.
+ * Fetch a validated public image URL and return its bytes as base64.
  */
-export async function fetchImageAsBase64(url, providedMimeType) {
+export async function fetchImageAsBase64(url, _providedMimeType) {
   if (!url) throw new Error('Image URL is required')
+  if (typeof url !== 'string') throw new Error('Only http(s) or data: image URLs are accepted')
+  const maxBytes = positiveIntegerEnv('IMAGE_FETCH_MAX_BYTES', 15_728_640)
 
-  if (url.startsWith('data:')) {
-    const match = url.match(/^data:([^;]+);base64,(.+)$/)
+  if (url.toLowerCase().startsWith('data:')) {
+    const match = url.match(/^data:(image\/[a-z0-9.+-]+);base64,([a-z0-9+/=\s]+)$/i)
     if (!match) throw new Error('Invalid data URI')
-    return { mimeType: match[1], data: match[2] }
+    const buffer = Buffer.from(match[2].replace(/\s/g, ''), 'base64')
+    if (!buffer.length) throw new Error('Invalid data URI')
+    if (buffer.length > maxBytes) throw new Error(`Image payload exceeds ${maxBytes} bytes`)
+    await validateImage(buffer)
+    return { mimeType: match[1].toLowerCase(), data: buffer.toString('base64') }
   }
 
-  if (url.startsWith('file://')) {
-    const path = fileURLToPath(url)
-    const buffer = await readFile(path)
-    return { mimeType: guessMimeType(path, providedMimeType), data: buffer.toString('base64') }
+  let target
+  try { target = new URL(url) } catch { throw new Error('Only http(s) or data: image URLs are accepted') }
+  if (!['http:', 'https:'].includes(target.protocol)) {
+    throw new Error('Only http(s) or data: image URLs are accepted')
   }
+  if (target.username || target.password) throw new Error('Image URLs must not contain credentials')
 
-  if (!url.startsWith('http://') && !url.startsWith('https://')) {
-    const buffer = await readFile(url)
-    return { mimeType: guessMimeType(url, providedMimeType), data: buffer.toString('base64') }
+  const timeoutMs = positiveIntegerEnv('IMAGE_FETCH_TIMEOUT_MS', 15_000)
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    for (let redirects = 0; redirects <= 3; redirects++) {
+      const addresses = await withAbort(assertPublicDestination(target), controller.signal)
+      const dispatcher = pinnedDispatcher(addresses)
+      try {
+        const response = await fetch(target, {
+          redirect: 'manual',
+          credentials: 'omit',
+          dispatcher,
+          headers: { 'User-Agent': 'Wingcaster/1.0 (+ingest)' },
+          signal: controller.signal,
+        })
+        if (response.status >= 300 && response.status < 400) {
+          if (redirects === 3) throw new Error('Image URL exceeded maximum redirects')
+          const location = response.headers.get('location')
+          if (!location) throw new Error('Image redirect is missing Location header')
+          await response.body?.cancel()
+          target = new URL(location, target)
+          if (!['http:', 'https:'].includes(target.protocol)) {
+            throw new Error('Only http(s) or data: image URLs are accepted')
+          }
+          if (target.username || target.password) throw new Error('Image URLs must not contain credentials')
+          continue
+        }
+        if (!response.ok) await rejectResponse(response, `Failed to fetch image ${target}: ${response.status}`)
+        const contentLengthHeader = response.headers.get('content-length')
+        if (!contentLengthHeader || !/^\d+$/.test(contentLengthHeader)) {
+          await rejectResponse(response, 'Image response must include a valid Content-Length')
+        }
+        const declaredLength = Number(contentLengthHeader)
+        if (!Number.isSafeInteger(declaredLength) || declaredLength > maxBytes) {
+          await rejectResponse(response, `Image response exceeds ${maxBytes} bytes`)
+        }
+        const contentType = response.headers.get('content-type')
+        if (!contentType || !contentType.toLowerCase().startsWith('image/')) {
+          await rejectResponse(response, 'Image response Content-Type must be image/*')
+        }
+        const buffer = await readLimitedBody(response, declaredLength, maxBytes, controller)
+        const mimeType = await validateImage(buffer)
+        return { mimeType, data: buffer.toString('base64') }
+      } finally {
+        await dispatcher.close()
+      }
+    }
+    throw new Error('Image URL exceeded maximum redirects')
+  } finally {
+    clearTimeout(timeout)
   }
-
-  const res = await fetch(url)
-  if (!res.ok) throw new Error(`Failed to fetch image ${url}: ${res.status}`)
-  const buffer = await res.arrayBuffer()
-  const contentType = res.headers.get('content-type') || guessMimeType(url, providedMimeType)
-  return { mimeType: contentType, data: Buffer.from(buffer).toString('base64') }
 }
 
 export function createTimeoutSignal(ms) {
