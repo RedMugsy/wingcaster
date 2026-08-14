@@ -15,6 +15,7 @@ import { insert } from '../db.js'
 import { resolveActionCost, RATE_CARD_LATEST_VERSION, CAST_VALUE_MINOR_SEED } from './rate-card.js'
 import { resolveActiveSubscription, meteredRateOverride } from './entitlements.js'
 import { recordConsumption, currentBillingPeriod } from './ledger.js'
+import { resolveEffectivePrice, resolveMarketContext } from './pricing/index.js'
 
 let injectedLogger = null
 
@@ -58,18 +59,51 @@ export async function emitUsageEvent({
 
   try {
     // Resolve the tenant's subscription to pick up any per-plan metered
-    // rate override. Falls back to the standard rate card if none.
+    // rate override. Falls back to the runtime rate card if none.
     const active = await resolveActiveSubscription(tenantId)
-    const rateCardVersion = active?.subscription?.rate_card_version || RATE_CARD_LATEST_VERSION
-    const castValueMinor = active?.subscription?.cast_value_minor || CAST_VALUE_MINOR_SEED
+    const pinnedTerritoryId = active?.subscription?.territory_id || null
+    const pinnedZoneId = active?.subscription?.zone_id || null
+
+    // Territory/zone context: pinned from the tenant's subscription when
+    // one exists, otherwise inferred from destination country for
+    // telemetry. Never falls back to CAST_VALUE_MINOR_SEED silently —
+    // resolveEffectivePrice picks up the active CoreRateCard.
+    let territoryId = pinnedTerritoryId
+    let zoneId = pinnedZoneId
+    if (!territoryId && country) {
+      const ctx = await resolveMarketContext({ countryCode: country })
+      territoryId = ctx.territory?.id || null
+      zoneId = ctx.zone?.id || null
+    }
 
     const override = await meteredRateOverride(tenantId, actionKey)
-    const cost = override != null
-      ? { casts_charged: 0, price_minor: Math.round(override * (quantity || 1)), cogs_estimate_minor: 0 }
-      : resolveActionCost({
-          actionKey, quantity, country, whatsappCategory,
-          rateCardVersion, castValueMinor,
-        })
+    let cost
+    if (override != null) {
+      cost = {
+        casts_charged: 0,
+        price_minor: Math.round(override * (quantity || 1)),
+        cogs_estimate_minor: 0,
+        rate_card_version: active?.subscription?.rate_card_version || RATE_CARD_LATEST_VERSION,
+        cast_value_minor: active?.subscription?.cast_value_minor || CAST_VALUE_MINOR_SEED,
+        territory_id: territoryId,
+        zone_id: zoneId,
+      }
+    } else {
+      cost = await resolveEffectivePrice({
+        actionKey,
+        quantity,
+        country,
+        whatsappCategory,
+        territoryId,
+        zoneId,
+        rateCardVersion: active?.subscription?.rate_card_version || null,
+        castValueMinorOverride: active?.subscription?.cast_value_minor || null,
+      }).catch(() => resolveActionCost({
+        actionKey, quantity, country, whatsappCategory,
+        rateCardVersion: RATE_CARD_LATEST_VERSION,
+        castValueMinor: CAST_VALUE_MINOR_SEED,
+      }))
+    }
 
     const event = {
       id: uuidv4(),
@@ -86,8 +120,10 @@ export async function emitUsageEvent({
       casts_charged: cost.casts_charged,
       price_minor: cost.price_minor,
       cogs_estimate_minor: cost.cogs_estimate_minor,
-      rate_card_version: rateCardVersion,
-      cast_value_minor: castValueMinor,
+      rate_card_version: cost.rate_card_version || RATE_CARD_LATEST_VERSION,
+      cast_value_minor: cost.cast_value_minor || CAST_VALUE_MINOR_SEED,
+      territory_id: cost.territory_id || territoryId,
+      zone_id: cost.zone_id || zoneId,
       metadata: metadata || {},
       occurred_at: new Date().toISOString(),
       billing_period: currentBillingPeriod(),

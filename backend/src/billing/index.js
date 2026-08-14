@@ -15,6 +15,11 @@ import { RATE_CARD_LATEST_VERSION, CAST_VALUE_MINOR_SEED, CAST_RATES_V1, resolve
 import { estimateCogsUsd, WHATSAPP_COST_BY_COUNTRY, SMS_COST_BY_COUNTRY, SMS_MARKUP_PCT } from './cogs-lookup.js'
 import { grantAllowance, recordConsumption, recordTopup, recordAdjustment, periodSummary, quotaBalance, currentBillingPeriod } from './ledger.js'
 import { hasFeature, quotaState, meteredRateOverride, resolveActiveSubscription, KNOWN_FEATURES, KNOWN_QUOTAS, ENTITLEMENT_TYPES } from './entitlements.js'
+import {
+  registerPricingRoutes, seedPricingHierarchy,
+  resolveMarketContext, resolveEffectivePrice, effectiveCastValueMinor,
+  getActiveRateCard, listTerritories, listZones, listCities,
+} from './pricing/index.js'
 
 export const MODULE_NAME = 'billing'
 
@@ -35,15 +40,21 @@ export function createModule() {
     enabled: true,
     logger,
     async prepare() {
+      try {
+        await seedPricingHierarchy()
+      } catch (err) {
+        logger.warn({ err: err.message }, 'pricing hierarchy seed failed — territories/zones/rate-card may need manual setup')
+      }
       logger.info({
         rate_card_version: RATE_CARD_LATEST_VERSION,
         cast_value_minor: CAST_VALUE_MINOR_SEED,
         action_count: Object.keys(CAST_RATES_V1).length,
-      }, 'billing module ready — Phase 7a infrastructure active, no tenant is being charged (all subscriptions default to null)')
+      }, 'billing module ready — Phase 7a/7b active, no tenant is being charged (all subscriptions default to null)')
     },
     registerRoutes(app, { authMiddleware, isPlatformAdmin } = {}) {
       const requirePlatformAdmin = isPlatformAdmin ? makePlatformAdminGuard(isPlatformAdmin) : null
       registerBillingRoutes(app, { authMiddleware, requirePlatformAdmin })
+      registerPricingRoutes(app, { authMiddleware, requirePlatformAdmin })
     },
   }
 }
@@ -76,4 +87,13 @@ export {
   WHATSAPP_COST_BY_COUNTRY,
   SMS_COST_BY_COUNTRY,
   SMS_MARKUP_PCT,
+  // Phase 7b pricing hierarchy
+  resolveMarketContext,
+  resolveEffectivePrice,
+  effectiveCastValueMinor,
+  getActiveRateCard,
+  listTerritories,
+  listZones,
+  listCities,
+  seedPricingHierarchy,
 }

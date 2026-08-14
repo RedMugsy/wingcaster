@@ -73,8 +73,101 @@ const TABLE_MAP = {
   },
 
   // Listings
-  territories: { schema: 'public', table: 'territories', columns: ['code', 'name', 'currency'] },
+  territories: {
+    schema: 'public',
+    table: 'territories',
+    columns: [
+      'code', 'name', 'currency',
+      'pricing_multiplier', 'launch_status', 'launch_wave',
+      'data_residency_required', 'billing_mode', 'vat_percent',
+      'regulator_id_type', 'default_zone_id',
+      'payment_gateway_primary', 'payment_gateway_secondary',
+      'sort_order', 'active',
+    ],
+  },
   territory_disclosure_fields: { schema: 'public', table: 'territory_disclosure_fields', columns: ['territory_id', 'key', 'label', 'field_type', 'required', 'unit', 'sort_order'] },
+  pricing_zones: {
+    schema: 'public',
+    table: 'pricing_zones',
+    columns: [
+      'territory_id', 'code', 'name', 'name_ar',
+      'pricing_multiplier', 'is_default', 'sort_order', 'active',
+    ],
+  },
+  pricing_cities: {
+    schema: 'public',
+    table: 'pricing_cities',
+    columns: [
+      'territory_id', 'zone_id', 'name', 'name_ar', 'name_norm',
+      'latitude', 'longitude', 'sort_order', 'active',
+    ],
+  },
+  core_rate_cards: {
+    schema: 'public',
+    table: 'core_rate_cards',
+    columns: [
+      'version', 'name', 'description', 'currency', 'cast_value_minor',
+      'rates', 'is_active', 'activated_at', 'deactivated_at', 'created_by',
+    ],
+  },
+  usage_events: {
+    schema: 'public',
+    table: 'usage_events',
+    columns: [
+      'tenant_id', 'subscription_id', 'action_key', 'quantity', 'channel',
+      'destination_country', 'whatsapp_category', 'listing_id',
+      'conversation_id', 'distribution_id', 'casts_charged', 'price_minor',
+      'cogs_estimate_minor', 'rate_card_version', 'cast_value_minor',
+      'territory_id', 'zone_id', 'metadata', 'billing_period', 'occurred_at',
+    ],
+  },
+  ledger_entries: {
+    schema: 'public',
+    table: 'ledger_entries',
+    columns: [
+      'tenant_id', 'subscription_id', 'billing_period', 'type',
+      'quota_key', 'amount', 'source_event_id', 'metadata',
+    ],
+  },
+  billing_products: {
+    schema: 'public',
+    table: 'billing_products',
+    columns: [
+      'code', 'version', 'name', 'description', 'billing_cadence',
+      'base_price_minor', 'currency', 'entitlements', 'bundle_items',
+      'is_public', 'status',
+    ],
+  },
+  billing_subscriptions: {
+    schema: 'public',
+    table: 'billing_subscriptions',
+    columns: [
+      'tenant_id', 'product_id', 'product_version', 'status',
+      'territory_id', 'zone_id', 'rate_card_version', 'cast_value_minor',
+      'price_locked_minor', 'billing_period_start', 'billing_period_end',
+      'trial_ends_at', 'cancelled_at', 'metadata',
+    ],
+  },
+  // Aliases used by billing/entitlements.js and billing/ledger.js
+  subscriptions: {
+    schema: 'public',
+    table: 'billing_subscriptions',
+    columns: [
+      'tenant_id', 'product_id', 'product_version', 'status',
+      'territory_id', 'zone_id', 'rate_card_version', 'cast_value_minor',
+      'price_locked_minor', 'billing_period_start', 'billing_period_end',
+      'trial_ends_at', 'cancelled_at', 'metadata',
+    ],
+  },
+  products: {
+    schema: 'public',
+    table: 'billing_products',
+    columns: [
+      'code', 'version', 'name', 'description', 'billing_cadence',
+      'base_price_minor', 'currency', 'entitlements', 'bundle_items',
+      'is_public', 'status',
+    ],
+  },
   properties: {
     schema: 'public',
     table: 'properties',
