@@ -1018,6 +1018,9 @@ export const api = {
     fetchJson(`/admin/scoring/signals/${id}/reject`, { method: 'POST', body: JSON.stringify({ reason }) }),
   calculateAdminScores: (areaId: string) =>
     fetchJson('/admin/scoring/calculate', { method: 'POST', body: JSON.stringify({ area_id: areaId }) }),
+  refreshAreaGoogleSignals: (areaId: string): Promise<{
+    area_id: string; source_types: number; signals_before?: number; signals_after: number; signals_created?: number
+  }> => fetchJson(`/admin/areas/${areaId}/refresh-google-signals`, { method: 'POST', body: '{}' }),
   overrideAdminScore: (data: Record<string, unknown>) =>
     fetchJson('/admin/scoring/override', { method: 'POST', body: JSON.stringify(data) }),
   getAdminGoogleUsage: (params?: Record<string, string>) => {

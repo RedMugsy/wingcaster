@@ -25,6 +25,7 @@ export function registerAdminRoutes(
     aiConfigService,
     googleService,
     inspectorService,
+    googleRefreshWorker,
     config,
     logger,
   }
@@ -375,6 +376,20 @@ export function registerAdminRoutes(
   })
 
   // Score calculation
+  // On-demand Google signals refresh for a single area — used by the
+  // "Fetch Google signals now" button. Bypasses the scheduled worker
+  // interval (default 30 days). Still respects the monthly budget cap.
+  app.post('/api/admin/areas/:id/refresh-google-signals', authMiddleware, requirePlatformAdmin, async (req, res) => {
+    try {
+      if (!googleRefreshWorker) return res.status(503).json({ error: 'Google refresh worker not available' })
+      const result = await googleRefreshWorker.refreshOneArea(req.params.id)
+      res.json(result)
+    } catch (err) {
+      logger.error({ err: err.message, area_id: req.params.id }, 'On-demand Google refresh failed')
+      res.status(400).json({ error: err.message })
+    }
+  })
+
   app.post('/api/admin/scoring/calculate', authMiddleware, requirePlatformAdmin, async (req, res) => {
     try {
       const { area_id } = req.body

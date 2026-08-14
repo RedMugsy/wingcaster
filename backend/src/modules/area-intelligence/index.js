@@ -87,6 +87,7 @@ export function createModule({ platformAdapter, config: configOverride }) {
       aiConfigService,
       googleService,
       inspectorService,
+      googleRefreshWorker,
       config,
       logger,
     })

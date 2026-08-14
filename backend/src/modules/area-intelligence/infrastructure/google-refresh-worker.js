@@ -252,5 +252,33 @@ export function createGoogleRefreshWorker({
     return running && !!timer
   }
 
-  return { start, stop, isRunning, tick }
+  /**
+   * Manually run the Google refresh for a single area. Bypasses the
+   * schedule so the admin UI can trigger an on-demand fetch (used by
+   * "Fetch Google signals now" per-area button). Still respects the
+   * monthly budget cap.
+   */
+  async function refreshOneArea(areaId) {
+    if (!config.googleMapsEnabled) throw new Error('Google Maps API key not configured')
+    if (await googleService.isOverBudget()) throw new Error('Google Maps monthly budget cap reached')
+    const area = await areaService.getById(areaId)
+    if (!area) throw new Error('Area not found')
+    if (area.status !== 'scoring_enabled') throw new Error('Area is not scoring_enabled — enable it first')
+    const sourceTypes = (await sourceTypeService.list({ isActive: true })).filter((st) =>
+      GOOGLE_INPUT_METHODS.includes(st.input_method)
+    )
+    if (!sourceTypes.length) return { area_id: areaId, source_types: 0, signals_after: 0 }
+    const before = (await signalService.list({ areaId, limit: 1 })).total || 0
+    await refreshArea(area, sourceTypes)
+    const after = (await signalService.list({ areaId, limit: 1 })).total || 0
+    return {
+      area_id: areaId,
+      source_types: sourceTypes.length,
+      signals_before: before,
+      signals_after: after,
+      signals_created: Math.max(0, after - before),
+    }
+  }
+
+  return { start, stop, isRunning, tick, refreshOneArea }
 }
