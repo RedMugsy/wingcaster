@@ -12,7 +12,7 @@
 
 import { v4 as uuidv4 } from 'uuid'
 import { insert } from '../db.js'
-import { resolveActionCost, RATE_CARD_LATEST_VERSION, CAST_VALUE_MINOR_SEED } from './rate-card.js'
+import { RATE_CARD_LATEST_VERSION, CAST_VALUE_MINOR_SEED } from './rate-card.js'
 import { resolveActiveSubscription, meteredRateOverride } from './entitlements.js'
 import { recordConsumption, currentBillingPeriod } from './ledger.js'
 import { resolveEffectivePrice, resolveMarketContext } from './pricing/index.js'
@@ -98,11 +98,9 @@ export async function emitUsageEvent({
         zoneId,
         rateCardVersion: active?.subscription?.rate_card_version || null,
         castValueMinorOverride: active?.subscription?.cast_value_minor || null,
-      }).catch(() => resolveActionCost({
-        actionKey, quantity, country, whatsappCategory,
-        rateCardVersion: RATE_CARD_LATEST_VERSION,
-        castValueMinor: CAST_VALUE_MINOR_SEED,
-      }))
+        priceLockedMinor: active?.subscription?.price_locked_minor ?? null,
+        logger: injectedLogger || console,
+      })
     }
 
     const event = {
@@ -147,8 +145,7 @@ export async function emitUsageEvent({
 
     return event
   } catch (err) {
-    // Never block the primary action on a metering failure.
-    injectedLogger?.error({ err: err.message, actionKey, tenantId }, 'emitUsageEvent write failed')
+    injectedLogger?.error({ err, actionKey, tenantId, country }, 'pricing failure — event NOT persisted')
     return null
   }
 }

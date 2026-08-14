@@ -75,10 +75,10 @@ export async function resolveMarketContext(ctx = {}) {
  * an integer number of minor units per cast — this is what the price
  * formula multiplies against casts_charged.
  */
-export function effectiveCastValueMinor({ core, territory, zone }) {
+export function effectiveCastValueMinor({ core, territory, zone, logger = console }) {
   const base = Number(core?.cast_value_minor) || CAST_VALUE_MINOR_SEED
-  const tMult = territory ? clamp(Number(territory.pricing_multiplier)) : 1
-  const zMult = zone ? clamp(Number(zone.pricing_multiplier)) : 1
+  const tMult = territory ? multiplierOrDefault(territory.pricing_multiplier, 'territory', logger) : 1
+  const zMult = zone ? multiplierOrDefault(zone.pricing_multiplier, 'zone', logger) : 1
   const raw = base * tMult * zMult
   return Math.max(1, Math.round(raw))
 }
@@ -96,6 +96,7 @@ export function effectiveCastValueMinor({ core, territory, zone }) {
  * @param {string} params.zoneId
  * @param {number} params.rateCardVersion  pin to a specific version (grandfathering)
  * @param {number} params.castValueMinorOverride
+ * @param {number} params.priceLockedMinor
  * @returns {Promise<{casts_charged,price_minor,cogs_estimate_minor,rate_card_version,cast_value_minor,territory_id,zone_id,effective_cast_value_minor}>}
  */
 export async function resolveEffectivePrice({
@@ -107,11 +108,20 @@ export async function resolveEffectivePrice({
   zoneId = null,
   rateCardVersion = null,
   castValueMinorOverride = null,
+  priceLockedMinor = null,
+  logger = console,
 } = {}) {
-  const q = Math.max(1, Number(quantity) || 1)
+  const quantityNumber = Number(quantity)
+  const q = Number.isNaN(quantityNumber) ? 1 : quantityNumber
+  if (!Number.isFinite(q) || q <= 0) {
+    throw new Error(`quantity must be a positive number, got: ${quantity}`)
+  }
+  const castValueOverride = optionalNumber(castValueMinorOverride, 'castValueMinorOverride', { allowZero: false })
+  const lockedCastValue = optionalNumber(priceLockedMinor, 'priceLockedMinor', { allowZero: true })
+  const pinnedRateCardVersion = optionalNumber(rateCardVersion, 'rateCardVersion', { allowZero: false })
 
-  const core = rateCardVersion
-    ? await getRateCardByVersion(rateCardVersion)
+  const core = pinnedRateCardVersion
+    ? await getRateCardByVersion(pinnedRateCardVersion)
     : await getActiveRateCard()
 
   const rates = (core && core.rates) ? core.rates : CAST_RATES_V1
@@ -126,11 +136,12 @@ export async function resolveEffectivePrice({
     zone = resolved.zone
   }
 
-  const cast_value_minor = castValueMinorOverride != null
-    ? Math.max(1, Math.round(Number(castValueMinorOverride)))
-    : effectiveCastValueMinor({ core, territory, zone })
+  const cast_value_minor = castValueOverride != null
+    ? Math.round(castValueOverride)
+    : effectiveCastValueMinor({ core, territory, zone, logger })
 
-  const price_minor = casts_charged * cast_value_minor
+  const price_locked = lockedCastValue != null && lockedCastValue > 0
+  const price_minor = casts_charged * (price_locked ? Math.round(lockedCastValue) : cast_value_minor)
 
   const cogsUsd = estimateCogsUsd({ actionKey, quantity: q, country, whatsappCategory })
   const cogs_estimate_minor = Math.round(cogsUsd * 100)
@@ -144,10 +155,24 @@ export async function resolveEffectivePrice({
     effective_cast_value_minor: cast_value_minor,
     territory_id: territory ? territory.id : null,
     zone_id: zone ? zone.id : null,
+    price_locked,
   }
 }
 
-function clamp(n) {
-  if (!Number.isFinite(n) || n <= 0) return 1
-  return n
+function optionalNumber(value, name, { allowZero }) {
+  if (value == null) return null
+  const number = Number(value)
+  if (!Number.isFinite(number) || number < 0 || (!allowZero && number === 0)) {
+    throw new Error(`${name} must be a positive number, got: ${value}`)
+  }
+  return number
+}
+
+function multiplierOrDefault(value, source, logger) {
+  const multiplier = Number(value)
+  if (!Number.isFinite(multiplier) || multiplier <= 0) {
+    logger.warn({ source, value }, 'invalid pricing multiplier; using 1')
+    return 1
+  }
+  return multiplier
 }
