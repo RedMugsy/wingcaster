@@ -29,11 +29,19 @@
  *   }
  */
 
-export function registerListingsAiRoutes(app, { aiAdapter, config, logger, authMiddleware }) {
+export function registerListingsAiRoutes(app, { aiAdapter, config, logger, authMiddleware, emitUsageEventAsync: emitUsageEvent }) {
   const auth = authMiddleware || ((_req, _res, next) => next())
 
   app.post('/api/listings-ai/describe', auth, async (req, res) => {
     const started = Date.now()
+    if (typeof emitUsageEvent === 'function' && req.user?.id) {
+      emitUsageEvent({
+        actionKey: 'ai.description.generated',
+        tenantId: req.user.id,
+        quantity: Array.isArray(req.body?.photo_urls) ? req.body.photo_urls.length : 1,
+        metadata: { provider: req.body?.provider || null },
+      })
+    }
     const {
       photo_urls,
       hints,

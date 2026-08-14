@@ -11,6 +11,7 @@
 import { v4 as uuidv4 } from 'uuid'
 import { renderTemplate, refineWithAi } from './reply-composer.js'
 import { createOpportunity } from '../../opportunities.js'
+import { emitUsageEventAsync } from '../../billing/index.js'
 
 const NEW_ROUTING_ID = () => uuidv4()
 
@@ -337,6 +338,18 @@ async function composeReply(ctx, category) {
     suggested_reply: refined,
     suggested_reply_composed_at: nowIso(),
   }))
+
+  // Emit the AI-drafting cost — one event per composed reply. Uses the
+  // agent tenant so cost lands against the right agency.
+  emitUsageEventAsync({
+    actionKey: 'ai.reply.drafted',
+    tenantId: ctx.agent?.id || 'unknown',
+    quantity: 1,
+    channel: ctx.message.channel,
+    listingId: ctx.listing?.id || null,
+    conversationId: ctx.conversation?.id || null,
+    metadata: { category, provider: ctx.aiProvider || null },
+  })
 
   return { drafted: true, text: refined }
 }

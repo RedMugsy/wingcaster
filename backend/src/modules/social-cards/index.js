@@ -86,7 +86,7 @@ export function createModule() {
         logger.info({ storage: config.storagePath }, 'social-cards module ready (Bannerbear disabled)')
       }
     },
-    registerRoutes(app, { authMiddleware } = {}) {
+    registerRoutes(app, { authMiddleware, emitUsageEventAsync } = {}) {
       const auth = authMiddleware || ((_req, _res, next) => next())
 
       /* --------------------- Template CRUD + Store --------------------- */
@@ -293,6 +293,18 @@ export function createModule() {
           for (const a of assets) {
             await insert('social_cards', { ...a, agent_id: listing.agent_id })
             allAssets.push(a)
+            if (typeof emitUsageEventAsync === 'function') {
+              const actionKey = template.engine === 'bannerbear'
+                ? 'render.template.premium'
+                : 'render.template.standard'
+              emitUsageEventAsync({
+                actionKey,
+                tenantId: req.user.id,
+                quantity: 1,
+                listingId: listing.id,
+                metadata: { template_id: template.id, platform: a.platform, engine: template.engine || 'builtin' },
+              })
+            }
           }
           allErrors.push(...errors)
         }

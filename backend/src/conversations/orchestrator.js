@@ -10,6 +10,38 @@ import { sendFacebookMessengerDM, replyToFacebookComment, isFacebookEnabled } fr
 import { replyToLinkedInComment, isLinkedInEnabled } from '../lib/notifications/linkedin.js'
 import { resolveConnectionCredentials } from '../lib/credentials.js'
 import { classifyByRules } from '../lib/comment-classifier.js'
+import { emitUsageEventAsync } from '../billing/index.js'
+
+// Map orchestrator source_channel → §6 usage-event action_key.
+const IN_ACTION_KEY = {
+  whatsapp:            'message.in.whatsapp',
+  instagram_dm:        'message.in.meta_dm',
+  instagram_comment:   'message.in.comment',
+  facebook_messenger:  'message.in.meta_dm',
+  facebook_comment:    'message.in.comment',
+  tiktok_dm:           'message.in.x_dm', // no dedicated tiktok in key; treat as generic DM
+  tiktok_comment:      'message.in.comment',
+  x_dm:                'message.in.x_dm',
+  x_mention:           'message.in.comment',
+  linkedin_comment:    'message.in.comment',
+  email:               'message.in.comment',
+  sms:                 'message.in.comment',
+}
+const OUT_ACTION_KEY = {
+  instagram_dm:       'message.out.meta_dm',
+  facebook_messenger: 'message.out.meta_dm',
+  x_dm:               'message.out.x_dm',
+  x_mention:          'message.out.x_dm',
+  tiktok_dm:          'message.out.x_dm',
+  email:              'message.out.email',
+  sms:                'message.out.sms',
+  // whatsapp handled specially — routes to utility vs marketing based on 24h window
+  // instagram_comment / facebook_comment / tiktok_comment / linkedin_comment routed as meta_dm rate-0
+  instagram_comment:  'message.out.meta_dm',
+  facebook_comment:   'message.out.meta_dm',
+  tiktok_comment:     'message.out.meta_dm',
+  linkedin_comment:   'message.out.meta_dm',
+}
 
 // Router is injected at boot to avoid an import cycle
 // (router imports opportunities → orchestrator would form a loop).
@@ -55,6 +87,27 @@ async function resolveAgentPlatformCreds(agentId, platform) {
 
 function normalizePhone(phone) {
   return String(phone || '').replace(/\D/g, '')
+}
+
+// Best-effort country inference from an E.164 phone number. Used for
+// per-country COGS in message emit events. Covers the Wave 1 + Wave 2
+// launch markets first; unknown numbers fall through to null (COGS lookup
+// then uses DEFAULT). Not authoritative — market pinning happens on the
+// subscription in Phase 7b.
+function inferCountryFromPhone(phone) {
+  const digits = normalizePhone(phone)
+  if (!digits) return null
+  const map = [
+    ['961', 'LB'], ['962', 'JO'], ['963', 'SY'], ['964', 'IQ'],
+    ['971', 'AE'], ['966', 'SA'], ['965', 'KW'], ['968', 'OM'], ['974', 'QA'],
+    ['973', 'BH'], ['967', 'YE'], ['20', 'EG'], ['212', 'MA'], ['216', 'TN'],
+    ['44', 'GB'], ['33', 'FR'], ['34', 'ES'], ['39', 'IT'], ['49', 'DE'],
+    ['61', 'AU'], ['64', 'NZ'], ['1', 'US'],
+  ]
+  for (const [prefix, cc] of map) {
+    if (digits.startsWith(prefix)) return cc
+  }
+  return null
 }
 
 function normalizeEmail(email) {
@@ -209,6 +262,28 @@ export async function ingestInboundMessage({ channel, provider, providerMessageI
     created_at: new Date().toISOString(),
   }
   await insert('conversation_messages', message)
+
+  // Emit inbound usage event — rate-0 always, but records the interaction
+  // for the tenant's telemetry and future funnel analysis.
+  const inActionKey = IN_ACTION_KEY[channel] || 'message.in.comment'
+  emitUsageEventAsync({
+    actionKey: inActionKey,
+    tenantId: contact?.assigned_agent_id || assignedAgentId || 'unknown',
+    channel,
+    conversationId: conversation?.id || null,
+    metadata: { direction: 'inbound', category: classification?.category || null },
+  })
+  // Classifier itself is a metered (but rate-0) event — captures how much
+  // AI work we spent per tenant.
+  if (classification && CLASSIFIABLE_CHANNELS.has(channel)) {
+    emitUsageEventAsync({
+      actionKey: 'ai.classification',
+      tenantId: contact?.assigned_agent_id || assignedAgentId || 'unknown',
+      channel,
+      conversationId: conversation?.id || null,
+      metadata: { source: 'rules', category: classification?.category },
+    })
+  }
 
   // Fire-and-forget router dispatch. We deliberately do NOT await so a slow
   // AI refinement or downstream side effect never blocks the webhook / ingest
@@ -660,6 +735,37 @@ export async function sendOutboundMessage({ conversationId, content, contentType
     created_at: now,
   }
   await insert('conversation_messages', message)
+
+  // Emit outbound usage event only on successful dispatch. Channel + country
+  // resolve the correct §6 action_key; WhatsApp splits utility vs marketing
+  // based on whether an open 24-hour window exists (utility) or the send
+  // opens a new template thread (marketing). Simplest heuristic: last
+  // inbound within 24h → utility; otherwise marketing. If no inbound at
+  // all → marketing (opening a fresh thread).
+  if (dispatch.ok) {
+    let actionKey = OUT_ACTION_KEY[channel] || 'message.out.meta_dm'
+    let whatsappCategory = null
+    if (channel === 'whatsapp') {
+      const lastInboundRow = (await findAll('conversation_messages', (m) =>
+        m.conversation_id === conversation.id && m.direction === 'inbound',
+      )).sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0]
+      const withinWindow = lastInboundRow
+        && (Date.now() - new Date(lastInboundRow.created_at).getTime()) < 24 * 3600 * 1000
+      actionKey = withinWindow ? 'message.out.whatsapp.utility' : 'message.out.whatsapp.marketing'
+      whatsappCategory = withinWindow ? 'utility_service' : 'marketing'
+    }
+    // Best-effort country resolution from contact phone (E.164 prefix).
+    const country = contact?.phone ? inferCountryFromPhone(contact.phone) : null
+    emitUsageEventAsync({
+      actionKey,
+      tenantId: sentByAgentId || contact?.assigned_agent_id || 'unknown',
+      channel,
+      country,
+      whatsappCategory,
+      conversationId: conversation.id,
+      metadata: { direction: 'outbound', to: contact?.phone || contact?.email || null },
+    })
+  }
 
   await update('conversations', (c) => c.id === conversation.id, (c) => ({
     ...c,

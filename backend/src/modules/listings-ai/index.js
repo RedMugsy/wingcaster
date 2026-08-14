@@ -56,12 +56,13 @@ export function createModule() {
     config,
     logger,
     aiAdapter,
-    registerRoutes(app, { authMiddleware } = {}) {
+    registerRoutes(app, { authMiddleware, emitUsageEventAsync } = {}) {
       registerListingsAiRoutes(app, {
         aiAdapter,
         config,
         logger,
         authMiddleware,
+        emitUsageEventAsync,
       })
     },
   }

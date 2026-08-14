@@ -179,7 +179,10 @@ import {
   CATEGORY_WEIGHTS,
 } from './contact-360.js'
 import { resolveListingPerformance } from './performance-dashboard.js'
-import { createModule as createBillingModule } from './billing/index.js'
+import {
+  createModule as createBillingModule,
+  emitUsageEventAsync,
+} from './billing/index.js'
 import {
   isXEnabled,
   parseIncomingXWebhook,
@@ -511,13 +514,13 @@ if (whatsAppListingsModule.enabled) {
 
 const listingsAiModule = createListingsAiModule()
 if (listingsAiModule.enabled) {
-  listingsAiModule.registerRoutes(app, { authMiddleware })
+  listingsAiModule.registerRoutes(app, { authMiddleware, emitUsageEventAsync })
 }
 
 const socialCardsModule = createSocialCardsModule()
 if (socialCardsModule.enabled) {
   await socialCardsModule.prepare()
-  socialCardsModule.registerRoutes(app, { authMiddleware })
+  socialCardsModule.registerRoutes(app, { authMiddleware, emitUsageEventAsync })
 }
 
 // Phase 7a — billing infrastructure. Every meterable action emits a usage
@@ -1551,6 +1554,13 @@ app.post('/api/properties', authMiddleware, validate(propertyCreateSchema), asyn
   })
 
   await invalidatePricingForPropertyChange(propertyRecord)
+
+  emitUsageEventAsync({
+    actionKey: 'listing.created',
+    tenantId: req.user.id,
+    listingId: propertyRecord.id,
+    metadata: { city: propertyRecord.city, property_type: propertyRecord.property_type },
+  })
 
   res.json(serializeProperty(propertyRecord))
 })
@@ -4116,6 +4126,12 @@ app.get('/api/contacts/:id/lead-summary', authMiddleware, async (req, res) => {
 })
 
 app.post('/api/contacts/:id/regenerate-summary', authMiddleware, async (req, res) => {
+  emitUsageEventAsync({
+    actionKey: 'ai.chat.turn',
+    tenantId: req.user.id,
+    quantity: 2, // one for summary + one for next-steps
+    metadata: { flow: 'contact_360_regenerate', contact_id: req.params.id },
+  })
   const aiAdapter = listingsAiModule?.enabled ? listingsAiModule.aiAdapter : null
   if (!aiAdapter) {
     return res.status(400).json({
@@ -5370,6 +5386,27 @@ app.post('/api/listings/:id/publish-social', authMiddleware, async (req, res) =>
       },
     })
 
+    // Emit publish usage event only for successful publishes. Per-platform
+    // action_key maps directly to the §6 event catalog. X.link vs X.plain
+    // is decided by presence of a URL in the caption.
+    if (status === 'published') {
+      const hasUrl = /\bhttps?:\/\//i.test(text || '')
+      const actionKey =
+        platform === 'instagram' ? 'publish.meta.instagram' :
+        platform === 'facebook'  ? 'publish.meta.facebook'  :
+        platform === 'linkedin'  ? 'publish.linkedin'       :
+        platform === 'tiktok'    ? 'publish.tiktok'         :
+        platform === 'x'         ? (hasUrl ? 'publish.x.link' : 'publish.x.plain') :
+                                   null
+      if (actionKey) {
+        emitUsageEventAsync({
+          actionKey, tenantId: req.user.id, quantity: 1,
+          channel: platform, listingId: property.id, distributionId: row.id,
+          metadata: { format: format || null, has_url: hasUrl, external_id: externalId },
+        })
+      }
+    }
+
     results.push({
       platform,
       status,
@@ -5652,6 +5689,7 @@ app.get('/api/webhooks/instagram', (req, res) => {
 })
 
 app.post('/api/webhooks/instagram', async (req, res) => {
+  emitUsageEventAsync({ actionKey: 'webhook.received', tenantId: 'platform', channel: 'instagram' })
   try {
     const dmEvents = parseIncomingInstagramDMWebhook(req.body)
     const commentEvents = parseIncomingInstagramCommentWebhook(req.body)
@@ -5744,6 +5782,7 @@ app.get('/api/webhooks/facebook', (req, res) => {
 })
 
 app.post('/api/webhooks/facebook', async (req, res) => {
+  emitUsageEventAsync({ actionKey: 'webhook.received', tenantId: 'platform', channel: 'facebook' })
   try {
     const events = parseIncomingFacebookWebhook(req.body)
     const results = []
@@ -5795,6 +5834,7 @@ app.post('/api/webhooks/facebook', async (req, res) => {
 
 // ==================== TIKTOK WEBHOOKS ====================
 app.post('/api/webhooks/tiktok', async (req, res) => {
+  emitUsageEventAsync({ actionKey: 'webhook.received', tenantId: 'platform', channel: 'tiktok' })
   try {
     const events = parseIncomingTikTokWebhook(req.body)
     const results = []
@@ -5845,6 +5885,7 @@ app.post('/api/webhooks/tiktok', async (req, res) => {
 
 // ==================== X (TWITTER) WEBHOOKS ====================
 app.post('/api/webhooks/x', async (req, res) => {
+  emitUsageEventAsync({ actionKey: 'webhook.received', tenantId: 'platform', channel: 'x' })
   try {
     const events = parseIncomingXWebhook(req.body)
     const results = []
@@ -6100,6 +6141,12 @@ app.get('/api/listings/:id/comments', authMiddleware, async (req, res) => {
  * category_source to 'manual' so the background AI worker won't overwrite it.
  */
 app.post('/api/comments/:id/reclassify', authMiddleware, async (req, res) => {
+  emitUsageEventAsync({
+    actionKey: 'ai.classification',
+    tenantId: req.user.id,
+    quantity: 1,
+    metadata: { manual: true, message_id: req.params.id },
+  })
   const row = await findOne('conversation_messages', (m) => m.id === req.params.id)
   if (!row) return res.status(404).json({ error: 'Message not found' })
 
