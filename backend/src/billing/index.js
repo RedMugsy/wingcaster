@@ -1,0 +1,79 @@
+/**
+ * Billing module — public entrypoint.
+ *
+ * Phase 7a scope: emit + persist usage events + read tenant + admin
+ * telemetry. No charging, no subscriptions, no gating. Ships the
+ * infrastructure so every action from the emitter-wire-up (Phase 7a2)
+ * onward accumulates telemetry from day zero — the "single most
+ * important instruction" of the commercial-model spec §6.
+ */
+
+import { pino } from 'pino'
+import { registerBillingRoutes, makePlatformAdminGuard } from './routes.js'
+import { setBillingLogger, emitUsageEvent, emitUsageEventAsync, quotaKeyForAction } from './events.js'
+import { RATE_CARD_LATEST_VERSION, CAST_VALUE_MINOR_SEED, CAST_RATES_V1, resolveActionCost } from './rate-card.js'
+import { estimateCogsUsd, WHATSAPP_COST_BY_COUNTRY, SMS_COST_BY_COUNTRY, SMS_MARKUP_PCT } from './cogs-lookup.js'
+import { grantAllowance, recordConsumption, recordTopup, recordAdjustment, periodSummary, quotaBalance, currentBillingPeriod } from './ledger.js'
+import { hasFeature, quotaState, meteredRateOverride, resolveActiveSubscription, KNOWN_FEATURES, KNOWN_QUOTAS, ENTITLEMENT_TYPES } from './entitlements.js'
+
+export const MODULE_NAME = 'billing'
+
+export function createModule() {
+  const enabled = process.env.BILLING_MODULE_ENABLED !== 'false'
+  const logger = pino({
+    name: MODULE_NAME,
+    level: process.env.BILLING_LOG_LEVEL || process.env.LOG_LEVEL || 'info',
+  })
+
+  if (!enabled) {
+    return { enabled: false, registerRoutes: () => {}, prepare: async () => {} }
+  }
+
+  setBillingLogger(logger)
+
+  return {
+    enabled: true,
+    logger,
+    async prepare() {
+      logger.info({
+        rate_card_version: RATE_CARD_LATEST_VERSION,
+        cast_value_minor: CAST_VALUE_MINOR_SEED,
+        action_count: Object.keys(CAST_RATES_V1).length,
+      }, 'billing module ready — Phase 7a infrastructure active, no tenant is being charged (all subscriptions default to null)')
+    },
+    registerRoutes(app, { authMiddleware, isPlatformAdmin } = {}) {
+      const requirePlatformAdmin = isPlatformAdmin ? makePlatformAdminGuard(isPlatformAdmin) : null
+      registerBillingRoutes(app, { authMiddleware, requirePlatformAdmin })
+    },
+  }
+}
+
+// Re-exports so server.js and downstream modules can emit events + read
+// state without importing individual files.
+export {
+  emitUsageEvent,
+  emitUsageEventAsync,
+  quotaKeyForAction,
+  resolveActionCost,
+  estimateCogsUsd,
+  grantAllowance,
+  recordConsumption,
+  recordTopup,
+  recordAdjustment,
+  periodSummary,
+  quotaBalance,
+  currentBillingPeriod,
+  hasFeature,
+  quotaState,
+  meteredRateOverride,
+  resolveActiveSubscription,
+  KNOWN_FEATURES,
+  KNOWN_QUOTAS,
+  ENTITLEMENT_TYPES,
+  RATE_CARD_LATEST_VERSION,
+  CAST_VALUE_MINOR_SEED,
+  CAST_RATES_V1,
+  WHATSAPP_COST_BY_COUNTRY,
+  SMS_COST_BY_COUNTRY,
+  SMS_MARKUP_PCT,
+}

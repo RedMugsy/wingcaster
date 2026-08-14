@@ -179,6 +179,7 @@ import {
   CATEGORY_WEIGHTS,
 } from './contact-360.js'
 import { resolveListingPerformance } from './performance-dashboard.js'
+import { createModule as createBillingModule } from './billing/index.js'
 import {
   isXEnabled,
   parseIncomingXWebhook,
@@ -517,6 +518,18 @@ const socialCardsModule = createSocialCardsModule()
 if (socialCardsModule.enabled) {
   await socialCardsModule.prepare()
   socialCardsModule.registerRoutes(app, { authMiddleware })
+}
+
+// Phase 7a — billing infrastructure. Every meterable action emits a usage
+// event via emitUsageEventAsync(). Emitter wire-up into existing endpoints
+// lands in Phase 7a2 (next commit); this commit ships the infrastructure.
+const billingModule = createBillingModule()
+if (billingModule.enabled) {
+  await billingModule.prepare()
+  billingModule.registerRoutes(app, {
+    authMiddleware,
+    isPlatformAdmin: (agentId) => isPlatformAdmin(agentId),
+  })
 }
 
 /* ============================================================================
