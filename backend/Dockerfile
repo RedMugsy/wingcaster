@@ -1,12 +1,16 @@
 # Wingcaster backend — multi-stage production image.
 #
+# Build context is the repo ROOT (Railway ignores `buildContext` in
+# railway.json for this project), so every COPY prefixes `backend/`.
+#
 # Stage 1 (deps): install every production dependency, including native
 # modules that require compilation (sharp needs libvips, better-sqlite3
 # needs node-gyp + python + build tools).
 #
-# Stage 2 (runtime): copy only the compiled node_modules + app source into
-# a slim base image with just the shared libraries the natives need at
-# runtime. Runs as a non-root user under tini for correct signal handling.
+# Stage 2 (runtime): copy only the compiled node_modules + backend app
+# source into a slim base image with just the shared libraries the
+# natives need at runtime. Runs as a non-root user under tini for
+# correct signal handling.
 
 # ---------- deps ----------
 FROM node:20-bookworm-slim AS deps
@@ -20,7 +24,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
-COPY package.json package-lock.json ./
+COPY backend/package.json backend/package-lock.json ./
 RUN npm ci --omit=dev --no-audit --no-fund
 
 # ---------- runtime ----------
@@ -36,7 +40,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
-COPY --chown=wingcaster:wingcaster . .
+COPY --chown=wingcaster:wingcaster backend/ ./
 
 RUN mkdir -p uploads && chown -R wingcaster:wingcaster uploads
 

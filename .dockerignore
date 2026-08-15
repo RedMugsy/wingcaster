@@ -1,0 +1,43 @@
+# Docker build context is the repo root. Keep only what the backend
+# image actually needs; skip the web/, mobile/, docs/, and .git payload
+# so images stay lean and secrets in .env files never leak in.
+
+# Node artefacts anywhere in the tree
+**/node_modules
+**/npm-debug.log*
+**/coverage
+**/.nyc_output
+
+# Env + secrets — Railway injects env vars at runtime.
+**/.env
+**/.env.*
+!**/.env.example
+
+# Test artefacts + IDE
+**/*.test.js
+**/tests/
+.vscode
+.idea
+
+# Repo / VCS
+.git
+.gitignore
+.github
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor + tooling caches
+**/*.log
+**/*.swp
+
+# Local uploads — created fresh in the image, replaced by object
+# storage in Phase 8.
+**/uploads/
+
+# Sibling packages we don't ship in the backend image
+web/
+mobile/
+shared/
+docs/
