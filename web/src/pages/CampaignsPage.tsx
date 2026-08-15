@@ -1,7 +1,5 @@
 /**
- * CampaignsPage — Gateway for Concept C / Guided Workflow Studio.
- * Phase 1: CRUD list of campaigns with enrollment status.
- * Phase 2: Visual builder will be a separate route /campaigns/:id/builder.
+ * CampaignsPage — CRUD list of campaigns with enrollment status.
  */
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
@@ -134,19 +132,6 @@ export function CampaignsPage() {
           },
         ]}
       />
-
-      {/* Campaign builder callout */}
-      <div className="shrink-0 border-b border-[#E4E3E0] bg-[#FAFAF9] px-6 py-3">
-        <div className="flex items-center justify-between gap-4">
-          <div>
-            <p className="text-sm font-medium">Visual Workflow Builder</p>
-            <p className="text-xs text-muted-foreground">
-              Design multi-step omnichannel journeys with branching and simulation — coming in Phase 2.
-            </p>
-          </div>
-          <Badge variant="outline" className="shrink-0 border-blue-200 bg-blue-50 text-blue-700">Roadmap</Badge>
-        </div>
-      </div>
 
       {/* Campaign list */}
       <div className="flex-1 overflow-y-auto">

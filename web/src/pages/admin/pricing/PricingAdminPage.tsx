@@ -400,7 +400,7 @@ function SourcesPanel({ sources, onChange }: { sources: PricingSource[]; onChang
   const [showForm, setShowForm] = useState(false)
   const [source, setSource] = useState('')
   const [label, setLabel] = useState('')
-  const [provider, setProvider] = useState('skeleton')
+  const [provider, setProvider] = useState('olx_lebanon')
 
   async function toggle(sourceRow: PricingSource) {
     try {
@@ -418,7 +418,7 @@ function SourcesPanel({ sources, onChange }: { sources: PricingSource[]; onChang
       await api.createAdminPricingSource({ source, label, provider, enabled: false, is_internal: false })
       setSource('')
       setLabel('')
-      setProvider('skeleton')
+      setProvider('olx_lebanon')
       setShowForm(false)
       onChange()
       addToast({ title: 'Source created' })
@@ -455,7 +455,6 @@ function SourcesPanel({ sources, onChange }: { sources: PricingSource[]; onChang
                   value={provider}
                   onChange={(e) => setProvider(e.target.value)}
                 >
-                  <option value="skeleton">Skeleton / placeholder</option>
                   <option value="olx_lebanon">OLX Lebanon</option>
                   <option value="property_finder_lb">Property Finder Lebanon</option>
                   <option value="government_records">Government records</option>

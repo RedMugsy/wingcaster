@@ -802,7 +802,6 @@ function PublishSocialTab({ property }: { property: Property }) {
     external_id: string | null
     external_url: string | null
     provider: string | null
-    simulated: boolean
     error: string | null
   }>>([])
 
@@ -988,7 +987,6 @@ function PublishSocialTab({ property }: { property: Property }) {
                       >
                         {r.status}
                       </Badge>
-                      {r.simulated && <Badge variant="outline" className="text-[10px]">simulated</Badge>}
                     </div>
                     {r.error && <p className="mt-0.5 text-xs text-red-700">{r.error}</p>}
                     {r.provider && <p className="mt-0.5 text-[11px] text-muted-foreground">via {r.provider}</p>}
@@ -1280,13 +1278,11 @@ function InsightsSection({ listingId }: { listingId: string }) {
                 clicks: d.clicks ?? d.insights?.clicks ?? null,
               }
               const fetchedAt = d.insights_fetched_at || d.insights?.fetched_at || null
-              const simulated = d.insights?.simulated || false
               return (
                 <li key={d.id} className="rounded-lg border bg-white p-3">
                   <div className="flex items-center justify-between gap-2">
                     <div className="flex items-center gap-2">
                       <Badge variant="outline">{platformLabel[d.platform] || d.platform}</Badge>
-                      {simulated && <Badge variant="outline" className="text-[10px]">simulated</Badge>}
                     </div>
                     <Button
                       size="sm"
