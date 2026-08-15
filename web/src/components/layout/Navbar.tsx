@@ -3,6 +3,7 @@ import { useState } from 'react'
 import {
   Menu, X, LogIn, UserPlus, LayoutDashboard, LogOut, User, Inbox,
   ListTodo, Users as UsersIcon, Building2, Megaphone, Calendar, Radar,
+  Coins,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useAuth } from '@/context/AuthContext'
@@ -11,7 +12,7 @@ import { useBrand } from '@/context/BrandContext'
 export function Navbar() {
   const [mobileOpen, setMobileOpen] = useState(false)
   const location = useLocation()
-  const { agent, logout, loading: authLoading } = useAuth()
+  const { agent, isAdmin, logout, loading: authLoading } = useAuth()
   const { brand } = useBrand()
 
   const agentNav = [
@@ -24,6 +25,10 @@ export function Navbar() {
     { path: '/campaigns', label: 'Campaigns', icon: Megaphone },
     { path: '/tasks', label: 'Tasks', icon: ListTodo },
   ]
+
+  const adminNav = isAdmin
+    ? [{ path: '/admin/commercial-pricing/territories', label: 'Commercial Pricing', icon: Coins }]
+    : []
 
   return (
     <nav className="sticky top-0 z-50 w-full border-b bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/60">
@@ -40,9 +45,9 @@ export function Navbar() {
 
         {agent && (
           <div className="hidden items-center gap-1 lg:flex">
-            {agentNav.map((item) => {
+            {[...agentNav, ...adminNav].map((item) => {
               const Icon = item.icon
-              const active = location.pathname === item.path || location.pathname.startsWith(`${item.path}/`)
+              const active = location.pathname === item.path || location.pathname.startsWith(`${item.path.split('/').slice(0, 3).join('/')}/`)
               return (
                 <Link
                   key={item.path}
@@ -106,7 +111,7 @@ export function Navbar() {
         <div className="border-t bg-white px-4 py-3 lg:hidden">
           <div className="flex flex-col gap-1">
             {agent &&
-              agentNav.map((item) => {
+              [...agentNav, ...adminNav].map((item) => {
                 const Icon = item.icon
                 return (
                   <Link

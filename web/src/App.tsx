@@ -41,6 +41,9 @@ import { AgentWhatsAppListingsPage } from '@/pages/agent/whatsapp-listings/Agent
 import { AdminAreasPage } from '@/pages/admin/areas/AdminAreasPage'
 import { AdminScoringPage } from '@/pages/admin/scoring/AdminScoringPage'
 import { PricingAdminPage } from '@/pages/admin/pricing/PricingAdminPage'
+import { TerritoriesAdminPage } from '@/pages/admin/commercial-pricing/TerritoriesAdminPage'
+import { TerritoryDetailPage } from '@/pages/admin/commercial-pricing/TerritoryDetailPage'
+import { RateCardsAdminPage } from '@/pages/admin/commercial-pricing/RateCardsAdminPage'
 import { InspectorPage } from '@/pages/inspector/InspectorPage'
 import { AreaProfilePage } from '@/pages/AreaProfilePage'
 import { PublicAgencyPage } from '@/pages/PublicAgencyPage'
@@ -95,6 +98,10 @@ function AppShell() {
           <Route path="/admin/areas" element={<AdminAreasPage />} />
           <Route path="/admin/scoring" element={<AdminScoringPage />} />
           <Route path="/admin/pricing" element={<PricingAdminPage />} />
+          <Route path="/admin/commercial-pricing" element={<Navigate to="/admin/commercial-pricing/territories" replace />} />
+          <Route path="/admin/commercial-pricing/territories" element={<TerritoriesAdminPage />} />
+          <Route path="/admin/commercial-pricing/territories/:id" element={<TerritoryDetailPage />} />
+          <Route path="/admin/commercial-pricing/rate-cards" element={<RateCardsAdminPage />} />
           <Route path="/agency/whatsapp-listings" element={<AgencyWhatsAppListingsPage />} />
           <Route path="/agent/whatsapp-listings" element={<AgentWhatsAppListingsPage />} />
           <Route path="/areas/:slug" element={<AreaProfilePage />} />
