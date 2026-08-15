@@ -6,6 +6,30 @@ const REQUIREMENTS = {
   x: ['X_BEARER_TOKEN'],
 }
 
+/**
+ * Does the tenant's resolved connection already carry usable publish
+ * credentials for this platform? When true, /publish-social should NOT
+ * fall through to the global-env check — the tenant's own creds are
+ * sufficient and env may legitimately be empty.
+ *
+ * - OAuth models (x, tiktok): the tenant's stored oauth_access_token.
+ * - Enterprise models (facebook, instagram, linkedin, whatsapp): the
+ *   tenant's own override token (fb/ig/li/wa_access_token_override).
+ *   Without an override, the enterprise adapter needs the shared env
+ *   token, so we DO fall through to assertPublishChannelConfigured.
+ */
+export function tenantHasPublishToken(platform, creds) {
+  if (!creds) return false
+  if (platform === 'x' || platform === 'tiktok') {
+    return Boolean(creds.oauth_access_token)
+  }
+  if (platform === 'facebook') return Boolean(creds.fb_page_access_token_override)
+  if (platform === 'instagram') return Boolean(creds.ig_page_access_token_override)
+  if (platform === 'linkedin') return Boolean(creds.li_access_token_override)
+  if (platform === 'whatsapp') return Boolean(creds.wa_access_token_override)
+  return false
+}
+
 export function missingPublishCredentials(channel, env = process.env) {
   return (REQUIREMENTS[channel] || []).filter((name) => !env[name])
 }

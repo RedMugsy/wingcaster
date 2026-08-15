@@ -105,6 +105,42 @@ export function registerAdminRoutes(app, { entitlements, credits, pipeline, conf
     }
   })
 
+  // Manual credit grant — the ONLY path that mints tenant credits until Phase
+  // 7e ships a real payment gateway. Requires platform_admin + a reason for
+  // the audit trail. Tenant-facing top-up endpoints return 501 by design.
+  app.post('/api/admin/whatsapp-listings/credits/grant', authMiddleware, requirePlatformAdmin, async (req, res) => {
+    try {
+      const { scope, scope_id, amount_usd, reason } = req.body || {}
+      if (scope !== 'agent' && scope !== 'agency') {
+        return res.status(400).json({ error: "scope must be 'agent' or 'agency'" })
+      }
+      if (!scope_id) return res.status(400).json({ error: 'scope_id is required' })
+      const amount = Number(amount_usd)
+      if (!Number.isFinite(amount) || amount <= 0) {
+        return res.status(400).json({ error: 'amount_usd must be a positive number' })
+      }
+      const reasonText = String(reason || '').trim()
+      if (!reasonText) return res.status(400).json({ error: 'reason is required for audit trail' })
+
+      const balance = await credits.topUp(scope, scope_id, amount, {
+        description: `Manual admin credit by ${req.user.id}: ${reasonText}`,
+      })
+      await insertModule(Collections.AUDIT_LOGS, {
+        id: uuidv4(),
+        actor_id: req.user.id,
+        action: 'admin_credit_grant',
+        target_scope: scope,
+        target_id: scope_id,
+        amount_usd: amount,
+        reason: reasonText,
+        created_at: new Date().toISOString(),
+      })
+      res.status(201).json({ success: true, balance })
+    } catch (err) {
+      res.status(500).json({ error: err.message })
+    }
+  })
+
   app.post('/api/admin/whatsapp-listings/audit-log', authMiddleware, requirePlatformAdmin, async (req, res) => {
     try {
       const log = await insertModule(Collections.AUDIT_LOGS, {

@@ -103,15 +103,14 @@ export function registerAgencyRoutes(app, { entitlements, credits, pipeline, con
     }
   })
 
-  app.post('/api/agency/credits/top-up', authMiddleware, requireAgencyAdmin, async (req, res) => {
-    try {
-      const { amount_usd, stripe_payment_intent_id } = req.body
-      if (!amount_usd || Number(amount_usd) <= 0) return res.status(400).json({ error: 'amount_usd is required' })
-      const balance = await credits.topUp(CreditScope.AGENCY, req.agencyId, Number(amount_usd), { paymentIntentId: stripe_payment_intent_id })
-      res.json({ success: true, balance })
-    } catch (err) {
-      res.status(500).json({ error: err.message })
-    }
+  app.post('/api/agency/credits/top-up', authMiddleware, requireAgencyAdmin, async (_req, res) => {
+    // See agent-routes.js — tenant-facing top-up is disabled until Phase 7e
+    // ships a real payment gateway. Platform-admin manual credit is the ONLY
+    // path that mints tenant credits today.
+    res.status(501).json({
+      error: 'topup_unavailable',
+      reason: 'payment_gateway_not_configured',
+    })
   })
 
   app.post('/api/agency/credits/allocate', authMiddleware, requireAgencyAdmin, async (req, res) => {

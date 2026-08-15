@@ -29,18 +29,12 @@ export function createPipeline({ adapter, entitlements, credits, aiAdapter, temp
   const matcher = createListingMatcher({ adapter })
 
   async function ingest({ from, messageId, text, interactiveId, mediaIds, location, messageType, rawPayload }) {
-    // Deduplicate by message ID.
-    const existing = await findOneModule(Collections.PROCESSED_MESSAGES, (m) => m.message_id === messageId)
-    if (existing) {
-      logger.debug({ messageId }, 'duplicate message ignored')
-      return { handled: true, deduplicated: true }
-    }
-    await insertModule(Collections.PROCESSED_MESSAGES, {
-      id: uuidv4(),
-      message_id: messageId,
-      from,
-      processed_at: new Date().toISOString(),
-    })
+    // NOTE: message_id deduplication happens atomically in the webhook layer
+    // (createWebhookHandler → claimProcessedMessage) BEFORE reaching this
+    // function. Doing a second find-then-insert here would be redundant AND
+    // would false-positive when webhook has already claimed the row on our
+    // behalf. Direct callers (tests, admin retry tools) get a clean pipeline
+    // — dedup is a webhook-layer concern.
 
     // Find agent by WhatsApp number.
     const agent = await adapter.getAgentByWhatsAppNumber(from)

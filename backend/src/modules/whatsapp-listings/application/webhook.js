@@ -9,8 +9,8 @@
  *     platform conversation orchestrator can handle them.
  */
 
-import { createHmac, timingSafeEqual, randomUUID } from 'crypto'
-import { Collections, findOneModule, insertModule } from '../infrastructure/db.js'
+import { createHmac, timingSafeEqual } from 'crypto'
+import { claimProcessedMessage, releaseProcessedMessage } from '../infrastructure/db.js'
 
 export function createWebhookHandler({ adapter, entitlements, credits, pipeline, config, logger }) {
   function isListingIntent(event) {
@@ -45,19 +45,6 @@ export function createWebhookHandler({ adapter, entitlements, credits, pipeline,
     }
   }
 
-  async function isDuplicate(messageId) {
-    return await findOneModule(Collections.PROCESSED_MESSAGES, (m) => m.message_id === messageId)
-  }
-
-  async function recordDedupe(messageId, from) {
-    await insertModule(Collections.PROCESSED_MESSAGES, {
-      id: randomUUID(),
-      message_id: messageId,
-      from,
-      processed_at: new Date().toISOString(),
-    })
-  }
-
   async function handle({ rawBody, signature, payload }) {
     const verification = verifySignature({ rawBody, signature })
     if (!verification.ok) {
@@ -74,28 +61,33 @@ export function createWebhookHandler({ adapter, entitlements, credits, pipeline,
         continue
       }
 
-      if (await isDuplicate(event.message_id)) {
+      // Atomic claim: exactly one worker wins the INSERT for a given
+      // message_id. Losers dedup here. If the winner's pipeline throws we
+      // release the claim so a provider retry can re-attempt.
+      const claim = await claimProcessedMessage(event.message_id, event.from)
+      if (!claim.claimed) {
         results.push({ handled: true, reason: 'deduplicated', message_id: event.message_id })
         continue
       }
 
       const agent = await adapter.getAgentByWhatsAppNumber(event.from)
       if (!agent) {
+        // Not one of ours — but we already claimed the row. Keep it so we
+        // don't reprocess this on every retry.
         results.push({ handled: false, reason: 'not_agent_sender', message_id: event.message_id })
         continue
       }
 
       const agencyId = await adapter.getAgentAgencyId(agent.id)
       if (!entitlements.isEnabled({ agentId: agent.id, agencyId })) {
-        // Feature disabled; send a polite reply and consider it handled so the
-        // orchestrator doesn't create a duplicate conversation.
+        // Feature disabled; send a polite reply and consider the delivery
+        // handled — provider must NOT retry (nothing to fix on their side).
         try {
           const { sendWhatsAppText } = await import('../../whatsapp.js')
           await sendWhatsAppText(event.from, 'This feature is not included in your current plan. Upgrade to enable listing creation via WhatsApp.')
         } catch (err) {
           logger.warn({ err: err.message }, 'failed to send feature disabled reply')
         }
-        await recordDedupe(event.message_id, event.from)
         results.push({ handled: true, reason: 'feature_disabled', message_id: event.message_id })
         continue
       }
@@ -112,12 +104,21 @@ export function createWebhookHandler({ adapter, entitlements, credits, pipeline,
           messageType: event.raw_type || 'text',
           rawPayload: payload,
         })
-        await recordDedupe(event.message_id, event.from)
         results.push({ handled: true, ...result, message_id: event.message_id })
       } catch (err) {
+        // Release the claim so the provider's retry can succeed. Log first
+        // in case the release itself fails — we still want the pipeline
+        // failure visible in ops.
         logger.error({ err: err.message || String(err), message_id: event.message_id }, 'pipeline ingest failed')
-        await recordDedupe(event.message_id, event.from)
-        results.push({ handled: true, error: err.message, message_id: event.message_id })
+        try {
+          await releaseProcessedMessage(event.message_id)
+        } catch (releaseErr) {
+          logger.error(
+            { err: releaseErr.message || String(releaseErr), message_id: event.message_id },
+            'failed to release processed_messages claim after pipeline error',
+          )
+        }
+        results.push({ handled: false, error: err.message, message_id: event.message_id, retryable: true })
       }
     }
 

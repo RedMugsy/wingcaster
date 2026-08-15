@@ -114,15 +114,15 @@ export function registerAgentRoutes(app, { entitlements, credits, pipeline, conf
     }
   })
 
-  app.post('/api/agent/credits/top-up', authMiddleware, async (req, res) => {
-    try {
-      const { amount_usd, stripe_payment_intent_id } = req.body
-      if (!amount_usd || Number(amount_usd) <= 0) return res.status(400).json({ error: 'amount_usd is required' })
-      const balance = await credits.topUp(CreditScope.AGENT, req.user.id, Number(amount_usd), { paymentIntentId: stripe_payment_intent_id })
-      res.json({ success: true, balance, stripe_payload: stripe_payment_intent_id ? null : { amount_usd: Number(amount_usd), currency: 'usd' } })
-    } catch (err) {
-      res.status(500).json({ error: err.message })
-    }
+  app.post('/api/agent/credits/top-up', authMiddleware, async (_req, res) => {
+    // Tenant-facing top-up disabled until Phase 7e wires a real payment gateway.
+    // Until then the ONLY way to credit a tenant is through the platform-admin
+    // manual credit path. Accepting an "amount + payment_intent_id" here without
+    // gateway verification would let any authenticated tenant mint credits.
+    res.status(501).json({
+      error: 'topup_unavailable',
+      reason: 'payment_gateway_not_configured',
+    })
   })
 
   app.get('/api/agent/whatsapp-listings/analytics', authMiddleware, async (req, res) => {

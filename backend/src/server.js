@@ -35,7 +35,11 @@ import {
   updateAgencyMembership,
 } from './tenant-authorization.js'
 import logger from './lib/logger.js'
-import { assertPublishChannelConfigured, warnUnavailablePublishChannels } from './lib/publish-readiness.js'
+import {
+  assertPublishChannelConfigured,
+  tenantHasPublishToken,
+  warnUnavailablePublishChannels,
+} from './lib/publish-readiness.js'
 import { createPropertyWithCanonical } from './lib/property-write.js'
 import { escapeXml } from './lib/xml.js'
 import { sendOtp } from './lib/otp.js'
@@ -5222,13 +5226,6 @@ app.post('/api/listings/:id/publish-social', authMiddleware, async (req, res) =>
       continue
     }
 
-    try {
-      assertPublishChannelConfigured(platform)
-    } catch (error) {
-      results.push({ platform, status: 'failed', error: error.message, error_code: error.code })
-      continue
-    }
-
     const conn = await findOne(
       'marketplace_connections',
       c => c.agent_id === req.user.id && c.platform === platform && c.status === 'connected',
@@ -5238,6 +5235,7 @@ app.post('/api/listings/:id/publish-social', authMiddleware, async (req, res) =>
         platform,
         status: 'failed',
         error: `${platform} is not connected. Connect it in Settings → Integrations.`,
+        error_code: 'NOT_CONNECTED',
       })
       continue
     }
@@ -5247,6 +5245,20 @@ app.post('/api/listings/:id/publish-social', authMiddleware, async (req, res) =>
     // stored access token.
     const creds = resolveConnectionCredentials(conn)
     const model = PLATFORM_INTEGRATION_MODEL[platform] || 'enterprise'
+
+    // Only check the shared-env credentials when the tenant does NOT already
+    // have its own usable publish token. Tenants that stored an override token
+    // (or completed OAuth) must not be 503'd because the Wingcaster env is
+    // unset — the adapter will use their own creds. See
+    // lib/publish-readiness.js#tenantHasPublishToken for the rules.
+    if (!tenantHasPublishToken(platform, creds)) {
+      try {
+        assertPublishChannelConfigured(platform)
+      } catch (error) {
+        results.push({ platform, status: 'failed', error: error.message, error_code: error.code })
+        continue
+      }
+    }
 
     let publishResult = null
     let publishError = null
