@@ -3,9 +3,17 @@ import { useState } from 'react'
 import {
   Menu, X, LogIn, UserPlus, LayoutDashboard, LogOut, User, Inbox,
   ListTodo, Users as UsersIcon, Building2, Megaphone, Calendar, Radar,
-  Coins,
+  Coins, ChevronDown,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { useAuth } from '@/context/AuthContext'
 import { useBrand } from '@/context/BrandContext'
 
@@ -26,9 +34,14 @@ export function Navbar() {
     { path: '/tasks', label: 'Tasks', icon: ListTodo },
   ]
 
-  const adminNav = isAdmin
-    ? [{ path: '/admin/commercial-pricing/territories', label: 'Commercial Pricing', icon: Coins }]
-    : []
+  const commercialPricingSubItems = [
+    { path: '/admin/commercial-pricing/territories', label: 'Territories' },
+    { path: '/admin/commercial-pricing/rate-cards', label: 'Rate cards' },
+    { path: '/admin/commercial-pricing/products', label: 'Products' },
+    { path: '/admin/commercial-pricing/subscriptions', label: 'Subscriptions' },
+    { path: '/admin/commercial-pricing/credit-notes', label: 'Credit notes' },
+  ]
+  const commercialPricingActive = location.pathname.startsWith('/admin/commercial-pricing')
 
   return (
     <nav className="sticky top-0 z-50 w-full border-b bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/60">
@@ -45,9 +58,9 @@ export function Navbar() {
 
         {agent && (
           <div className="hidden items-center gap-1 lg:flex">
-            {[...agentNav, ...adminNav].map((item) => {
+            {agentNav.map((item) => {
               const Icon = item.icon
-              const active = location.pathname === item.path || location.pathname.startsWith(`${item.path.split('/').slice(0, 3).join('/')}/`)
+              const active = location.pathname === item.path || location.pathname.startsWith(`${item.path}/`)
               return (
                 <Link
                   key={item.path}
@@ -64,6 +77,33 @@ export function Navbar() {
                 </Link>
               )
             })}
+            {isAdmin ? (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    className={`flex items-center gap-1.5 rounded-md px-3 py-2 text-sm font-medium transition-colors ${
+                      commercialPricingActive
+                        ? 'text-white'
+                        : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
+                    }`}
+                    style={commercialPricingActive ? { backgroundColor: brand.primaryColor } : undefined}
+                  >
+                    <Coins className="h-4 w-4" />
+                    Commercial
+                    <ChevronDown className="h-3.5 w-3.5" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-56">
+                  <DropdownMenuLabel>Commercial Pricing</DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  {commercialPricingSubItems.map((sub) => (
+                    <DropdownMenuItem key={sub.path} asChild>
+                      <Link to={sub.path}>{sub.label}</Link>
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            ) : null}
           </div>
         )}
 
@@ -111,7 +151,7 @@ export function Navbar() {
         <div className="border-t bg-white px-4 py-3 lg:hidden">
           <div className="flex flex-col gap-1">
             {agent &&
-              [...agentNav, ...adminNav].map((item) => {
+              agentNav.map((item) => {
                 const Icon = item.icon
                 return (
                   <Link
@@ -125,6 +165,24 @@ export function Navbar() {
                   </Link>
                 )
               })}
+            {isAdmin ? (
+              <div className="mt-2 border-t pt-3">
+                <div className="mb-1 flex items-center gap-2 px-3 text-xs font-semibold uppercase text-muted-foreground">
+                  <Coins className="h-3.5 w-3.5" />
+                  Commercial
+                </div>
+                {commercialPricingSubItems.map((sub) => (
+                  <Link
+                    key={sub.path}
+                    to={sub.path}
+                    onClick={() => setMobileOpen(false)}
+                    className="flex items-center gap-2 rounded-md px-6 py-2 text-sm font-medium text-muted-foreground hover:bg-accent"
+                  >
+                    {sub.label}
+                  </Link>
+                ))}
+              </div>
+            ) : null}
             <div className="mt-2 flex flex-col gap-2 border-t pt-3">
               {authLoading ? (
                 <div className="h-9 w-full animate-pulse rounded-md bg-muted" />

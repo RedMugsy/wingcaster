@@ -44,6 +44,11 @@ import { PricingAdminPage } from '@/pages/admin/pricing/PricingAdminPage'
 import { TerritoriesAdminPage } from '@/pages/admin/commercial-pricing/TerritoriesAdminPage'
 import { TerritoryDetailPage } from '@/pages/admin/commercial-pricing/TerritoryDetailPage'
 import { RateCardsAdminPage } from '@/pages/admin/commercial-pricing/RateCardsAdminPage'
+import { ProductsAdminPage } from '@/pages/admin/commercial-pricing/ProductsAdminPage'
+import { ProductDetailPage } from '@/pages/admin/commercial-pricing/ProductDetailPage'
+import { SubscriptionsAdminPage } from '@/pages/admin/commercial-pricing/SubscriptionsAdminPage'
+import { SubscriptionDetailPage } from '@/pages/admin/commercial-pricing/SubscriptionDetailPage'
+import { CreditNotesAdminPage } from '@/pages/admin/commercial-pricing/CreditNotesAdminPage'
 import { InspectorPage } from '@/pages/inspector/InspectorPage'
 import { AreaProfilePage } from '@/pages/AreaProfilePage'
 import { PublicAgencyPage } from '@/pages/PublicAgencyPage'
@@ -102,6 +107,11 @@ function AppShell() {
           <Route path="/admin/commercial-pricing/territories" element={<TerritoriesAdminPage />} />
           <Route path="/admin/commercial-pricing/territories/:id" element={<TerritoryDetailPage />} />
           <Route path="/admin/commercial-pricing/rate-cards" element={<RateCardsAdminPage />} />
+          <Route path="/admin/commercial-pricing/products" element={<ProductsAdminPage />} />
+          <Route path="/admin/commercial-pricing/products/:id" element={<ProductDetailPage />} />
+          <Route path="/admin/commercial-pricing/subscriptions" element={<SubscriptionsAdminPage />} />
+          <Route path="/admin/commercial-pricing/subscriptions/:id" element={<SubscriptionDetailPage />} />
+          <Route path="/admin/commercial-pricing/credit-notes" element={<CreditNotesAdminPage />} />
           <Route path="/agency/whatsapp-listings" element={<AgencyWhatsAppListingsPage />} />
           <Route path="/agent/whatsapp-listings" element={<AgentWhatsAppListingsPage />} />
           <Route path="/areas/:slug" element={<AreaProfilePage />} />
