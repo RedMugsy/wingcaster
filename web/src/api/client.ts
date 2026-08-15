@@ -7,6 +7,16 @@ import type {
   PricingRecalculationJob,
   PricingTrendSnapshot,
 } from '@/types/marketPricing'
+import type {
+  City,
+  CoreRateCard,
+  ListAdminOpts,
+  MarketContext,
+  PricePreview,
+  PricePreviewInput,
+  Territory,
+  Zone,
+} from '@/types/commercialPricing'
 
 export interface CommandItem {
   message_id: string
@@ -1321,4 +1331,65 @@ export const api = {
     provider: string
     change_summary: Record<string, unknown> | null
   }> => fetchJson('/listings-ai/describe', { method: 'POST', body: JSON.stringify(payload) }),
+
+  // ============================================================
+  // Commercial pricing admin — territory/zone/city/rate-card CRUD.
+  // Backed by /api/admin/pricing/* (platform-admin only).
+  // Not to be confused with property-valuation "pricing" (see the
+  // marketPricing.ts types + /api/pricing/* endpoints).
+  // ============================================================
+
+  listAdminRateCards: (): Promise<{ cards: CoreRateCard[]; active_id: string | null }> =>
+    fetchJson('/admin/pricing/rate-cards'),
+  createAdminRateCard: (input: Partial<CoreRateCard>): Promise<{ card: CoreRateCard }> =>
+    fetchJson('/admin/pricing/rate-cards', { method: 'POST', body: JSON.stringify(input) }),
+  updateAdminRateCard: (id: string, patch: Partial<CoreRateCard>): Promise<{ card: CoreRateCard }> =>
+    fetchJson(`/admin/pricing/rate-cards/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+  activateAdminRateCard: (id: string): Promise<{ active: CoreRateCard }> =>
+    fetchJson(`/admin/pricing/rate-cards/${id}/activate`, { method: 'POST' }),
+
+  listAdminTerritories: (opts: ListAdminOpts = {}): Promise<{ territories: Territory[] }> =>
+    fetchJson(`/admin/pricing/territories${buildQuery(opts)}`),
+  getAdminTerritory: (id: string): Promise<{ territory: Territory; zones: Zone[] }> =>
+    fetchJson(`/admin/pricing/territories/${id}`),
+  createAdminTerritory: (input: Partial<Territory>): Promise<{ territory: Territory }> =>
+    fetchJson('/admin/pricing/territories', { method: 'POST', body: JSON.stringify(input) }),
+  updateAdminTerritory: (id: string, patch: Partial<Territory>): Promise<{ territory: Territory }> =>
+    fetchJson(`/admin/pricing/territories/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+  deactivateAdminTerritory: (id: string): Promise<{ territory: Territory }> =>
+    fetchJson(`/admin/pricing/territories/${id}`, { method: 'DELETE' }),
+
+  listAdminZones: (opts: ListAdminOpts = {}): Promise<{ zones: Zone[] }> =>
+    fetchJson(`/admin/pricing/zones${buildQuery(opts)}`),
+  createAdminZone: (input: Partial<Zone>): Promise<{ zone: Zone }> =>
+    fetchJson('/admin/pricing/zones', { method: 'POST', body: JSON.stringify(input) }),
+  updateAdminZone: (id: string, patch: Partial<Zone>): Promise<{ zone: Zone }> =>
+    fetchJson(`/admin/pricing/zones/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+  deactivateAdminZone: (id: string): Promise<{ zone: Zone }> =>
+    fetchJson(`/admin/pricing/zones/${id}`, { method: 'DELETE' }),
+
+  listAdminCities: (opts: ListAdminOpts = {}): Promise<{ cities: City[] }> =>
+    fetchJson(`/admin/pricing/cities${buildQuery(opts)}`),
+  createAdminCity: (input: Partial<City>): Promise<{ city: City }> =>
+    fetchJson('/admin/pricing/cities', { method: 'POST', body: JSON.stringify(input) }),
+  updateAdminCity: (id: string, patch: Partial<City>): Promise<{ city: City }> =>
+    fetchJson(`/admin/pricing/cities/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+  deactivateAdminCity: (id: string): Promise<{ city: City }> =>
+    fetchJson(`/admin/pricing/cities/${id}`, { method: 'DELETE' }),
+  bulkAssignAdminCitiesToZone: (city_ids: string[], zone_id: string | null): Promise<{ cities: City[] }> =>
+    fetchJson('/admin/pricing/cities/bulk-assign-zone', {
+      method: 'POST',
+      body: JSON.stringify({ city_ids, zone_id }),
+    }),
+
+  previewCommercialPrice: (input: PricePreviewInput): Promise<{ context: MarketContext; price: PricePreview }> =>
+    fetchJson('/admin/pricing/preview', { method: 'POST', body: JSON.stringify(input) }),
+}
+
+function buildQuery(opts: ListAdminOpts): string {
+  const parts: string[] = []
+  if (opts.include_inactive) parts.push('include_inactive=true')
+  if (opts.territory_id) parts.push(`territory_id=${encodeURIComponent(opts.territory_id)}`)
+  if (opts.zone_id) parts.push(`zone_id=${encodeURIComponent(opts.zone_id)}`)
+  return parts.length ? `?${parts.join('&')}` : ''
 }
