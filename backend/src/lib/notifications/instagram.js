@@ -10,10 +10,8 @@
  *   - Meta app with instagram_basic, instagram_manage_messages, pages_messaging (where applicable).
  *
  * Env:
- *   INSTAGRAM_PROVIDER=dev|meta_graph          (default: dev)
  *   INSTAGRAM_PAGE_ACCESS_TOKEN                (page-scoped token for DMs and comment replies)
  *   INSTAGRAM_BUSINESS_ACCOUNT_ID              (for Graph API comment actions)
- *   INSTAGRAM_DEV_ALWAYS_SUCCESS=true          (default: true)
  */
 
 import { v4 as uuidv4 } from 'uuid'
@@ -28,17 +26,21 @@ function normalizeInstagramHandle(handle) {
 
 export function getInstagramConfig() {
   return {
-    provider: process.env.INSTAGRAM_PROVIDER || 'dev',
     pageAccessToken: process.env.INSTAGRAM_PAGE_ACCESS_TOKEN || '',
     businessAccountId: process.env.INSTAGRAM_BUSINESS_ACCOUNT_ID || '',
-    devAlwaysSuccess: process.env.INSTAGRAM_DEV_ALWAYS_SUCCESS !== 'false',
   }
 }
 
 export function isInstagramEnabled() {
-  const cfg = getInstagramConfig()
-  if (cfg.provider === 'dev') return true
-  return Boolean(cfg.pageAccessToken)
+  return Boolean(getInstagramConfig().pageAccessToken)
+}
+
+function requireInstagramCreds(token, feature) {
+  if (!token) {
+    const err = new Error(`Instagram ${feature} requires INSTAGRAM_PAGE_ACCESS_TOKEN to be set`)
+    err.code = 'INSTAGRAM_UNCONFIGURED'
+    throw err
+  }
 }
 
 /**
@@ -49,20 +51,7 @@ export async function sendInstagramDM({ recipientId, text, attachmentUrl, access
   const token = accessToken || cfg.pageAccessToken
   if (!recipientId) throw Object.assign(new Error('recipientId is required for Instagram DM'), { code: 'MISSING_RECIPIENT' })
   if (!text?.trim() && !attachmentUrl) throw Object.assign(new Error('text or attachmentUrl is required'), { code: 'MISSING_CONTENT' })
-
-  if (cfg.provider === 'dev' || !isInstagramEnabled()) {
-    if (cfg.devAlwaysSuccess) {
-      return {
-        ok: true,
-        provider: 'instagram_dev_simulator',
-        provider_message_id: `instagram_dm_dev_${uuidv4().slice(0, 12)}`,
-        recipient_id: recipientId,
-        text: text || '',
-        simulated: true,
-      }
-    }
-    throw Object.assign(new Error('Instagram dev mode configured to fail'), { code: 'DEV_FAILURE' })
-  }
+  requireInstagramCreds(token, 'DMs')
 
   const payload = {
     recipient: { id: recipientId },
@@ -95,7 +84,6 @@ export async function sendInstagramDM({ recipientId, text, attachmentUrl, access
     provider_message_id: data?.message_id || null,
     recipient_id: recipientId,
     text: text || '',
-    simulated: false,
   }
 }
 
@@ -108,20 +96,7 @@ export async function replyToInstagramComment({ commentId, text, accessToken }) 
   const token = accessToken || cfg.pageAccessToken
   if (!commentId) throw Object.assign(new Error('commentId is required'), { code: 'MISSING_COMMENT_ID' })
   if (!text?.trim()) throw Object.assign(new Error('reply text is required'), { code: 'MISSING_CONTENT' })
-
-  if (cfg.provider === 'dev' || !isInstagramEnabled()) {
-    if (cfg.devAlwaysSuccess) {
-      return {
-        ok: true,
-        provider: 'instagram_dev_simulator',
-        provider_message_id: `instagram_comment_dev_${uuidv4().slice(0, 12)}`,
-        comment_id: commentId,
-        text: text.trim(),
-        simulated: true,
-      }
-    }
-    throw Object.assign(new Error('Instagram dev mode configured to fail'), { code: 'DEV_FAILURE' })
-  }
+  requireInstagramCreds(token, 'comment replies')
 
   const res = await fetch(`${GRAPH_BASE}/${commentId}/replies?access_token=${token}`, {
     method: 'POST',
@@ -143,7 +118,6 @@ export async function replyToInstagramComment({ commentId, text, accessToken }) 
     provider_message_id: data?.id || null,
     comment_id: commentId,
     text: text.trim(),
-    simulated: false,
   }
 }
 
@@ -190,13 +164,7 @@ export async function fetchInstagramInsights({ mediaId, accessToken }) {
   const cfg = getInstagramConfig()
   const token = accessToken || cfg.pageAccessToken
   if (!mediaId) throw Object.assign(new Error('mediaId is required'), { code: 'MISSING_MEDIA_ID' })
-
-  if (cfg.provider === 'dev' || !isInstagramEnabled() || !token) {
-    return {
-      impressions: 1200, reach: 890, likes: 74, comments: 6, shares: 3, saves: 12, clicks: null,
-      source: 'instagram_dev_simulator', simulated: true, fetched_at: new Date().toISOString(),
-    }
-  }
+  requireInstagramCreds(token, 'insights')
 
   const metrics = 'impressions,reach,likes,comments,shares,saved'
   const res = await fetch(`${GRAPH_BASE}/${mediaId}/insights?metric=${metrics}&access_token=${token}`)
@@ -220,7 +188,6 @@ export async function fetchInstagramInsights({ mediaId, accessToken }) {
     saves: byName.saved ?? null,
     clicks: null,
     source: 'instagram_graph_api',
-    simulated: false,
     fetched_at: new Date().toISOString(),
   }
 }
@@ -259,7 +226,6 @@ export async function publishInstagramFeed({ imageUrl, caption, businessAccountI
     provider: 'instagram_graph_api',
     provider_message_id: publishData.id,
     media_id: publishData.id,
-    simulated: false,
   }
 }
 
@@ -307,7 +273,6 @@ export async function publishInstagramCarousel({ imageUrls, caption, businessAcc
     provider: 'instagram_graph_api',
     provider_message_id: publishData.id,
     media_id: publishData.id,
-    simulated: false,
   }
 }
 
@@ -347,7 +312,6 @@ export async function publishInstagramReel({ videoUrl, caption, businessAccountI
     provider: 'instagram_graph_api',
     provider_message_id: publishData.id,
     media_id: publishData.id,
-    simulated: false,
   }
 }
 
@@ -382,7 +346,6 @@ export async function publishInstagramStory({ imageUrl, businessAccountId, acces
     provider: 'instagram_graph_api',
     provider_message_id: publishData.id,
     media_id: publishData.id,
-    simulated: false,
   }
 }
 

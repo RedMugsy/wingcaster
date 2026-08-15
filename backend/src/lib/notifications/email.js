@@ -7,14 +7,13 @@
  *   - SendGrid -> marketing and bulk distribution campaigns later
  *
  * Env:
- *   EMAIL_PROVIDER=dev|resend|sendgrid|smtp|ses    (default: dev)
+ *   EMAIL_PROVIDER=resend|sendgrid|smtp|ses        (optional; auto-detected from creds)
  *   RESEND_API_KEY
  *   RESEND_FROM_EMAIL
  *   SENDGRID_API_KEY
  *   SENDGRID_FROM_EMAIL
  *   SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_FROM_EMAIL
  *   SES_ACCESS_KEY_ID, SES_SECRET_ACCESS_KEY, SES_REGION, SES_FROM_EMAIL
- *   EMAIL_DEV_ALWAYS_SUCCESS=true                  (default: true)
  */
 
 import { v4 as uuidv4 } from 'uuid'
@@ -25,8 +24,16 @@ function normalizeEmail(email) {
 }
 
 export function getEmailConfig() {
+  const explicit = (process.env.EMAIL_PROVIDER || '').toLowerCase()
+  const auto = process.env.RESEND_API_KEY
+    ? 'resend'
+    : process.env.SENDGRID_API_KEY
+      ? 'sendgrid'
+      : (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS)
+        ? 'smtp'
+        : null
   return {
-    provider: process.env.EMAIL_PROVIDER || 'dev',
+    provider: explicit || auto,
     resendApiKey: process.env.RESEND_API_KEY || '',
     resendFrom: normalizeEmail(process.env.RESEND_FROM_EMAIL || process.env.EMAIL_FROM || ''),
     sendgridApiKey: process.env.SENDGRID_API_KEY || '',
@@ -40,13 +47,11 @@ export function getEmailConfig() {
     sesSecretAccessKey: process.env.SES_SECRET_ACCESS_KEY || '',
     sesRegion: process.env.SES_REGION || 'us-east-1',
     sesFrom: normalizeEmail(process.env.SES_FROM_EMAIL || process.env.EMAIL_FROM || ''),
-    devAlwaysSuccess: process.env.EMAIL_DEV_ALWAYS_SUCCESS !== 'false',
   }
 }
 
 export function isEmailEnabled() {
   const cfg = getEmailConfig()
-  if (cfg.provider === 'dev') return true
   if (cfg.provider === 'resend') return Boolean(cfg.resendApiKey && cfg.resendFrom)
   if (cfg.provider === 'sendgrid') return Boolean(cfg.sendgridApiKey && cfg.sendgridFrom)
   if (cfg.provider === 'smtp') return Boolean(cfg.smtpHost && cfg.smtpUser && cfg.smtpPass && cfg.smtpFrom)
@@ -60,37 +65,20 @@ export async function sendEmail({ to, subject, body, html, replyTo }) {
   if (!recipient) throw Object.assign(new Error('Recipient email is required'), { code: 'MISSING_RECIPIENT' })
   if (!body?.trim() && !html?.trim()) throw Object.assign(new Error('Message body or html is required'), { code: 'MISSING_BODY' })
 
-  if (cfg.provider === 'dev' || !isEmailEnabled()) {
-    if (cfg.devAlwaysSuccess) {
-      return {
-        ok: true,
-        provider: 'email_dev_simulator',
-        provider_message_id: `email_dev_${uuidv4().slice(0, 12)}`,
-        to: recipient,
-        subject: subject || '',
-        body: body || '',
-        simulated: true,
-      }
-    }
-    throw Object.assign(new Error('Email dev mode configured to fail'), { code: 'DEV_FAILURE' })
+  if (!isEmailEnabled()) {
+    const err = new Error('Email transport is not configured (need RESEND_API_KEY, SENDGRID_API_KEY, or SMTP_* + EMAIL_FROM)')
+    err.code = 'EMAIL_UNCONFIGURED'
+    throw err
   }
 
-  if (cfg.provider === 'resend') {
-    return sendResend(cfg, { to: recipient, subject, body, html, replyTo })
-  }
-
-  if (cfg.provider === 'sendgrid') {
-    return sendSendGrid(cfg, { to: recipient, subject, body, html, replyTo })
-  }
-
+  if (cfg.provider === 'resend') return sendResend(cfg, { to: recipient, subject, body, html, replyTo })
+  if (cfg.provider === 'sendgrid') return sendSendGrid(cfg, { to: recipient, subject, body, html, replyTo })
   if (cfg.provider === 'smtp') {
-    throw Object.assign(new Error('SMTP live provider requires nodemailer; install it or use sendgrid/ses/dev'), { code: 'SMTP_NOT_IMPLEMENTED' })
+    throw Object.assign(new Error('SMTP provider not wired here — use lib/otp.js path for signup OTP; general SMTP mail is Phase 7f'), { code: 'SMTP_NOT_IMPLEMENTED' })
   }
-
   if (cfg.provider === 'ses') {
-    throw Object.assign(new Error('SES live provider requires AWS SDK; install it or use sendgrid/smtp/dev'), { code: 'SES_NOT_IMPLEMENTED' })
+    throw Object.assign(new Error('SES provider requires AWS SDK — not yet wired'), { code: 'SES_NOT_IMPLEMENTED' })
   }
-
   throw Object.assign(new Error(`Unknown email provider: ${cfg.provider}`), { code: 'UNKNOWN_PROVIDER' })
 }
 
@@ -132,7 +120,6 @@ async function sendResend(cfg, { to, subject, body, html, replyTo }) {
     to,
     subject: subject || '',
     status: 'accepted',
-    simulated: false,
   }
 }
 
@@ -177,7 +164,6 @@ async function sendSendGrid(cfg, { to, subject, body, html }) {
     to,
     subject: subject || '',
     status: 'accepted',
-    simulated: false,
   }
 }
 

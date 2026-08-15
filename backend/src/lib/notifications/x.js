@@ -2,36 +2,38 @@
  * X (Twitter) dispatcher for the Conversation Orchestrator.
  *
  * X API v2 is required for DMs and mentions. Live access requires a paid
- * Basic/Pro/Enterprise tier and appropriate OAuth 2.0 scopes. This module
- * provides a dev simulator and a live-path scaffold that can be enabled once
- * credentials are available.
+ * Basic/Pro/Enterprise tier and appropriate OAuth 2.0 scopes. All entry
+ * points throw X_UNCONFIGURED when credentials are missing — no simulator.
  *
  * Env:
- *   X_PROVIDER=dev|x_api_v2                    (default: dev)
  *   X_BEARER_TOKEN                             (for API v2 lookups)
  *   X_API_KEY / X_API_KEY_SECRET               (OAuth 1.0a user context)
  *   X_ACCESS_TOKEN / X_ACCESS_TOKEN_SECRET     (OAuth 1.0a user context)
- *   X_DEV_ALWAYS_SUCCESS=true                  (default: true)
  */
 
 import { v4 as uuidv4 } from 'uuid'
 
 export function getXConfig() {
   return {
-    provider: process.env.X_PROVIDER || 'dev',
     bearerToken: process.env.X_BEARER_TOKEN || '',
     apiKey: process.env.X_API_KEY || '',
     apiKeySecret: process.env.X_API_KEY_SECRET || '',
     accessToken: process.env.X_ACCESS_TOKEN || '',
     accessTokenSecret: process.env.X_ACCESS_TOKEN_SECRET || '',
-    devAlwaysSuccess: process.env.X_DEV_ALWAYS_SUCCESS !== 'false',
   }
 }
 
 export function isXEnabled() {
   const cfg = getXConfig()
-  if (cfg.provider === 'dev') return true
   return Boolean(cfg.bearerToken && cfg.accessToken && cfg.accessTokenSecret)
+}
+
+function requireXCreds(token, feature) {
+  if (!token) {
+    const err = new Error(`X ${feature} requires X_BEARER_TOKEN to be set`)
+    err.code = 'X_UNCONFIGURED'
+    throw err
+  }
 }
 
 function xApiBase() {
@@ -46,20 +48,7 @@ export async function sendXDM({ participantId, text, bearerToken }) {
   const token = bearerToken || cfg.bearerToken
   if (!participantId) throw Object.assign(new Error('participantId is required for X DM'), { code: 'MISSING_RECIPIENT' })
   if (!text?.trim()) throw Object.assign(new Error('text is required'), { code: 'MISSING_CONTENT' })
-
-  if (cfg.provider === 'dev' || !isXEnabled()) {
-    if (cfg.devAlwaysSuccess) {
-      return {
-        ok: true,
-        provider: 'x_dev_simulator',
-        provider_message_id: `x_dm_dev_${uuidv4().slice(0, 12)}`,
-        participant_id: participantId,
-        text: text.trim(),
-        simulated: true,
-      }
-    }
-    throw Object.assign(new Error('X dev mode configured to fail'), { code: 'DEV_FAILURE' })
-  }
+  requireXCreds(token, 'DMs')
 
   // Live X API v2 DM conversation creation + message send.
   // Requires OAuth 1.0a user context or OAuth 2.0 with dm.write scope.
@@ -89,7 +78,6 @@ export async function sendXDM({ participantId, text, bearerToken }) {
     provider_message_id: data?.data?.dm_conversation_id || data?.data?.id || null,
     participant_id: participantId,
     text: text.trim(),
-    simulated: false,
   }
 }
 
@@ -102,20 +90,7 @@ export async function replyToXMention({ tweetId, text, bearerToken }) {
   const token = bearerToken || cfg.bearerToken
   if (!tweetId) throw Object.assign(new Error('tweetId is required'), { code: 'MISSING_TWEET_ID' })
   if (!text?.trim()) throw Object.assign(new Error('reply text is required'), { code: 'MISSING_CONTENT' })
-
-  if (cfg.provider === 'dev' || !isXEnabled()) {
-    if (cfg.devAlwaysSuccess) {
-      return {
-        ok: true,
-        provider: 'x_dev_simulator',
-        provider_message_id: `x_mention_dev_${uuidv4().slice(0, 12)}`,
-        tweet_id: tweetId,
-        text: text.trim(),
-        simulated: true,
-      }
-    }
-    throw Object.assign(new Error('X dev mode configured to fail'), { code: 'DEV_FAILURE' })
-  }
+  requireXCreds(token, 'mention replies')
 
   const res = await fetch(`${xApiBase()}/tweets`, {
     method: 'POST',
@@ -140,7 +115,6 @@ export async function replyToXMention({ tweetId, text, bearerToken }) {
     provider_message_id: data?.data?.id || null,
     tweet_id: tweetId,
     text: text.trim(),
-    simulated: false,
   }
 }
 
@@ -215,13 +189,7 @@ export async function fetchXInsights({ tweetId, bearerToken }) {
   const cfg = getXConfig()
   const token = bearerToken || cfg.bearerToken
   if (!tweetId) throw Object.assign(new Error('tweetId is required'), { code: 'MISSING_TWEET_ID' })
-
-  if (cfg.provider === 'dev' || !isXEnabled() || !token) {
-    return {
-      impressions: 4300, reach: null, likes: 58, comments: 5, shares: 11, saves: 4, clicks: null,
-      source: 'x_dev_simulator', simulated: true, fetched_at: new Date().toISOString(),
-    }
-  }
+  requireXCreds(token, 'insights')
 
   const res = await fetch(`${xApiBase()}/tweets/${tweetId}?tweet.fields=public_metrics`, {
     headers: { Authorization: `Bearer ${token}` },
@@ -243,7 +211,6 @@ export async function fetchXInsights({ tweetId, bearerToken }) {
     saves: m.bookmark_count ?? null,
     clicks: null,
     source: 'x_api_v2',
-    simulated: false,
     fetched_at: new Date().toISOString(),
   }
 }

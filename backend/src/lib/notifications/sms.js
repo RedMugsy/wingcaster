@@ -1,13 +1,7 @@
 /**
- * SMS dispatcher for the Conversation Orchestrator.
- * Supports Twilio live mode and dev simulation mode.
+ * SMS dispatcher (Twilio). Throws SMS_UNCONFIGURED when creds are missing.
  *
- * Env:
- *   SMS_PROVIDER=twilio|dev        (default: dev)
- *   TWILIO_ACCOUNT_SID
- *   TWILIO_AUTH_TOKEN
- *   TWILIO_PHONE_NUMBER            (E.164 outbound sender)
- *   SMS_DEV_ALWAYS_SUCCESS=true    (default: true)
+ * Env: TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_PHONE_NUMBER (E.164).
  */
 
 import { v4 as uuidv4 } from 'uuid'
@@ -19,18 +13,27 @@ function normalizePhone(phone) {
 
 export function getSMSConfig() {
   return {
-    provider: process.env.SMS_PROVIDER || 'dev',
     accountSid: process.env.TWILIO_ACCOUNT_SID || '',
     authToken: process.env.TWILIO_AUTH_TOKEN || '',
     fromNumber: normalizePhone(process.env.TWILIO_PHONE_NUMBER || ''),
-    devAlwaysSuccess: process.env.SMS_DEV_ALWAYS_SUCCESS !== 'false',
   }
 }
 
 export function isSMSEnabled() {
   const cfg = getSMSConfig()
-  if (cfg.provider === 'dev') return true
   return Boolean(cfg.accountSid && cfg.authToken && cfg.fromNumber)
+}
+
+function requireSMSCreds(cfg, feature) {
+  const missing = []
+  if (!cfg.accountSid) missing.push('TWILIO_ACCOUNT_SID')
+  if (!cfg.authToken) missing.push('TWILIO_AUTH_TOKEN')
+  if (!cfg.fromNumber) missing.push('TWILIO_PHONE_NUMBER')
+  if (missing.length) {
+    const err = new Error(`SMS ${feature} requires ${missing.join(', ')} to be set`)
+    err.code = 'SMS_UNCONFIGURED'
+    throw err
+  }
 }
 
 export async function sendSMS({ to, body }) {
@@ -38,21 +41,7 @@ export async function sendSMS({ to, body }) {
   const phone = normalizePhone(to)
   if (!phone) throw Object.assign(new Error('Recipient phone number is required'), { code: 'MISSING_RECIPIENT' })
   if (!body?.trim()) throw Object.assign(new Error('Message body is required'), { code: 'MISSING_BODY' })
-
-  if (cfg.provider === 'dev' || !isSMSEnabled()) {
-    // Dev simulation: pretend the message was accepted by the provider.
-    if (cfg.devAlwaysSuccess) {
-      return {
-        ok: true,
-        provider: 'sms_dev_simulator',
-        provider_message_id: `sms_dev_${uuidv4().slice(0, 12)}`,
-        to: phone,
-        body: body.trim(),
-        simulated: true,
-      }
-    }
-    throw Object.assign(new Error('SMS dev mode configured to fail'), { code: 'DEV_FAILURE' })
-  }
+  requireSMSCreds(cfg, 'send')
 
   // Twilio live path
   const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${cfg.accountSid}/Messages.json`
@@ -86,7 +75,6 @@ export async function sendSMS({ to, body }) {
     to: data.to || phone,
     body: data.body || body.trim(),
     status: data.status || 'queued',
-    simulated: false,
   }
 }
 

@@ -13,11 +13,9 @@
  *   - An OAuth 2.0 access token for that author.
  *
  * Env:
- *   LINKEDIN_PROVIDER=dev|linkedin_api      (default: dev)
  *   LINKEDIN_ACCESS_TOKEN                   (member-scoped or org-scoped OAuth token)
  *   LINKEDIN_AUTHOR_URN                     (default author, e.g. urn:li:organization:12345)
  *   LINKEDIN_API_VERSION=202405             (LI-Version header, YYYYMM)
- *   LINKEDIN_DEV_ALWAYS_SUCCESS=true        (default: true)
  */
 
 import { v4 as uuidv4 } from 'uuid'
@@ -27,18 +25,23 @@ const UGC_BASE = 'https://api.linkedin.com/v2'
 
 export function getLinkedInConfig() {
   return {
-    provider: process.env.LINKEDIN_PROVIDER || 'dev',
     accessToken: process.env.LINKEDIN_ACCESS_TOKEN || '',
     authorUrn: process.env.LINKEDIN_AUTHOR_URN || '',
     apiVersion: process.env.LINKEDIN_API_VERSION || '202405',
-    devAlwaysSuccess: process.env.LINKEDIN_DEV_ALWAYS_SUCCESS !== 'false',
   }
 }
 
 export function isLinkedInEnabled() {
   const cfg = getLinkedInConfig()
-  if (cfg.provider === 'dev') return true
   return Boolean(cfg.accessToken && cfg.authorUrn)
+}
+
+function requireLinkedInCreds(token, feature) {
+  if (!token) {
+    const err = new Error(`LinkedIn ${feature} requires LINKEDIN_ACCESS_TOKEN to be set`)
+    err.code = 'LINKEDIN_UNCONFIGURED'
+    throw err
+  }
 }
 
 /**
@@ -160,13 +163,7 @@ export async function fetchLinkedInInsights({ shareUrn, authorUrn, accessToken }
   const token = accessToken || cfg.accessToken
   const author = authorUrn || cfg.authorUrn
   if (!shareUrn) throw Object.assign(new Error('shareUrn is required'), { code: 'MISSING_SHARE_URN' })
-
-  if (cfg.provider === 'dev' || !isLinkedInEnabled() || !token) {
-    return {
-      impressions: 950, reach: null, likes: 34, comments: 2, shares: 5, saves: null, clicks: 18,
-      source: 'linkedin_dev_simulator', simulated: true, fetched_at: new Date().toISOString(),
-    }
-  }
+  requireLinkedInCreds(token, 'insights')
 
   const path = `/organizationalEntityShareStatistics?q=organizationalEntity&organizationalEntity=${encodeURIComponent(author)}&shares[0]=${encodeURIComponent(shareUrn)}`
   const res = await fetch(`${REST_BASE}${path}`, {
@@ -193,7 +190,6 @@ export async function fetchLinkedInInsights({ shareUrn, authorUrn, accessToken }
     saves: null,
     clicks: row.clickCount ?? null,
     source: 'linkedin_share_statistics',
-    simulated: false,
     fetched_at: new Date().toISOString(),
   }
 }
@@ -204,20 +200,7 @@ export async function replyToLinkedInComment({ postUrn, parentCommentUrn, text, 
   const token = accessToken || cfg.accessToken
   if (!postUrn) throw Object.assign(new Error('postUrn is required'), { code: 'MISSING_POST' })
   if (!text?.trim()) throw Object.assign(new Error('reply text is required'), { code: 'MISSING_CONTENT' })
-
-  if (cfg.provider === 'dev' || !isLinkedInEnabled()) {
-    if (cfg.devAlwaysSuccess) {
-      return {
-        ok: true,
-        provider: 'linkedin_dev_simulator',
-        provider_message_id: `li_comment_dev_${uuidv4().slice(0, 12)}`,
-        post_urn: postUrn,
-        text: text.trim(),
-        simulated: true,
-      }
-    }
-    throw Object.assign(new Error('LinkedIn dev mode configured to fail'), { code: 'DEV_FAILURE' })
-  }
+  requireLinkedInCreds(token, 'comment replies')
 
   const body = {
     actor,

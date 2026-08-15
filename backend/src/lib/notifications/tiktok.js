@@ -1,111 +1,67 @@
 /**
- * TikTok dispatcher for the Conversation Orchestrator.
+ * TikTok dispatcher for the Conversation Orchestrator + publish pipeline.
  *
- * TikTok does not expose a public API for DMs or programmatic comment replies
- * for most third-party integrations. This module provides a dev simulator and
- * a live-path scaffold that can be wired once TikTok for Business or partner
- * API access is available.
+ * TikTok's public API surface is narrow: Content Posting API for
+ * publishing photos/videos, Research API for insights. DMs and comment
+ * replies require partner-tier access most integrations don't have.
+ *
+ * Every function throws with a coded error when credentials are
+ * missing or the underlying integration isn't yet wired. No simulator
+ * paths — a fake "delivered" for an unimplemented lane is worse than
+ * a loud failure the caller can convert to a 503.
  *
  * Env:
- *   TIKTOK_PROVIDER=dev|tiktok_for_business   (default: dev)
- *   TIKTOK_ACCESS_TOKEN
- *   TIKTOK_DEV_ALWAYS_SUCCESS=true            (default: true)
+ *   TIKTOK_ACCESS_TOKEN — required for anything that hits the live API
  */
 
 import { v4 as uuidv4 } from 'uuid'
 
 export function getTikTokConfig() {
   return {
-    provider: process.env.TIKTOK_PROVIDER || 'dev',
     accessToken: process.env.TIKTOK_ACCESS_TOKEN || '',
-    devAlwaysSuccess: process.env.TIKTOK_DEV_ALWAYS_SUCCESS !== 'false',
   }
 }
 
 export function isTikTokEnabled() {
-  const cfg = getTikTokConfig()
-  if (cfg.provider === 'dev') return true
-  return Boolean(cfg.accessToken)
+  return Boolean(getTikTokConfig().accessToken)
 }
 
-/**
- * Reply to a TikTok comment. Public replies must not contain PII.
- * Live path requires TikTok Research / Content API access which is restricted.
- */
+function requireTikTokCreds(token, feature) {
+  if (!token) {
+    const err = new Error(`TikTok ${feature} requires TIKTOK_ACCESS_TOKEN to be set`)
+    err.code = 'TIKTOK_UNCONFIGURED'
+    throw err
+  }
+}
+
+function unimplemented(feature) {
+  const err = new Error(`TikTok ${feature} requires partner API access (not yet implemented)`)
+  err.code = 'TIKTOK_UNIMPLEMENTED'
+  throw err
+}
+
 export async function replyToTikTokComment({ commentId, text, accessToken }) {
-  const cfg = getTikTokConfig()
-  const token = accessToken || cfg.accessToken
-  void token
+  const token = accessToken || getTikTokConfig().accessToken
   if (!commentId) throw Object.assign(new Error('commentId is required'), { code: 'MISSING_COMMENT_ID' })
   if (!text?.trim()) throw Object.assign(new Error('reply text is required'), { code: 'MISSING_CONTENT' })
-
-  if (cfg.provider === 'dev' || !isTikTokEnabled()) {
-    if (cfg.devAlwaysSuccess) {
-      return {
-        ok: true,
-        provider: 'tiktok_dev_simulator',
-        provider_message_id: `tiktok_comment_dev_${uuidv4().slice(0, 12)}`,
-        comment_id: commentId,
-        text: text.trim(),
-        simulated: true,
-      }
-    }
-    throw Object.assign(new Error('TikTok dev mode configured to fail'), { code: 'DEV_FAILURE' })
-  }
-
-  throw Object.assign(
-    new Error('TikTok live comment replies require TikTok for Business / partner API access (not yet implemented)'),
-    { code: 'TIKTOK_LIVE_NOT_IMPLEMENTED' },
-  )
+  requireTikTokCreds(token, 'comment replies')
+  unimplemented('comment replies')
 }
 
-/**
- * Send a TikTok DM. Live path is not generally available to third-party apps.
- */
 export async function sendTikTokDM({ userId, text, accessToken }) {
-  const cfg = getTikTokConfig()
-  const token = accessToken || cfg.accessToken
-  void token
+  const token = accessToken || getTikTokConfig().accessToken
   if (!userId) throw Object.assign(new Error('userId is required'), { code: 'MISSING_RECIPIENT' })
   if (!text?.trim()) throw Object.assign(new Error('text is required'), { code: 'MISSING_CONTENT' })
-
-  if (cfg.provider === 'dev' || !isTikTokEnabled()) {
-    if (cfg.devAlwaysSuccess) {
-      return {
-        ok: true,
-        provider: 'tiktok_dev_simulator',
-        provider_message_id: `tiktok_dm_dev_${uuidv4().slice(0, 12)}`,
-        user_id: userId,
-        text: text.trim(),
-        simulated: true,
-      }
-    }
-    throw Object.assign(new Error('TikTok dev mode configured to fail'), { code: 'DEV_FAILURE' })
-  }
-
-  throw Object.assign(
-    new Error('TikTok live DM sending requires TikTok partner API access (not yet implemented)'),
-    { code: 'TIKTOK_LIVE_NOT_IMPLEMENTED' },
-  )
+  requireTikTokCreds(token, 'DMs')
+  unimplemented('DM sending')
 }
 
-/**
- * Publish a photo post to TikTok. Live path uses TikTok Content Posting API's
- * Direct Post (photo mode). Requires a TikTok for Business developer app with
- * `video.publish` scope (photo mode is enabled at app-review time).
- *
- * Live endpoint: POST https://open.tiktokapis.com/v2/post/publish/content/init/
- *   body: { post_info, source_info: { source: 'PULL_FROM_URL', photo_images: [...] } }
- */
 export async function publishTikTokPhoto({ imageUrls, caption, accessToken }) {
-  const cfg = getTikTokConfig()
-  const token = accessToken || cfg.accessToken
+  const token = accessToken || getTikTokConfig().accessToken
   const urls = Array.isArray(imageUrls) ? imageUrls.filter(Boolean) : [imageUrls].filter(Boolean)
   if (!urls.length) throw Object.assign(new Error('imageUrls is required'), { code: 'MISSING_MEDIA' })
+  requireTikTokCreds(token, 'photo publishing')
 
-  requireTikTokPublishing(token)
-
-  // Live path — POST /v2/post/publish/content/init/
   const res = await fetch('https://open.tiktokapis.com/v2/post/publish/content/init/', {
     method: 'POST',
     headers: {
@@ -142,16 +98,10 @@ export async function publishTikTokPhoto({ imageUrls, caption, accessToken }) {
   }
 }
 
-/**
- * Publish a vertical video to TikTok via the Content Posting API.
- * Live path requires the same `video.publish` scope on a TikTok for Business app.
- */
 export async function publishTikTokVideo({ videoUrl, caption, accessToken }) {
-  const cfg = getTikTokConfig()
-  const token = accessToken || cfg.accessToken
+  const token = accessToken || getTikTokConfig().accessToken
   if (!videoUrl) throw Object.assign(new Error('videoUrl is required'), { code: 'MISSING_MEDIA' })
-
-  requireTikTokPublishing(token)
+  requireTikTokCreds(token, 'video publishing')
 
   const res = await fetch('https://open.tiktokapis.com/v2/post/publish/video/init/', {
     method: 'POST',
@@ -186,33 +136,10 @@ export async function publishTikTokVideo({ videoUrl, caption, accessToken }) {
   }
 }
 
-/**
- * Parse a TikTok webhook payload for comments and mentions.
- * This accepts a normalized JSON shape because TikTok webhooks vary by
- * integration partner. Expected shape:
- *   {
- *     comments: [{ id, user_id, username, text, video_id, created_at }],
- *     mentions: [{ id, user_id, username, text, video_id, created_at }]
- *   }
- */
-/**
- * Fetch aggregate video insights.
- *
- * TikTok Research API (`/v2/research/video/query/`) is partner-gated. We
- * always simulate in dev mode; live mode is scaffolded so it can be flipped
- * on once TikTok for Business partner status is granted.
- */
 export async function fetchTikTokInsights({ videoId, accessToken }) {
-  const cfg = getTikTokConfig()
-  const token = accessToken || cfg.accessToken
+  const token = accessToken || getTikTokConfig().accessToken
   if (!videoId) throw Object.assign(new Error('videoId is required'), { code: 'MISSING_VIDEO_ID' })
-
-  if (cfg.provider === 'dev' || !isTikTokEnabled() || !token) {
-    return {
-      impressions: 8400, reach: null, likes: 312, comments: 24, shares: 41, saves: null, clicks: null,
-      source: 'tiktok_dev_simulator', simulated: true, fetched_at: new Date().toISOString(),
-    }
-  }
+  requireTikTokCreds(token, 'insights')
 
   const res = await fetch('https://open.tiktokapis.com/v2/research/video/query/', {
     method: 'POST',
@@ -243,17 +170,7 @@ export async function fetchTikTokInsights({ videoId, accessToken }) {
     saves: null,
     clicks: null,
     source: 'tiktok_research_api',
-    simulated: false,
     fetched_at: new Date().toISOString(),
-  }
-}
-
-function requireTikTokPublishing(token) {
-  if (!token) {
-    throw Object.assign(
-      new Error('tiktok publishing requires TIKTOK_ACCESS_TOKEN to be set'),
-      { code: 'PUBLISH_CREDENTIALS_MISSING' },
-    )
   }
 }
 

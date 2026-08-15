@@ -4705,7 +4705,7 @@ function getOAuthConfig(platform) {
       scope: 'tweet.read tweet.write users.read offline.access',
       client_id: process.env.X_OAUTH_CLIENT_ID || '',
       client_secret: process.env.X_OAUTH_CLIENT_SECRET || '',
-      dev: process.env.X_PROVIDER !== 'x_api_v2' || !process.env.X_OAUTH_CLIENT_ID,
+      dev: !process.env.X_OAUTH_CLIENT_ID,
     }
   }
   if (platform === 'tiktok') {
@@ -4715,7 +4715,7 @@ function getOAuthConfig(platform) {
       scope: 'user.info.basic,video.publish',
       client_id: process.env.TIKTOK_CLIENT_KEY || '',
       client_secret: process.env.TIKTOK_CLIENT_SECRET || '',
-      dev: process.env.TIKTOK_PROVIDER !== 'tiktok_for_business' || !process.env.TIKTOK_CLIENT_KEY,
+      dev: !process.env.TIKTOK_CLIENT_KEY,
     }
   }
   return null

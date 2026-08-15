@@ -12,10 +12,8 @@
  *   - A page-scoped access token.
  *
  * Env:
- *   FACEBOOK_PROVIDER=dev|meta_graph      (default: dev)
  *   FACEBOOK_PAGE_ACCESS_TOKEN            (page-scoped token)
  *   FACEBOOK_PAGE_ID                      (default page for posts)
- *   FACEBOOK_DEV_ALWAYS_SUCCESS=true      (default: true)
  */
 
 import { v4 as uuidv4 } from 'uuid'
@@ -25,17 +23,22 @@ const GRAPH_BASE = `https://graph.facebook.com/${GRAPH_VERSION}`
 
 export function getFacebookConfig() {
   return {
-    provider: process.env.FACEBOOK_PROVIDER || 'dev',
     pageAccessToken: process.env.FACEBOOK_PAGE_ACCESS_TOKEN || '',
     pageId: process.env.FACEBOOK_PAGE_ID || '',
-    devAlwaysSuccess: process.env.FACEBOOK_DEV_ALWAYS_SUCCESS !== 'false',
   }
 }
 
 export function isFacebookEnabled() {
   const cfg = getFacebookConfig()
-  if (cfg.provider === 'dev') return true
   return Boolean(cfg.pageAccessToken && cfg.pageId)
+}
+
+function requireFacebookCreds(token, feature) {
+  if (!token) {
+    const err = new Error(`Facebook ${feature} requires FACEBOOK_PAGE_ACCESS_TOKEN to be set`)
+    err.code = 'FACEBOOK_UNCONFIGURED'
+    throw err
+  }
 }
 
 /**
@@ -119,20 +122,7 @@ export async function replyToFacebookComment({ commentId, text, accessToken }) {
   const token = accessToken || cfg.pageAccessToken
   if (!commentId) throw Object.assign(new Error('commentId is required'), { code: 'MISSING_COMMENT_ID' })
   if (!text?.trim()) throw Object.assign(new Error('reply text is required'), { code: 'MISSING_CONTENT' })
-
-  if (cfg.provider === 'dev' || !isFacebookEnabled()) {
-    if (cfg.devAlwaysSuccess) {
-      return {
-        ok: true,
-        provider: 'facebook_dev_simulator',
-        provider_message_id: `fb_comment_dev_${uuidv4().slice(0, 12)}`,
-        comment_id: commentId,
-        text: text.trim(),
-        simulated: true,
-      }
-    }
-    throw Object.assign(new Error('Facebook dev mode configured to fail'), { code: 'DEV_FAILURE' })
-  }
+  requireFacebookCreds(token, 'comment replies')
 
   const body = new URLSearchParams()
   body.set('message', text.trim())
@@ -163,20 +153,7 @@ export async function sendFacebookMessengerDM({ recipientId, text, accessToken }
   const token = accessToken || cfg.pageAccessToken
   if (!recipientId) throw Object.assign(new Error('recipientId is required'), { code: 'MISSING_RECIPIENT' })
   if (!text?.trim()) throw Object.assign(new Error('text is required'), { code: 'MISSING_CONTENT' })
-
-  if (cfg.provider === 'dev' || !isFacebookEnabled()) {
-    if (cfg.devAlwaysSuccess) {
-      return {
-        ok: true,
-        provider: 'facebook_dev_simulator',
-        provider_message_id: `fb_dm_dev_${uuidv4().slice(0, 12)}`,
-        recipient_id: recipientId,
-        text: text.trim(),
-        simulated: true,
-      }
-    }
-    throw Object.assign(new Error('Facebook dev mode configured to fail'), { code: 'DEV_FAILURE' })
-  }
+  requireFacebookCreds(token, 'Messenger DMs')
 
   const res = await fetch(`${GRAPH_BASE}/me/messages?access_token=${token}`, {
     method: 'POST',
@@ -216,13 +193,7 @@ export async function fetchFacebookInsights({ postId, accessToken }) {
   const cfg = getFacebookConfig()
   const token = accessToken || cfg.pageAccessToken
   if (!postId) throw Object.assign(new Error('postId is required'), { code: 'MISSING_POST_ID' })
-
-  if (cfg.provider === 'dev' || !isFacebookEnabled() || !token) {
-    return {
-      impressions: 1800, reach: 1200, likes: 92, comments: 4, shares: 7, saves: null, clicks: 22,
-      source: 'facebook_dev_simulator', simulated: true, fetched_at: new Date().toISOString(),
-    }
-  }
+  requireFacebookCreds(token, 'insights')
 
   const metrics = 'post_impressions,post_impressions_unique,post_reactions_like_total,post_reactions_by_type_total,post_clicks'
   const res = await fetch(`${GRAPH_BASE}/${postId}/insights?metric=${metrics}&access_token=${token}`)
@@ -256,7 +227,6 @@ export async function fetchFacebookInsights({ postId, accessToken }) {
     saves: null,
     clicks: byName.post_clicks ?? null,
     source: 'facebook_graph_api',
-    simulated: false,
     fetched_at: new Date().toISOString(),
   }
 }
