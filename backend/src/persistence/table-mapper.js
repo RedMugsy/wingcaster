@@ -172,6 +172,7 @@ const TABLE_MAP = {
       'tier_id', 'grandfathered_at', 'eligible_for_migration',
       'next_renewal_at', 'auto_renew', 'cancellation_reason',
       'cancel_at_period_end',
+      'resolved_plan_price_minor', 'resolved_plan_currency', 'resolved_plan_source',
     ],
   },
   billing_subscription_history: {
@@ -180,6 +181,15 @@ const TABLE_MAP = {
     columns: [
       'subscription_id', 'event', 'from_state', 'to_state',
       'reason', 'actor_id', 'actor_type', 'metadata',
+    ],
+  },
+  billing_credit_notes: {
+    schema: 'commercial',
+    table: 'billing_credit_notes',
+    columns: [
+      'tenant_id', 'subscription_id', 'type', 'amount_minor',
+      'currency', 'status', 'applied_at', 'applied_to_invoice_id',
+      'expires_at', 'reason', 'actor_id', 'actor_type', 'metadata',
     ],
   },
   // Aliases used by billing/entitlements.js and billing/ledger.js
@@ -194,6 +204,7 @@ const TABLE_MAP = {
       'tier_id', 'grandfathered_at', 'eligible_for_migration',
       'next_renewal_at', 'auto_renew', 'cancellation_reason',
       'cancel_at_period_end',
+      'resolved_plan_price_minor', 'resolved_plan_currency', 'resolved_plan_source',
     ],
   },
   products: {

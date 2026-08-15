@@ -19,9 +19,13 @@ import {
 } from './pricing-overrides.js'
 import {
   cancelSubscription, createSubscription, expireSubscription, getSubscription,
-  markPastDue, pauseSubscription, resolvePastDue, resumeSubscription, tickRenewals,
+  markPastDue, migrateSubscription, pauseSubscription, resolvePastDue,
+  resumeSubscription, tickRenewals,
 } from './lifecycle.js'
 import { listEvents as listSubscriptionEvents } from './subscription-history.js'
+import {
+  getNote, issueNote, listNotes, pendingBalance, voidNote,
+} from './credit-notes.js'
 import { findAll, findOne, query } from '../../db.js'
 import { resolveMarketContext } from '../pricing/index.js'
 
@@ -336,6 +340,39 @@ export function registerProductCatalogRoutes(app, { authMiddleware, requirePlatf
     }
   })
 
+  // Tenant self-serve tier migration (upgrade / downgrade / cross-version).
+  // Restricted to public + active target tiers via lifecycle guards.
+  app.post('/api/billing/my-subscription/change-tier', authMiddleware, async (req, res) => {
+    try {
+      const { subscription_id, target_tier_id, target_product_id, prorate, reason } = req.body || {}
+      const sub = await findOne('billing_subscriptions', (s) => s.id === subscription_id && s.tenant_id === req.user.id)
+      if (!sub) return res.status(404).json({ error: 'Subscription not found' })
+      const updated = await migrateSubscription(sub.id, {
+        targetProductId: target_product_id || null,
+        targetTierId: target_tier_id,
+        prorate: prorate !== false,
+        reason: reason || null,
+        actorId: req.user.id,
+        actorType: 'tenant',
+      })
+      res.json({ subscription: updated })
+    } catch (err) {
+      res.status(subStatus(err, 400)).json({ error: err.message, code: err.code })
+    }
+  })
+
+  // Tenant self-serve view of their pending / applied credit notes.
+  app.get('/api/billing/my-credit-notes', authMiddleware, async (req, res) => {
+    try {
+      const status = req.query.status || null
+      const notes = await listNotes({ tenantId: req.user.id, status, limit: Math.min(500, Number(req.query.limit) || 100) })
+      const pending = await pendingBalance(req.user.id)
+      res.json({ notes, pending_balance_by_currency: pending })
+    } catch (err) {
+      res.status(500).json({ error: err.message })
+    }
+  })
+
   // ---------- Admin subscription management ----------
   app.get('/api/admin/billing/subscriptions', ...guards, async (req, res) => {
     try {
@@ -428,6 +465,25 @@ export function registerProductCatalogRoutes(app, { authMiddleware, requirePlatf
     }
   })
 
+  // Admin subscription migration (upgrade / downgrade / cross-product,
+  // including private tiers that tenants can't self-serve into).
+  app.post('/api/admin/billing/subscriptions/:id/migrate', ...guards, async (req, res) => {
+    try {
+      const { target_product_id, target_tier_id, prorate, reason } = req.body || {}
+      const updated = await migrateSubscription(req.params.id, {
+        targetProductId: target_product_id || null,
+        targetTierId: target_tier_id,
+        prorate: prorate !== false,
+        reason: reason || null,
+        actorId: actorFrom(req),
+        actorType: 'admin',
+      })
+      res.json({ subscription: updated })
+    } catch (err) {
+      res.status(subStatus(err, 400)).json({ error: err.message, code: err.code })
+    }
+  })
+
   // Manual scheduler kick — for admins to force a renewal sweep without
   // waiting for the interval tick. Useful during debugging + on cell
   // failover.
@@ -435,6 +491,75 @@ export function registerProductCatalogRoutes(app, { authMiddleware, requirePlatf
     try {
       const summary = await tickRenewals()
       res.json(summary)
+    } catch (err) {
+      res.status(500).json({ error: err.message })
+    }
+  })
+
+  // -------- Admin: credit notes --------
+  app.get('/api/admin/billing/credit-notes', ...guards, async (req, res) => {
+    try {
+      const notes = await listNotes({
+        tenantId: req.query.tenant_id || null,
+        subscriptionId: req.query.subscription_id || null,
+        status: req.query.status || null,
+        limit: Math.min(1000, Number(req.query.limit) || 200),
+      })
+      res.json({ notes })
+    } catch (err) {
+      res.status(500).json({ error: err.message })
+    }
+  })
+
+  app.post('/api/admin/billing/credit-notes', ...guards, async (req, res) => {
+    try {
+      const { tenant_id, subscription_id, type, amount_minor, currency, reason, expires_at, metadata } = req.body || {}
+      const note = await issueNote({
+        tenantId: tenant_id,
+        subscriptionId: subscription_id || null,
+        type,
+        amountMinor: amount_minor,
+        currency,
+        reason: reason || null,
+        expiresAt: expires_at || null,
+        actorId: actorFrom(req),
+        actorType: 'admin',
+        metadata: metadata || {},
+      })
+      res.status(201).json({ note })
+    } catch (err) {
+      res.status(errStatus(err, 400)).json({ error: err.message, code: err.code })
+    }
+  })
+
+  app.get('/api/admin/billing/credit-notes/:id', ...guards, async (req, res) => {
+    try {
+      const note = await getNote(req.params.id)
+      if (!note) return res.status(404).json({ error: 'Credit note not found' })
+      res.json({ note })
+    } catch (err) {
+      res.status(500).json({ error: err.message })
+    }
+  })
+
+  app.post('/api/admin/billing/credit-notes/:id/void', ...guards, async (req, res) => {
+    try {
+      const note = await voidNote(req.params.id, {
+        reason: req.body?.reason || null,
+        actorId: actorFrom(req),
+        actorType: 'admin',
+      })
+      res.json({ note })
+    } catch (err) {
+      res.status(errStatus(err, 400)).json({ error: err.message, code: err.code })
+    }
+  })
+
+  // Admin view of a tenant's pending credit balance grouped by currency.
+  app.get('/api/admin/billing/tenants/:tenantId/credit-balance', ...guards, async (req, res) => {
+    try {
+      const balance = await pendingBalance(req.params.tenantId)
+      res.json({ tenant_id: req.params.tenantId, pending_balance_by_currency: balance })
     } catch (err) {
       res.status(500).json({ error: err.message })
     }

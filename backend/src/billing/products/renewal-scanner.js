@@ -28,6 +28,7 @@
 import logger from '../../lib/logger.js'
 import { getPool, query } from '../../persistence/postgres-adapter.js'
 import { endTrial, expireSubscription, renewSubscription } from './lifecycle.js'
+import { sweepExpiredNotes } from './credit-notes.js'
 
 const SUB_ROW_COLS = 'id, status, cancel_at_period_end, auto_renew, trial_ends_at, billing_period_end, next_renewal_at'
 
@@ -45,7 +46,16 @@ export async function tickRenewals({ batchSize = 50, now = new Date() } = {}) {
     trials_ended: 0,
     renewed: 0,
     expired: 0,
+    credit_notes_expired: 0,
     errors: [],
+  }
+
+  try {
+    const noteSweep = await sweepExpiredNotes({ now })
+    summary.credit_notes_expired = noteSweep.expired
+  } catch (err) {
+    logger.error({ err: err.message }, 'renewal-scanner: sweepExpiredNotes failed')
+    summary.errors.push({ phase: 'credit_notes_sweep', error: err.message })
   }
 
   // Trials first — a trial expiring is a positive event (fresh allowances),
@@ -179,7 +189,7 @@ export async function startRenewalScheduler({ intervalMs = 15 * 60 * 1000, batch
   const tick = async () => {
     try {
       const summary = await tickRenewals({ batchSize })
-      if (summary.trials_ended || summary.renewed || summary.expired || summary.errors.length) {
+      if (summary.trials_ended || summary.renewed || summary.expired || summary.credit_notes_expired || summary.errors.length) {
         logger.info(summary, 'billing renewal scheduler tick')
       }
     } catch (err) {

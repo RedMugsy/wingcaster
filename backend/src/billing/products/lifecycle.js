@@ -42,6 +42,9 @@ import { grantAllowance, currentBillingPeriod } from '../ledger.js'
 import { getProduct } from './products.js'
 import { getTier } from './tiers.js'
 import { recordEvent } from './subscription-history.js'
+import { resolveEffectivePrice } from './pricing-overrides.js'
+import { issueNote } from './credit-notes.js'
+import { prorateMigration } from './proration.js'
 
 const SUBSCRIPTIONS = 'billing_subscriptions'
 
@@ -231,6 +234,15 @@ export async function createSubscription(input) {
   const periodEnd = computePeriodEnd(now, product.billing_cadence, { trialDays, customPeriodDays })
   const isTrial = trialDays > 0
 
+  // Snapshot the resolved plan price at creation so mid-period migrations
+  // prorate against the number the tenant actually agreed to (protects
+  // against admin editing the tier / override price after signup).
+  const priceResolution = await resolveEffectivePrice({
+    product,
+    tier,
+    territoryId: input.territoryId || null,
+  })
+
   const created = await transaction(async () => {
     const row = {
       id: randomUUID(),
@@ -247,6 +259,9 @@ export async function createSubscription(input) {
       next_renewal_at: (autoRenew && periodEnd) ? periodEnd.toISOString() : null,
       auto_renew: autoRenew,
       cancel_at_period_end: false,
+      resolved_plan_price_minor: priceResolution.priceMinor,
+      resolved_plan_currency: priceResolution.currency,
+      resolved_plan_source: priceResolution.source,
       metadata: {
         ...(input.metadata || {}),
         cadence: product.billing_cadence,
@@ -624,6 +639,222 @@ export async function resolvePastDue(subscriptionId, { reason = null, actorId = 
     reason, actorId, actorType,
   })
   return updated
+}
+
+/**
+ * Migrate a subscription to a different tier and/or product version.
+ * This is the single write-path for upgrade, downgrade, and cross-
+ * version migration (grandfathered → new version).
+ *
+ * Behaviour:
+ *   - Old tier's granted quotas for the CURRENT period are NOT rescinded
+ *     (tenant keeps what they were already given). New tier's quotas
+ *     take effect at the NEXT renewal.
+ *   - Cadence-change migrations (monthly → annual) DO roll the period
+ *     immediately and grant new tier's quotas — otherwise a monthly →
+ *     annual switcher would sit for a month without their new bucket.
+ *   - Proration issues a credit_note when netCreditMinor != 0:
+ *       positive → 'proration_credit' (refund owed to tenant)
+ *       negative → 'proration_debit' (owed by tenant; 7e collects)
+ *     Skipped entirely when prorate=false OR the subscription has no
+ *     billing_period_end.
+ *   - grandfathered_at is CLEARED on migration (tenant is no longer on
+ *     the old version).
+ *   - Records an 'upgraded' or 'downgraded' or 'migrated_version'
+ *     event based on the direction. If the new tier's price differs
+ *     from the old, direction is determined by that; otherwise by
+ *     product_version.
+ *
+ * @param {string} subscriptionId
+ * @param {object} input
+ * @param {string} [input.targetProductId]   defaults to current product
+ * @param {string}  input.targetTierId
+ * @param {boolean} [input.prorate=true]
+ * @param {string}  [input.reason]
+ * @param {string}  [input.actorId]
+ * @param {'tenant'|'admin'} [input.actorType='tenant']
+ */
+export async function migrateSubscription(subscriptionId, input = {}) {
+  const sub = await getSubscription(subscriptionId)
+  if (!sub) throw Object.assign(new Error('Subscription not found'), { code: 'NOT_FOUND' })
+  if (!['trialing', 'active', 'past_due', 'paused'].includes(sub.status)) {
+    throw Object.assign(new Error(`Cannot migrate a ${sub.status} subscription`), { code: 'INVALID_TRANSITION' })
+  }
+  if (!input.targetTierId) throw Object.assign(new Error('targetTierId is required'), { code: 'MISSING_FIELD' })
+
+  const targetTier = await getTier(input.targetTierId)
+  if (!targetTier) throw Object.assign(new Error('Target tier not found'), { code: 'TIER_NOT_FOUND' })
+  if (targetTier.status !== 'active') {
+    throw Object.assign(new Error(`Cannot migrate to a ${targetTier.status} tier`), { code: 'TIER_NOT_SUBSCRIBABLE' })
+  }
+
+  const targetProductId = input.targetProductId || targetTier.product_id
+  const targetProduct = await getProduct(targetProductId)
+  if (!targetProduct) throw Object.assign(new Error('Target product not found'), { code: 'PRODUCT_NOT_FOUND' })
+  if (targetProduct.status !== 'active') {
+    throw Object.assign(new Error(`Cannot migrate to a ${targetProduct.status} product`), { code: 'PRODUCT_NOT_SUBSCRIBABLE' })
+  }
+  if (targetTier.product_id !== targetProduct.id || Number(targetTier.product_version) !== Number(targetProduct.version)) {
+    throw Object.assign(new Error('Target tier does not belong to the target product version'), { code: 'TIER_PRODUCT_MISMATCH' })
+  }
+  if (targetTier.is_public === false && input.actorType === 'tenant') {
+    throw Object.assign(new Error('Target tier is not available for self-serve'), { code: 'TIER_NOT_PUBLIC' })
+  }
+  if (targetTier.id === sub.tier_id && targetProduct.id === sub.product_id && Number(targetProduct.version) === Number(sub.product_version)) {
+    throw Object.assign(new Error('Subscription already on that tier + product version'), { code: 'NOOP_MIGRATION' })
+  }
+
+  const oldProduct = await getProduct(sub.product_id)
+  const oldTier = sub.tier_id ? await getTier(sub.tier_id) : null
+  const targetPrice = await resolveEffectivePrice({
+    product: targetProduct,
+    tier: targetTier,
+    territoryId: sub.territory_id,
+  })
+
+  const oldPriceMinor = Number(sub.resolved_plan_price_minor) || 0
+  const newPriceMinor = Number(targetPrice.priceMinor) || 0
+
+  const prorate = input.prorate !== false
+  const cadenceChanged = oldProduct?.billing_cadence !== targetProduct.billing_cadence
+
+  let proration = { issue: false, netCreditMinor: 0, oldRefundMinor: 0, newChargeMinor: 0, daysInPeriod: 0, daysRemaining: 0, ratioRemaining: 0 }
+  if (prorate) {
+    proration = prorateMigration({
+      oldPriceMinor,
+      newPriceMinor,
+      periodStart: sub.billing_period_start,
+      periodEnd: sub.billing_period_end,
+    })
+  }
+
+  const now = new Date()
+  const before = snapshot(sub)
+
+  const event = pickMigrationEvent({ oldPriceMinor, newPriceMinor, oldProductVersion: sub.product_version, newProductVersion: targetProduct.version })
+
+  const updated = await transaction(async () => {
+    let newPeriodStart = sub.billing_period_start
+    let newPeriodEnd = sub.billing_period_end
+    let newNextRenewalAt = sub.next_renewal_at
+    let didRollPeriod = false
+
+    if (cadenceChanged) {
+      newPeriodStart = now.toISOString()
+      const rolledEnd = computePeriodEnd(now, targetProduct.billing_cadence, {
+        customPeriodDays: sub.metadata?.custom_period_days || null,
+      })
+      newPeriodEnd = rolledEnd ? rolledEnd.toISOString() : null
+      newNextRenewalAt = (sub.auto_renew && rolledEnd) ? rolledEnd.toISOString() : null
+      didRollPeriod = true
+    }
+
+    const nextMeta = {
+      ...(sub.metadata || {}),
+      cadence: targetProduct.billing_cadence,
+    }
+
+    await query(
+      `UPDATE commercial.billing_subscriptions
+          SET product_id = $2,
+              product_version = $3,
+              tier_id = $4,
+              resolved_plan_price_minor = $5,
+              resolved_plan_currency = $6,
+              resolved_plan_source = $7,
+              billing_period_start = $8::timestamptz,
+              billing_period_end = $9::timestamptz,
+              next_renewal_at = $10::timestamptz,
+              grandfathered_at = NULL,
+              eligible_for_migration = false,
+              metadata = $11::jsonb,
+              updated_at = CURRENT_TIMESTAMP
+        WHERE id = $1`,
+      [
+        sub.id,
+        targetProduct.id,
+        targetProduct.version,
+        targetTier.id,
+        newPriceMinor,
+        targetPrice.currency,
+        targetPrice.source,
+        newPeriodStart,
+        newPeriodEnd,
+        newNextRenewalAt,
+        JSON.stringify(nextMeta),
+      ],
+    )
+
+    let allowanceEntries = []
+    if (didRollPeriod) {
+      const refreshed = await getSubscription(sub.id)
+      allowanceEntries = await grantTierAllowances({ subscription: refreshed, tier: targetTier, note: 'migration_cadence_roll' })
+    }
+
+    let creditNote = null
+    if (proration.issue) {
+      creditNote = await issueNote({
+        tenantId: sub.tenant_id,
+        subscriptionId: sub.id,
+        type: proration.netCreditMinor > 0 ? 'proration_credit' : 'proration_debit',
+        amountMinor: proration.netCreditMinor,
+        currency: targetPrice.currency || sub.resolved_plan_currency || 'USD',
+        reason: input.reason || `Migration ${oldTier?.code || 'tier'} → ${targetTier.code}`,
+        actorId: input.actorId || null,
+        actorType: input.actorType || 'tenant',
+        metadata: {
+          from_tier_id: sub.tier_id,
+          to_tier_id: targetTier.id,
+          from_product_id: sub.product_id,
+          from_product_version: sub.product_version,
+          to_product_id: targetProduct.id,
+          to_product_version: targetProduct.version,
+          old_price_minor: oldPriceMinor,
+          new_price_minor: newPriceMinor,
+          old_refund_minor: proration.oldRefundMinor,
+          new_charge_minor: proration.newChargeMinor,
+          days_in_period: proration.daysInPeriod,
+          days_remaining: proration.daysRemaining,
+          ratio_remaining: proration.ratioRemaining,
+        },
+      })
+    }
+
+    const after = await getSubscription(sub.id)
+    await recordEvent({
+      subscriptionId: sub.id,
+      event,
+      fromState: before,
+      toState: snapshot(after),
+      reason: input.reason || null,
+      actorId: input.actorId || null,
+      actorType: input.actorType || 'tenant',
+      metadata: {
+        from_tier_id: sub.tier_id,
+        to_tier_id: targetTier.id,
+        from_product_id: sub.product_id,
+        from_product_version: sub.product_version,
+        to_product_id: targetProduct.id,
+        to_product_version: targetProduct.version,
+        old_price_minor: oldPriceMinor,
+        new_price_minor: newPriceMinor,
+        proration: proration.issue ? proration : null,
+        credit_note_id: creditNote?.id || null,
+        rolled_period_forward: didRollPeriod,
+        allowances_granted: allowanceEntries,
+      },
+    })
+    return after
+  })
+
+  return updated
+}
+
+function pickMigrationEvent({ oldPriceMinor, newPriceMinor, oldProductVersion, newProductVersion }) {
+  if (Number(newProductVersion) !== Number(oldProductVersion)) return 'migrated_version'
+  if (newPriceMinor > oldPriceMinor) return 'upgraded'
+  if (newPriceMinor < oldPriceMinor) return 'downgraded'
+  return 'migrated_lateral'
 }
 
 /**

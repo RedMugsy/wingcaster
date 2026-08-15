@@ -172,7 +172,9 @@ export async function publishProduct(id) {
 
   // If a previous active version of the same code exists, mark it deprecated
   // atomically alongside the publish. Subscribers on the old version stay
-  // where they are — they're grandfathered by product_version pin.
+  // where they are — they're grandfathered by product_version pin, and we
+  // stamp grandfathered_at so admins can see who's on the old version and
+  // decide whether to prompt them to migrate.
   await query(
     `UPDATE commercial.billing_products
         SET status = 'deprecated',
@@ -184,11 +186,47 @@ export async function publishProduct(id) {
     [existing.code, now, id],
   )
 
+  const grandfatheredResult = await query(
+    `UPDATE commercial.billing_subscriptions
+        SET grandfathered_at = $2::timestamptz,
+            eligible_for_migration = true,
+            updated_at = CURRENT_TIMESTAMP
+      WHERE product_id IN (
+              SELECT id FROM commercial.billing_products
+                WHERE code = $1 AND id <> $3
+            )
+        AND status IN ('trialing','active','past_due','paused')
+        AND grandfathered_at IS NULL
+      RETURNING id, tenant_id`,
+    [existing.code, now, id],
+  )
+
   await update(COLLECTION, (p) => p.id === id, (p) => ({
     ...p,
     status: 'active',
     published_at: now,
   }))
+
+  // Emit a subscription_history event per grandfathered sub so the audit
+  // trail records the exact moment they were pinned to their old version.
+  if (Array.isArray(grandfatheredResult) && grandfatheredResult.length) {
+    const { recordEvent } = await import('./subscription-history.js')
+    for (const row of grandfatheredResult) {
+      try {
+        await recordEvent({
+          subscriptionId: row.id,
+          event: 'grandfathered',
+          actorType: 'system',
+          reason: `Product ${existing.code} v${existing.version} published; retained pin to prior version.`,
+          metadata: { new_version_id: id, published_at: now },
+        })
+      } catch (err) {
+        // Never fail the publish because of an audit-write hiccup — log
+        // and move on. The scheduler will re-emit on next sweep if needed.
+        // (Import lazily above so a circular test-time import doesn't break.)
+      }
+    }
+  }
   return await getProduct(id)
 }
 

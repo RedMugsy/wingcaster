@@ -47,6 +47,7 @@ export {
   resumeSubscription,
   markPastDue,
   resolvePastDue,
+  migrateSubscription,
   getSubscription,
   computePeriodEnd,
   computeLedgerBillingPeriod,
@@ -57,5 +58,17 @@ export {
   startRenewalScheduler,
   stopRenewalScheduler,
 } from './renewal-scanner.js'
+
+export {
+  issueNote,
+  listNotes,
+  getNote,
+  pendingBalance,
+  voidNote,
+  applyNote,
+  sweepExpiredNotes,
+} from './credit-notes.js'
+
+export { prorateMigration, daysBetween } from './proration.js'
 
 export { registerProductCatalogRoutes } from './routes.js'
