@@ -4,10 +4,10 @@ import { readFile } from 'fs/promises'
 import { dirname, join } from 'path'
 import { fileURLToPath } from 'url'
 import pg from 'pg'
+import { skipIfNoPostgres } from '../testing/postgres.js'
 
 const { Client } = pg
-const databaseUrl = process.env.DATABASE_URL
-const hasDatabaseUrl = Boolean(databaseUrl)
+const databaseUrl = process.env.TEST_DATABASE_URL
 const migrationsDir = join(dirname(fileURLToPath(import.meta.url)), 'migrations')
 
 async function createTestDatabase() {
@@ -43,7 +43,7 @@ async function runMigration(client, filename) {
   await client.query(sql)
 }
 
-describe.skipIf(!hasDatabaseUrl)('tenant foundation migrations', () => {
+skipIfNoPostgres()('tenant foundation migrations', () => {
   let client
   let testDbName
 

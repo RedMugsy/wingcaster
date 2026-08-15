@@ -1,19 +1,19 @@
 /**
  * Postgres adapter integration tests.
  *
- * These tests require a running Postgres instance and DATABASE_URL to be set.
- * If DATABASE_URL is missing, the suite is skipped.
+ * These tests require a running Postgres instance and TEST_DATABASE_URL to be set.
+ * If TEST_DATABASE_URL is missing, the suite is skipped.
  */
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest'
 import { randomUUID } from 'crypto'
 import pg from 'pg'
 import * as postgresAdapter from './postgres-adapter.js'
+import { skipIfNoPostgres } from '../testing/postgres.js'
 
 const { Client } = pg
 
-const databaseUrl = process.env.DATABASE_URL
-const hasDatabaseUrl = Boolean(databaseUrl)
+const databaseUrl = process.env.TEST_DATABASE_URL
 
 async function createTestDatabase() {
   const baseUrl = new URL(databaseUrl)
@@ -48,7 +48,7 @@ async function dropTestDatabase(testDbName) {
   }
 }
 
-describe.skipIf(!hasDatabaseUrl)('Postgres adapter', () => {
+skipIfNoPostgres()('Postgres adapter', () => {
   let testDatabaseUrl = null
   let testDbName = null
 

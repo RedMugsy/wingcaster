@@ -29,7 +29,7 @@ export function getPool() {
     _pool = new Pool({
       connectionString: databaseUrl,
       ssl: process.env.PG_SSL === 'false' ? false : undefined,
-      connectionTimeoutMillis: 10000,
+      connectionTimeoutMillis: Number(process.env.PG_CONNECTION_TIMEOUT_MS || 10000),
       idleTimeoutMillis: 60000,
       keepAlive: true,
       keepAliveInitialDelayMillis: 10000,

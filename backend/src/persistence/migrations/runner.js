@@ -19,38 +19,42 @@ function migrationSort(a, b) {
   return na - nb
 }
 
-async function ensureMigrationsTable(client, retries = 3) {
-  try {
-    await client.query(`
-      CREATE TABLE IF NOT EXISTS schema_migrations (
-        filename TEXT PRIMARY KEY,
-        applied_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
-      );
-    `)
-  } catch (err) {
-    // Race: another worker may create the table concurrently. Retry.
-    if (retries > 0 && err.code === '23505') {
-      await new Promise((r) => setTimeout(r, 50))
-      return ensureMigrationsTable(client, retries - 1)
-    }
-    throw err
-  }
+function quoteIdentifier(identifier) {
+  return `"${String(identifier).replaceAll('"', '""')}"`
 }
 
-async function loadApplied(client) {
-  const { rows } = await client.query('SELECT filename FROM schema_migrations')
-  return new Set(rows.map((r) => r.filename))
+function scopeMigration(sql, schemaMap) {
+  if (!schemaMap) return sql
+  return Object.entries(schemaMap).reduce(
+    (scoped, [source, target]) => scoped
+      .replaceAll(`${source}.`, `${quoteIdentifier(target)}.`)
+      .replaceAll(`'${source}'`, `'${target}'`)
+      .replace(
+        new RegExp(`(CREATE\\s+SCHEMA\\s+(?:IF\\s+NOT\\s+EXISTS\\s+)?)${source}\\b`, 'gi'),
+        `$1${quoteIdentifier(target)}`,
+      )
+      .replace(new RegExp(`(SET\\s+SCHEMA\\s+)${source}\\b`, 'gi'), `$1${quoteIdentifier(target)}`),
+    sql,
+  )
 }
 
-export async function runMigrations() {
-  const pool = getPool()
+export async function runMigrations(options = {}) {
+  const pool = options.pool || getPool()
+  const schemaMap = options.schemaMap || null
+  const migrationsSchema = schemaMap?.public || 'public'
+  const migrationsTable = `${quoteIdentifier(migrationsSchema)}.schema_migrations`
 
   // Ensure migrations table exists outside a transaction so concurrent workers
   // do not abort a shared transaction on a duplicate-key race.
   {
     const client = await pool.connect()
     try {
-      await ensureMigrationsTable(client)
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS ${migrationsTable} (
+          filename TEXT PRIMARY KEY,
+          applied_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+        );
+      `)
     } finally {
       client.release()
     }
@@ -61,7 +65,8 @@ export async function runMigrations() {
     await client.query('BEGIN')
     // Serialize concurrent migration runs across all workers/services.
     await client.query('SELECT pg_advisory_xact_lock(123456789)')
-    const applied = await loadApplied(client)
+    const { rows } = await client.query(`SELECT filename FROM ${migrationsTable}`)
+    const applied = new Set(rows.map((row) => row.filename))
 
     const files = (await readdir(__dirname))
       .filter((f) => extname(f).toLowerCase() === '.sql')
@@ -69,9 +74,9 @@ export async function runMigrations() {
 
     for (const file of files) {
       if (applied.has(file)) continue
-      const sql = await readFile(join(__dirname, file), 'utf-8')
+      const sql = scopeMigration(await readFile(join(__dirname, file), 'utf-8'), schemaMap)
       await client.query(sql)
-      await client.query('INSERT INTO schema_migrations (filename) VALUES ($1) ON CONFLICT (filename) DO NOTHING', [file])
+      await client.query(`INSERT INTO ${migrationsTable} (filename) VALUES ($1) ON CONFLICT (filename) DO NOTHING`, [file])
       console.log(`[migration] applied ${file}`)
     }
 

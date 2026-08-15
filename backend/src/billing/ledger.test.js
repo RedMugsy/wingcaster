@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { closeDb, configure, loadDb, query } from '../db.js'
+import { skipIfNoPostgres } from '../testing/postgres.js'
 import { grantAllowance, quotaBalance, recordConsumption, recordTopup } from './ledger.js'
 
 const testDatabaseUrl = process.env.TEST_DATABASE_URL
@@ -21,7 +22,7 @@ async function ledgerRows(tenantId) {
   )
 }
 
-describe.skipIf(!testDatabaseUrl)('recordConsumption Postgres serialization', () => {
+skipIfNoPostgres()('recordConsumption Postgres serialization', () => {
   beforeAll(async () => {
     configure({ databaseUrl: testDatabaseUrl, force: true })
     await loadDb()

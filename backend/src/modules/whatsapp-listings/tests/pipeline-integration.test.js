@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { randomUUID } from 'crypto'
 import pg from 'pg'
 import { loadDb, insert, findOne, update, closeDb, configure } from '../../../db.js'
+import { skipIfNoPostgres } from '../../../testing/postgres.js'
 
 vi.mock('../../../whatsapp.js', () => ({
   sendWhatsAppText: vi.fn().mockResolvedValue({ messages: [{ id: 'mock-msg-id' }] }),
@@ -15,8 +16,7 @@ vi.mock('../../../whatsapp.js', () => ({
 
 const { Client } = pg
 
-const databaseUrl = process.env.DATABASE_URL
-const hasDatabaseUrl = Boolean(databaseUrl)
+const databaseUrl = process.env.TEST_DATABASE_URL
 
 async function createTestDatabase() {
   const baseUrl = new URL(databaseUrl)
@@ -58,7 +58,7 @@ async function dropTestDatabase(testDbName) {
  *   webhook ingest → intake aggregation → extraction → approval draft.
  */
 
-describe.skipIf(!hasDatabaseUrl)('WhatsApp Listing pipeline integration', () => {
+skipIfNoPostgres()('WhatsApp Listing pipeline integration', () => {
   const testRoot = join(process.cwd(), 'backend', 'src', 'modules', 'whatsapp-listings', 'tests', '.integration')
   const storageDir = join(testRoot, 'uploads')
 

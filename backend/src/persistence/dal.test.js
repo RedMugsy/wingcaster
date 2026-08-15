@@ -2,11 +2,11 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest'
 import { randomUUID } from 'crypto'
 import pg from 'pg'
 import { loadDb, closeDb, getDb, findAll, findOne, insert, update, remove, transaction, configure } from './index.js'
+import { skipIfNoPostgres } from '../testing/postgres.js'
 
 const { Client } = pg
 
-const databaseUrl = process.env.DATABASE_URL
-const hasDatabaseUrl = Boolean(databaseUrl)
+const databaseUrl = process.env.TEST_DATABASE_URL
 
 async function createTestDatabase() {
   const baseUrl = new URL(databaseUrl)
@@ -40,7 +40,7 @@ async function dropTestDatabase(testDbName) {
   }
 }
 
-describe.skipIf(!hasDatabaseUrl)('persistence DAL contract', () => {
+skipIfNoPostgres()('persistence DAL contract', () => {
   let testDatabaseUrl = null
   let testDbName = null
 
