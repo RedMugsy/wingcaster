@@ -17,6 +17,7 @@ import {
   fromRow,
   columnNames,
 } from './table-mapper.js'
+import { generatedColumnsFor } from './generated-columns.js'
 
 const { Pool } = pg
 
@@ -144,7 +145,8 @@ export async function insert(collection, item) {
   const createdAt = item.created_at || now
   const updatedAt = now
 
-  const cols = columnNames(collection)
+  const generated = new Set(generatedColumnsFor(mapping.schema, mapping.table))
+  const cols = columnNames(collection).filter((c) => !generated.has(c))
   const vals = cols.map((c) => serializeParam(row[c] ?? (c === 'id' ? id : c === 'created_at' ? createdAt : c === 'updated_at' ? updatedAt : null)))
   const conflictTarget = isLegacy(mapping) ? '(collection, id)' : '(id)'
 
@@ -178,7 +180,12 @@ export async function update(collection, filter, updater) {
       const row = toRow(collection, { ...updated, id })
       // Never update id, collection, created_at, or updated_at here.
       // updated_at is appended explicitly as a TIMESTAMPTZ literal.
-      const cols = columnNames(collection).filter((c) => !['id', 'collection', 'created_at', 'updated_at'].includes(c))
+      // Generated columns are computed by Postgres — assigning them
+      // (even NULL) raises "cannot insert a non-DEFAULT value".
+      const generated = new Set(generatedColumnsFor(mapping.schema, mapping.table))
+      const cols = columnNames(collection)
+        .filter((c) => !['id', 'collection', 'created_at', 'updated_at'].includes(c))
+        .filter((c) => !generated.has(c))
       const setClause = cols.map((c, i) => `"${c}" = $${i + 1}`).join(', ')
       const vals = cols.map((c) => serializeParam(row[c] ?? null))
       const updatedAtIdx = cols.length + 1

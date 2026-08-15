@@ -177,9 +177,13 @@ const TABLE_MAP = {
     schema: 'public',
     table: 'properties',
     columns: [
+      // geom is intentionally omitted — it's a Postgres GENERATED
+      // ALWAYS AS ... STORED column derived from (longitude, latitude)
+      // in migration 024. Listing it here would trigger error 428C9
+      // on every insert/update. See generated-columns.js allowlist.
       'agent_id', 'agency_id', 'canonical_id', 'title', 'description', 'status', 'listing_type', 'property_type',
       'price', 'price_unit', 'bedrooms', 'bathrooms', 'area', 'area_unit', 'city', 'neighborhood', 'location',
-      'latitude', 'longitude', 'geom', 'territory_id', 'marketplace_syndicated', 'asset_version', 'last_asset_generated_at',
+      'latitude', 'longitude', 'territory_id', 'marketplace_syndicated', 'asset_version', 'last_asset_generated_at',
       'tenant_id', 'ownership_type', 'custody_tenant_id', 'source_user_id', 'exit_disposition',
     ],
   },
