@@ -28,9 +28,22 @@
 --     no country context, e.g. webhook.received before tenant resolves).
 
 -- ---------------------------------------------------------------------------
--- Step 1 — rename the existing table out of the way.
+-- Step 1 — rename the existing table (and its indexes) out of the way.
+-- Renaming a table in Postgres does NOT rename its indexes, so we have to
+-- do it explicitly — otherwise the new partitioned table's CREATE INDEX
+-- calls fail with "relation ... already exists".
 -- ---------------------------------------------------------------------------
 ALTER TABLE IF EXISTS commercial.usage_events RENAME TO usage_events_pre_partition;
+ALTER INDEX IF EXISTS commercial.idx_usage_events_tenant_period
+  RENAME TO idx_usage_events_tenant_period_pre_partition;
+ALTER INDEX IF EXISTS commercial.idx_usage_events_action_period
+  RENAME TO idx_usage_events_action_period_pre_partition;
+ALTER INDEX IF EXISTS commercial.idx_usage_events_occurred
+  RENAME TO idx_usage_events_occurred_pre_partition;
+ALTER INDEX IF EXISTS commercial.idx_usage_events_listing
+  RENAME TO idx_usage_events_listing_pre_partition;
+ALTER INDEX IF EXISTS commercial.idx_usage_events_conversation
+  RENAME TO idx_usage_events_conversation_pre_partition;
 
 -- ---------------------------------------------------------------------------
 -- Step 2 — create the partitioned table with (id, territory_id) as PK.
