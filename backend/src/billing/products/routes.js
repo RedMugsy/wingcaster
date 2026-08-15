@@ -17,6 +17,12 @@ import {
   listOverrides, getOverride, createOverride, updateOverride, deactivateOverride,
   resolveEffectivePrice,
 } from './pricing-overrides.js'
+import {
+  cancelSubscription, createSubscription, expireSubscription, getSubscription,
+  markPastDue, pauseSubscription, resolvePastDue, resumeSubscription, tickRenewals,
+} from './lifecycle.js'
+import { listEvents as listSubscriptionEvents } from './subscription-history.js'
+import { findAll, findOne, query } from '../../db.js'
 import { resolveMarketContext } from '../pricing/index.js'
 
 function actorFrom(req) {
@@ -243,6 +249,197 @@ export function registerProductCatalogRoutes(app, { authMiddleware, requirePlatf
     }
   })
 
+  // =====================================================================
+  // Subscription lifecycle
+  // =====================================================================
+
+  // ---------- Tenant self-serve ----------
+  app.get('/api/billing/my-subscription', authMiddleware, async (req, res) => {
+    try {
+      const subs = await findAll('billing_subscriptions', (s) =>
+        s.tenant_id === req.user.id &&
+        ['trialing', 'active', 'past_due', 'paused'].includes(s.status),
+      )
+      const primary = subs.find((s) => true) || null
+      let history = []
+      if (primary) history = await listSubscriptionEvents(primary.id, { limit: 25 })
+      res.json({ subscription: primary, other_subscriptions: subs.filter((s) => s.id !== primary?.id), history })
+    } catch (err) {
+      res.status(500).json({ error: err.message })
+    }
+  })
+
+  app.post('/api/billing/subscribe', authMiddleware, async (req, res) => {
+    try {
+      const { tier_id, product_id, trial_days, auto_renew, territory_id, zone_id, custom_period_days, metadata } = req.body || {}
+      const sub = await createSubscription({
+        tenantId: req.user.id,
+        productId: product_id,
+        tierId: tier_id,
+        trialDays: trial_days ? Number(trial_days) : 0,
+        autoRenew: auto_renew !== false,
+        territoryId: territory_id || null,
+        zoneId: zone_id || null,
+        customPeriodDays: custom_period_days ? Number(custom_period_days) : null,
+        metadata: metadata || {},
+        actorId: req.user.id,
+        actorType: 'tenant',
+      })
+      res.status(201).json({ subscription: sub })
+    } catch (err) {
+      res.status(subStatus(err, 400)).json({ error: err.message, code: err.code })
+    }
+  })
+
+  app.post('/api/billing/my-subscription/cancel', authMiddleware, async (req, res) => {
+    try {
+      const sub = await findOne('billing_subscriptions', (s) => s.id === req.body?.subscription_id && s.tenant_id === req.user.id)
+      if (!sub) return res.status(404).json({ error: 'Subscription not found' })
+      const updated = await cancelSubscription(sub.id, {
+        reason: req.body?.reason || null,
+        actorId: req.user.id,
+        actorType: 'tenant',
+        atPeriodEnd: req.body?.immediate !== true,
+      })
+      res.json({ subscription: updated })
+    } catch (err) {
+      res.status(subStatus(err, 400)).json({ error: err.message, code: err.code })
+    }
+  })
+
+  app.post('/api/billing/my-subscription/pause', authMiddleware, async (req, res) => {
+    try {
+      const sub = await findOne('billing_subscriptions', (s) => s.id === req.body?.subscription_id && s.tenant_id === req.user.id)
+      if (!sub) return res.status(404).json({ error: 'Subscription not found' })
+      const updated = await pauseSubscription(sub.id, {
+        reason: req.body?.reason || null,
+        actorId: req.user.id,
+        actorType: 'tenant',
+      })
+      res.json({ subscription: updated })
+    } catch (err) {
+      res.status(subStatus(err, 400)).json({ error: err.message, code: err.code })
+    }
+  })
+
+  app.post('/api/billing/my-subscription/resume', authMiddleware, async (req, res) => {
+    try {
+      const sub = await findOne('billing_subscriptions', (s) => s.id === req.body?.subscription_id && s.tenant_id === req.user.id)
+      if (!sub) return res.status(404).json({ error: 'Subscription not found' })
+      const updated = await resumeSubscription(sub.id, {
+        actorId: req.user.id,
+        actorType: 'tenant',
+      })
+      res.json({ subscription: updated })
+    } catch (err) {
+      res.status(subStatus(err, 400)).json({ error: err.message, code: err.code })
+    }
+  })
+
+  // ---------- Admin subscription management ----------
+  app.get('/api/admin/billing/subscriptions', ...guards, async (req, res) => {
+    try {
+      const status = req.query.status ? String(req.query.status).split(',') : null
+      const tenantId = req.query.tenant_id || null
+      const productId = req.query.product_id || null
+      const tierId = req.query.tier_id || null
+      const limit = Math.min(500, Number(req.query.limit) || 100)
+      const params = []
+      const where = []
+      if (status) { params.push(status); where.push(`status = ANY($${params.length}::text[])`) }
+      if (tenantId) { params.push(tenantId); where.push(`tenant_id = $${params.length}`) }
+      if (productId) { params.push(productId); where.push(`product_id = $${params.length}`) }
+      if (tierId) { params.push(tierId); where.push(`tier_id = $${params.length}`) }
+      params.push(limit)
+      const rows = await query(
+        `SELECT * FROM commercial.billing_subscriptions
+          ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
+          ORDER BY created_at DESC
+          LIMIT $${params.length}`,
+        params,
+      )
+      res.json({ subscriptions: rows })
+    } catch (err) {
+      res.status(500).json({ error: err.message })
+    }
+  })
+
+  app.get('/api/admin/billing/subscriptions/:id', ...guards, async (req, res) => {
+    try {
+      const subscription = await getSubscription(req.params.id)
+      if (!subscription) return res.status(404).json({ error: 'Subscription not found' })
+      const history = await listSubscriptionEvents(subscription.id, { limit: 200 })
+      res.json({ subscription, history })
+    } catch (err) {
+      res.status(500).json({ error: err.message })
+    }
+  })
+
+  app.post('/api/admin/billing/subscriptions/:id/cancel', ...guards, async (req, res) => {
+    try {
+      const updated = await cancelSubscription(req.params.id, {
+        reason: req.body?.reason || null,
+        actorId: actorFrom(req),
+        actorType: 'admin',
+        atPeriodEnd: req.body?.immediate !== true,
+      })
+      res.json({ subscription: updated })
+    } catch (err) {
+      res.status(subStatus(err, 400)).json({ error: err.message, code: err.code })
+    }
+  })
+
+  app.post('/api/admin/billing/subscriptions/:id/expire', ...guards, async (req, res) => {
+    try {
+      const updated = await expireSubscription(req.params.id, {
+        reason: req.body?.reason || null,
+        actorId: actorFrom(req),
+        actorType: 'admin',
+      })
+      res.json({ subscription: updated })
+    } catch (err) {
+      res.status(subStatus(err, 400)).json({ error: err.message, code: err.code })
+    }
+  })
+
+  app.post('/api/admin/billing/subscriptions/:id/mark-past-due', ...guards, async (req, res) => {
+    try {
+      const updated = await markPastDue(req.params.id, {
+        reason: req.body?.reason || null,
+        actorId: actorFrom(req),
+        actorType: 'admin',
+      })
+      res.json({ subscription: updated })
+    } catch (err) {
+      res.status(subStatus(err, 400)).json({ error: err.message, code: err.code })
+    }
+  })
+
+  app.post('/api/admin/billing/subscriptions/:id/resolve-past-due', ...guards, async (req, res) => {
+    try {
+      const updated = await resolvePastDue(req.params.id, {
+        reason: req.body?.reason || null,
+        actorId: actorFrom(req),
+        actorType: 'admin',
+      })
+      res.json({ subscription: updated })
+    } catch (err) {
+      res.status(subStatus(err, 400)).json({ error: err.message, code: err.code })
+    }
+  })
+
+  // Manual scheduler kick — for admins to force a renewal sweep without
+  // waiting for the interval tick. Useful during debugging + on cell
+  // failover.
+  app.post('/api/admin/billing/subscriptions/tick', ...guards, async (_req, res) => {
+    try {
+      const summary = await tickRenewals()
+      res.json(summary)
+    } catch (err) {
+      res.status(500).json({ error: err.message })
+    }
+  })
+
   // ---------- Public tenant-facing catalog ----------
   app.get('/api/billing/plans', authMiddleware || ((_req, _res, next) => next()), async (_req, res) => {
     try {
@@ -272,5 +469,14 @@ function errStatus(err, fallback) {
   if (err?.code === 'DUPLICATE_VERSION' || err?.code === 'DUPLICATE_CODE' || err?.code === 'DUPLICATE_OVERRIDE') return 409
   if (err?.code === 'INVALID_TRANSITION' || err?.code === 'PRODUCT_LOCKED' || err?.code === 'TIER_LOCKED') return 409
   if (err?.code === 'RETIRE_HAS_ACTIVE_SUBS') return 409
+  return fallback
+}
+
+function subStatus(err, fallback) {
+  if (err?.code === 'NOT_FOUND' || err?.code === 'PRODUCT_NOT_FOUND' || err?.code === 'TIER_NOT_FOUND') return 404
+  if (err?.code === 'PLAN_ALREADY_SUBSCRIBED') return 409
+  if (err?.code === 'INVALID_TRANSITION') return 409
+  if (err?.code === 'PRODUCT_NOT_SUBSCRIBABLE' || err?.code === 'TIER_NOT_SUBSCRIBABLE' || err?.code === 'TIER_NOT_PUBLIC') return 403
+  if (err?.code === 'TIER_PRODUCT_MISMATCH' || err?.code === 'MISSING_FIELD') return 400
   return fallback
 }

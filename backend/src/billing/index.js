@@ -20,7 +20,7 @@ import {
   resolveMarketContext, resolveEffectivePrice, effectiveCastValueMinor,
   getActiveRateCard, listTerritories, listZones, listCities,
 } from './pricing/index.js'
-import { registerProductCatalogRoutes } from './products/index.js'
+import { registerProductCatalogRoutes, startRenewalScheduler } from './products/index.js'
 
 export const MODULE_NAME = 'billing'
 
@@ -46,11 +46,19 @@ export function createModule() {
       } catch (err) {
         logger.warn({ err: err.message }, 'pricing hierarchy seed failed — territories/zones/rate-card may need manual setup')
       }
+      try {
+        const schedulerIntervalMs = Number(process.env.BILLING_SCHEDULER_INTERVAL_MS || 15 * 60 * 1000)
+        const schedulerBatchSize = Number(process.env.BILLING_SCHEDULER_BATCH_SIZE || 50)
+        const startResult = await startRenewalScheduler({ intervalMs: schedulerIntervalMs, batchSize: schedulerBatchSize })
+        logger.info(startResult, 'billing subscription renewal scheduler boot')
+      } catch (err) {
+        logger.warn({ err: err.message }, 'renewal scheduler failed to boot — subscriptions will not auto-renew on this instance')
+      }
       logger.info({
         rate_card_version: RATE_CARD_LATEST_VERSION,
         cast_value_minor: CAST_VALUE_MINOR_SEED,
         action_count: Object.keys(CAST_RATES_V1).length,
-      }, 'billing module ready — Phase 7a/7b active, no tenant is being charged (all subscriptions default to null)')
+      }, 'billing module ready — Phase 7a/7b/7c active')
     },
     registerRoutes(app, { authMiddleware, isPlatformAdmin } = {}) {
       const requirePlatformAdmin = isPlatformAdmin ? makePlatformAdminGuard(isPlatformAdmin) : null

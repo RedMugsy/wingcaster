@@ -37,4 +37,25 @@ export {
   listEvents as listSubscriptionHistory,
 } from './subscription-history.js'
 
+export {
+  createSubscription,
+  endTrial,
+  renewSubscription,
+  cancelSubscription,
+  expireSubscription,
+  pauseSubscription,
+  resumeSubscription,
+  markPastDue,
+  resolvePastDue,
+  getSubscription,
+  computePeriodEnd,
+  computeLedgerBillingPeriod,
+} from './lifecycle.js'
+
+export {
+  tickRenewals,
+  startRenewalScheduler,
+  stopRenewalScheduler,
+} from './renewal-scanner.js'
+
 export { registerProductCatalogRoutes } from './routes.js'
