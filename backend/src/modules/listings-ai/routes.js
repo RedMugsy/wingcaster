@@ -34,14 +34,6 @@ export function registerListingsAiRoutes(app, { aiAdapter, config, logger, authM
 
   app.post('/api/listings-ai/describe', auth, async (req, res) => {
     const started = Date.now()
-    if (typeof emitUsageEvent === 'function' && req.user?.id) {
-      emitUsageEvent({
-        actionKey: 'ai.description.generated',
-        tenantId: req.user.id,
-        quantity: Array.isArray(req.body?.photo_urls) ? req.body.photo_urls.length : 1,
-        metadata: { provider: req.body?.provider || null },
-      })
-    }
     const {
       photo_urls,
       hints,
@@ -86,16 +78,43 @@ export function registerListingsAiRoutes(app, { aiAdapter, config, logger, authM
         },
         'listings-ai describe complete',
       )
+      if (typeof emitUsageEvent === 'function' && req.user?.id) {
+        emitUsageEvent({
+          actionKey: 'ai.description.generated',
+          tenantId: req.user.id,
+          quantity: 1,
+          metadata: {
+            provider: result.provider,
+            photo_count: images.length,
+            ai_duration_ms: elapsed,
+            ai_success: true,
+          },
+        })
+      }
       return res.json({
         property: result.property,
         provider: result.provider,
         change_summary: result.changeSummary || null,
       })
     } catch (err) {
+      const elapsed = Date.now() - started
       logger.warn(
         { err: err.message, agentId: req.user?.id, photoCount: images.length },
         'listings-ai describe failed',
       )
+      if (typeof emitUsageEvent === 'function' && req.user?.id) {
+        emitUsageEvent({
+          actionKey: 'ai.description.failed',
+          tenantId: req.user.id,
+          quantity: 1,
+          metadata: {
+            provider: provider || null,
+            photo_count: images.length,
+            ai_duration_ms: elapsed,
+            ai_success: false,
+          },
+        })
+      }
       return res.status(502).json({
         error: 'AI extraction failed',
         detail: err.message,

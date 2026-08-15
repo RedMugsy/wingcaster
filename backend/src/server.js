@@ -4121,12 +4121,6 @@ app.get('/api/contacts/:id/lead-summary', authMiddleware, async (req, res) => {
 
 app.post('/api/contacts/:id/regenerate-summary', authMiddleware, async (req, res) => {
   await assertOwnsContact(req.user.id, req.params.id)
-  emitUsageEventAsync({
-    actionKey: 'ai.chat.turn',
-    tenantId: req.user.id,
-    quantity: 2, // one for summary + one for next-steps
-    metadata: { flow: 'contact_360_regenerate', contact_id: req.params.id },
-  })
   const aiAdapter = listingsAiModule?.enabled ? listingsAiModule.aiAdapter : null
   if (!aiAdapter) {
     return res.status(400).json({
@@ -4149,6 +4143,12 @@ app.post('/api/contacts/:id/regenerate-summary', authMiddleware, async (req, res
       type: 'contact_lead_summary_regenerated',
       agent_id: req.user.id,
       meta: { contact_id: req.params.id, score: bundle.score?.score, steps_count: bundle.summary?.next_steps?.length || 0 },
+    })
+    emitUsageEventAsync({
+      actionKey: 'ai.chat.turn',
+      tenantId: req.user.id,
+      quantity: 2,
+      metadata: { flow: 'contact_360_regenerate', contact_id: req.params.id },
     })
     res.json(bundle)
   } catch (err) {
@@ -6249,12 +6249,6 @@ app.get('/api/listings/:id/comments', authMiddleware, async (req, res) => {
  * category_source to 'manual' so the background AI worker won't overwrite it.
  */
 app.post('/api/comments/:id/reclassify', authMiddleware, async (req, res) => {
-  emitUsageEventAsync({
-    actionKey: 'ai.classification',
-    tenantId: req.user.id,
-    quantity: 1,
-    metadata: { manual: true, message_id: req.params.id },
-  })
   const row = await findOne('conversation_messages', (m) => m.id === req.params.id)
   if (!row) return res.status(404).json({ error: 'Message not found' })
 
@@ -6296,6 +6290,12 @@ app.post('/api/comments/:id/reclassify', authMiddleware, async (req, res) => {
     type: 'comment_manually_reclassified',
     agent_id: req.user.id,
     meta: { message_id: row.id, category, sentiment: nextSentiment },
+  })
+  emitUsageEventAsync({
+    actionKey: 'ai.classification',
+    tenantId: req.user.id,
+    quantity: 1,
+    metadata: { manual: true, message_id: req.params.id },
   })
   res.json({ message: updated })
 })

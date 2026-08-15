@@ -48,6 +48,7 @@ export const CAST_RATES_V1 = {
 
   // AI — description + classification are FREE (§2 rationale). Reply drafting + chat are billed.
   'ai.description.generated': 0,
+  'ai.description.failed':    0,
   'ai.classification':        0,
   'ai.reply.drafted':         1,
   'ai.chat.turn':             1,
