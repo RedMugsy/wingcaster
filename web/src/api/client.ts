@@ -10,10 +10,24 @@ import type {
 import type {
   City,
   CoreRateCard,
+  CreditNote,
+  CreditNoteStatus,
+  CreditNoteType,
   ListAdminOpts,
   MarketContext,
   PricePreview,
   PricePreviewInput,
+  Product,
+  ProductPricePreviewResult,
+  ProductStatus,
+  ProductTier,
+  ProductType,
+  PricingOverride,
+  RenewalTickSummary,
+  Subscription,
+  SubscriptionHistoryEvent,
+  SubscriptionStatus,
+  TenantPlanEntry,
   Territory,
   Zone,
 } from '@/types/commercialPricing'
@@ -1384,6 +1398,186 @@ export const api = {
 
   previewCommercialPrice: (input: PricePreviewInput): Promise<{ context: MarketContext; price: PricePreview }> =>
     fetchJson('/admin/pricing/preview', { method: 'POST', body: JSON.stringify(input) }),
+
+  // ============================================================
+  // Products + Tiers + Overrides (Phase 7c/1)
+  // ============================================================
+
+  listAdminProducts: (opts: { include_all_statuses?: boolean; product_type?: ProductType } = {}): Promise<{ products: Product[] }> => {
+    const parts: string[] = []
+    if (opts.include_all_statuses) parts.push('include_all_statuses=true')
+    if (opts.product_type) parts.push(`product_type=${encodeURIComponent(opts.product_type)}`)
+    return fetchJson(`/admin/billing/products${parts.length ? '?' + parts.join('&') : ''}`)
+  },
+  getAdminProduct: (id: string): Promise<{ product: Product; tiers: ProductTier[]; overrides: PricingOverride[] }> =>
+    fetchJson(`/admin/billing/products/${id}`),
+  createAdminProduct: (input: Partial<Product>): Promise<{ product: Product }> =>
+    fetchJson('/admin/billing/products', { method: 'POST', body: JSON.stringify(input) }),
+  updateAdminProduct: (id: string, patch: Partial<Product>): Promise<{ product: Product }> =>
+    fetchJson(`/admin/billing/products/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+  publishAdminProduct: (id: string): Promise<{ product: Product }> =>
+    fetchJson(`/admin/billing/products/${id}/publish`, { method: 'POST' }),
+  deprecateAdminProduct: (id: string): Promise<{ product: Product }> =>
+    fetchJson(`/admin/billing/products/${id}/deprecate`, { method: 'POST' }),
+  retireAdminProduct: (id: string): Promise<{ product: Product }> =>
+    fetchJson(`/admin/billing/products/${id}/retire`, { method: 'POST' }),
+  cloneAdminProduct: (id: string): Promise<{ product: Product }> =>
+    fetchJson(`/admin/billing/products/${id}/clone-as-new-version`, { method: 'POST' }),
+
+  listAdminTiers: (productId: string, opts: { include_all_statuses?: boolean } = {}): Promise<{ tiers: ProductTier[] }> =>
+    fetchJson(`/admin/billing/products/${productId}/tiers${opts.include_all_statuses ? '?include_all_statuses=true' : ''}`),
+  createAdminTier: (productId: string, input: Partial<ProductTier>): Promise<{ tier: ProductTier }> =>
+    fetchJson(`/admin/billing/products/${productId}/tiers`, { method: 'POST', body: JSON.stringify(input) }),
+  updateAdminTier: (id: string, patch: Partial<ProductTier>): Promise<{ tier: ProductTier }> =>
+    fetchJson(`/admin/billing/tiers/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+  activateAdminTier: (id: string): Promise<{ tier: ProductTier }> =>
+    fetchJson(`/admin/billing/tiers/${id}/activate`, { method: 'POST' }),
+  deprecateAdminTier: (id: string): Promise<{ tier: ProductTier }> =>
+    fetchJson(`/admin/billing/tiers/${id}/deprecate`, { method: 'POST' }),
+  retireAdminTier: (id: string): Promise<{ tier: ProductTier }> =>
+    fetchJson(`/admin/billing/tiers/${id}/retire`, { method: 'POST' }),
+
+  listAdminProductOverrides: (productId: string): Promise<{ overrides: PricingOverride[] }> =>
+    fetchJson(`/admin/billing/products/${productId}/pricing-overrides`),
+  createAdminProductOverride: (productId: string, input: Partial<PricingOverride>): Promise<{ override: PricingOverride }> =>
+    fetchJson(`/admin/billing/products/${productId}/pricing-overrides`, { method: 'POST', body: JSON.stringify(input) }),
+  updateAdminProductOverride: (id: string, patch: Partial<PricingOverride>): Promise<{ override: PricingOverride }> =>
+    fetchJson(`/admin/billing/pricing-overrides/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+  deleteAdminProductOverride: (id: string): Promise<{ override: PricingOverride }> =>
+    fetchJson(`/admin/billing/pricing-overrides/${id}`, { method: 'DELETE' }),
+
+  previewAdminProductPrice: (input: {
+    product_id: string
+    tier_id?: string
+    territory_id?: string
+    zone_id?: string
+    city?: string
+    country_code?: string
+  }): Promise<ProductPricePreviewResult> =>
+    fetchJson('/admin/billing/pricing-preview', { method: 'POST', body: JSON.stringify(input) }),
+
+  // ============================================================
+  // Subscriptions (Phase 7c/2 + 7c/3)
+  // ============================================================
+
+  listAdminSubscriptions: (opts: {
+    status?: SubscriptionStatus | SubscriptionStatus[]
+    tenant_id?: string
+    product_id?: string
+    tier_id?: string
+    limit?: number
+  } = {}): Promise<{ subscriptions: Subscription[] }> => {
+    const parts: string[] = []
+    if (opts.status) parts.push(`status=${encodeURIComponent(Array.isArray(opts.status) ? opts.status.join(',') : opts.status)}`)
+    if (opts.tenant_id) parts.push(`tenant_id=${encodeURIComponent(opts.tenant_id)}`)
+    if (opts.product_id) parts.push(`product_id=${encodeURIComponent(opts.product_id)}`)
+    if (opts.tier_id) parts.push(`tier_id=${encodeURIComponent(opts.tier_id)}`)
+    if (opts.limit) parts.push(`limit=${opts.limit}`)
+    return fetchJson(`/admin/billing/subscriptions${parts.length ? '?' + parts.join('&') : ''}`)
+  },
+  getAdminSubscription: (id: string): Promise<{ subscription: Subscription; history: SubscriptionHistoryEvent[] }> =>
+    fetchJson(`/admin/billing/subscriptions/${id}`),
+  cancelAdminSubscription: (id: string, body: { reason?: string; immediate?: boolean } = {}): Promise<{ subscription: Subscription }> =>
+    fetchJson(`/admin/billing/subscriptions/${id}/cancel`, { method: 'POST', body: JSON.stringify(body) }),
+  expireAdminSubscription: (id: string, body: { reason?: string } = {}): Promise<{ subscription: Subscription }> =>
+    fetchJson(`/admin/billing/subscriptions/${id}/expire`, { method: 'POST', body: JSON.stringify(body) }),
+  markAdminSubscriptionPastDue: (id: string, body: { reason?: string } = {}): Promise<{ subscription: Subscription }> =>
+    fetchJson(`/admin/billing/subscriptions/${id}/mark-past-due`, { method: 'POST', body: JSON.stringify(body) }),
+  resolveAdminSubscriptionPastDue: (id: string, body: { reason?: string } = {}): Promise<{ subscription: Subscription }> =>
+    fetchJson(`/admin/billing/subscriptions/${id}/resolve-past-due`, { method: 'POST', body: JSON.stringify(body) }),
+  migrateAdminSubscription: (id: string, body: {
+    target_product_id?: string
+    target_tier_id: string
+    prorate?: boolean
+    reason?: string
+  }): Promise<{ subscription: Subscription }> =>
+    fetchJson(`/admin/billing/subscriptions/${id}/migrate`, { method: 'POST', body: JSON.stringify(body) }),
+  tickRenewalSweep: (): Promise<RenewalTickSummary> =>
+    fetchJson('/admin/billing/subscriptions/tick', { method: 'POST' }),
+
+  // ============================================================
+  // Credit Notes (Phase 7c/3)
+  // ============================================================
+
+  listAdminCreditNotes: (opts: {
+    tenant_id?: string
+    subscription_id?: string
+    status?: CreditNoteStatus
+    limit?: number
+  } = {}): Promise<{ notes: CreditNote[] }> => {
+    const parts: string[] = []
+    if (opts.tenant_id) parts.push(`tenant_id=${encodeURIComponent(opts.tenant_id)}`)
+    if (opts.subscription_id) parts.push(`subscription_id=${encodeURIComponent(opts.subscription_id)}`)
+    if (opts.status) parts.push(`status=${encodeURIComponent(opts.status)}`)
+    if (opts.limit) parts.push(`limit=${opts.limit}`)
+    return fetchJson(`/admin/billing/credit-notes${parts.length ? '?' + parts.join('&') : ''}`)
+  },
+  getAdminCreditNote: (id: string): Promise<{ note: CreditNote }> =>
+    fetchJson(`/admin/billing/credit-notes/${id}`),
+  createAdminCreditNote: (body: {
+    tenant_id: string
+    subscription_id?: string
+    type: CreditNoteType
+    amount_minor: number
+    currency: string
+    reason?: string
+    expires_at?: string
+    metadata?: Record<string, unknown>
+  }): Promise<{ note: CreditNote }> =>
+    fetchJson('/admin/billing/credit-notes', { method: 'POST', body: JSON.stringify(body) }),
+  voidAdminCreditNote: (id: string, body: { reason?: string } = {}): Promise<{ note: CreditNote }> =>
+    fetchJson(`/admin/billing/credit-notes/${id}/void`, { method: 'POST', body: JSON.stringify(body) }),
+  getAdminTenantCreditBalance: (tenantId: string): Promise<{ tenant_id: string; pending_balance_by_currency: Record<string, number> }> =>
+    fetchJson(`/admin/billing/tenants/${tenantId}/credit-balance`),
+
+  // ============================================================
+  // Tenant self-serve (Phase 7c/1 + 7c/2 + 7c/3)
+  // ============================================================
+
+  getMySubscription: (): Promise<{
+    subscription: Subscription | null
+    other_subscriptions: Subscription[]
+    history: SubscriptionHistoryEvent[]
+  }> => fetchJson('/billing/my-subscription'),
+  subscribeToTier: (body: {
+    tier_id: string
+    product_id?: string
+    trial_days?: number
+    auto_renew?: boolean
+    territory_id?: string
+    zone_id?: string
+    custom_period_days?: number
+    metadata?: Record<string, unknown>
+  }): Promise<{ subscription: Subscription }> =>
+    fetchJson('/billing/subscribe', { method: 'POST', body: JSON.stringify(body) }),
+  cancelMySubscription: (body: {
+    subscription_id: string
+    reason?: string
+    immediate?: boolean
+  }): Promise<{ subscription: Subscription }> =>
+    fetchJson('/billing/my-subscription/cancel', { method: 'POST', body: JSON.stringify(body) }),
+  pauseMySubscription: (body: { subscription_id: string; reason?: string }): Promise<{ subscription: Subscription }> =>
+    fetchJson('/billing/my-subscription/pause', { method: 'POST', body: JSON.stringify(body) }),
+  resumeMySubscription: (body: { subscription_id: string }): Promise<{ subscription: Subscription }> =>
+    fetchJson('/billing/my-subscription/resume', { method: 'POST', body: JSON.stringify(body) }),
+  changeMyTier: (body: {
+    subscription_id: string
+    target_tier_id: string
+    target_product_id?: string
+    prorate?: boolean
+    reason?: string
+  }): Promise<{ subscription: Subscription }> =>
+    fetchJson('/billing/my-subscription/change-tier', { method: 'POST', body: JSON.stringify(body) }),
+  getMyCreditNotes: (opts: { status?: CreditNoteStatus; limit?: number } = {}): Promise<{
+    notes: CreditNote[]
+    pending_balance_by_currency: Record<string, number>
+  }> => {
+    const parts: string[] = []
+    if (opts.status) parts.push(`status=${encodeURIComponent(opts.status)}`)
+    if (opts.limit) parts.push(`limit=${opts.limit}`)
+    return fetchJson(`/billing/my-credit-notes${parts.length ? '?' + parts.join('&') : ''}`)
+  },
+  listBillingPlans: (): Promise<{ plans: TenantPlanEntry[] }> => fetchJson('/billing/plans'),
 }
 
 function buildQuery(opts: ListAdminOpts): string {
