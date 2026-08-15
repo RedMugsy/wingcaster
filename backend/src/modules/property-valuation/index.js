@@ -24,6 +24,7 @@ import { registerAdminRoutes } from './interface/admin-routes.js'
 import { registerPublicRoutes } from './interface/public-routes.js'
 import { registerRoleRoutes } from './interface/role-routes.js'
 import { seedMarketPricingDefaults } from './application/seed.js'
+import { assertActiveCurrencyProvidersConfigured } from './application/currency-providers.js'
 
 export const MODULE_NAME = 'property-valuation'
 
@@ -86,6 +87,8 @@ export function createModule({ platformAdapter, config: configOverride, dal: dal
   async function seed() {
     try {
       await seedMarketPricingDefaults({ dal, config, logger })
+      const pricingSources = await dal.findAll('pricing_sources', () => true)
+      assertActiveCurrencyProvidersConfigured(pricingSources)
       logger.info('Market Pricing default seed completed')
     } catch (err) {
       logger.error({ err: err.message }, 'Market Pricing default seed failed')

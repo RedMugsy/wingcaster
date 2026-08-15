@@ -161,20 +161,11 @@ export async function publishXTweet({ text, mediaIds = [], replyToTweetId = null
   }
   const trimmed = String(text || '').trim().slice(0, 280)
 
-  if (cfg.provider === 'dev' || !isXEnabled()) {
-    if (cfg.devAlwaysSuccess) {
-      const id = `x_tweet_dev_${uuidv4().slice(0, 12)}`
-      return {
-        ok: true,
-        provider: 'x_dev_simulator',
-        tweet_id: id,
-        external_url: `https://x.com/dev/status/${id}`,
-        text: trimmed,
-        media_count: mediaIds.length,
-        simulated: true,
-      }
-    }
-    throw Object.assign(new Error('X dev mode configured to fail'), { code: 'DEV_FAILURE' })
+  if (!token) {
+    throw Object.assign(
+      new Error('x publishing requires X_BEARER_TOKEN to be set'),
+      { code: 'PUBLISH_CREDENTIALS_MISSING' },
+    )
   }
 
   const body = { text: trimmed }

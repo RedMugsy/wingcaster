@@ -35,6 +35,7 @@ import {
   updateAgencyMembership,
 } from './tenant-authorization.js'
 import logger from './lib/logger.js'
+import { assertPublishChannelConfigured, warnUnavailablePublishChannels } from './lib/publish-readiness.js'
 import { createPropertyWithCanonical } from './lib/property-write.js'
 import { escapeXml } from './lib/xml.js'
 import { sendOtp } from './lib/otp.js'
@@ -4385,13 +4386,11 @@ async function retryDistributionDelivery(row, { requestedBy, source = 'manual' }
         next_retry_at: null,
       })
     } else {
-      // Social retry currently confirms internal publish state and records external placeholder id.
-      externalId = `retry_${row.platform}_${Date.now()}`
-      status = 'published'
-      publishedAt = nowIso
+      status = 'failed'
+      error = `Retry publishing is not implemented for ${row.platform}`
       Object.assign(meta, {
-        delivery: 'agent_social_retry_queue',
-        published_via: 'retry_worker_simulated',
+        delivery: null,
+        published_via: null,
         next_retry_at: null,
       })
     }
@@ -4771,13 +4770,7 @@ app.get('/api/social-channels/oauth/:platform/callback', async (req, res) => {
   let userInfo = null
 
   if (cfg.dev || code === 'dev_ok') {
-    // Dev-mode: synthesize a token so downstream publish adapters work.
-    tokenPayload = {
-      access_token: `dev_${platform}_${uuidv4().slice(0, 20)}`,
-      refresh_token: `dev_refresh_${platform}_${uuidv4().slice(0, 20)}`,
-      expires_at: new Date(Date.now() + 90 * 24 * 3600 * 1000).toISOString(),
-    }
-    userInfo = { id: `dev_${platform}_user`, handle: `dev_${platform}_handle` }
+    return res.status(503).send(`${platform} OAuth requires production credentials to be configured`)
   } else {
     try {
       const redirectUri = `${getOAuthRedirectBase(req)}/social-channels/oauth/${platform}/callback`
@@ -5179,8 +5172,7 @@ app.post('/api/properties/:propertyId/distribute-own', authMiddleware, async (re
  * Direct-publish path: fans out to platform-specific publish scaffolds.
  * Unlike /distribute-own (which queues for retry on social channels), this
  * endpoint hits the real IG / FB / X / TikTok / LinkedIn publish functions
- * directly. Dev-mode adapters return simulated results so the UX works
- * end-to-end without live credentials.
+ * directly. Missing provider credentials fail the affected channel.
  */
 app.post('/api/listings/:id/publish-social', authMiddleware, async (req, res) => {
   const property = await findOne('properties', p => p.id === req.params.id)
@@ -5205,6 +5197,13 @@ app.post('/api/listings/:id/publish-social', authMiddleware, async (req, res) =>
     const format = raw?.format || null
     if (!platform) {
       results.push({ platform, status: 'failed', error: 'platform is required' })
+      continue
+    }
+
+    try {
+      assertPublishChannelConfigured(platform)
+    } catch (error) {
+      results.push({ platform, status: 'failed', error: error.message, error_code: error.code })
       continue
     }
 
@@ -5343,6 +5342,7 @@ app.post('/api/listings/:id/publish-social', authMiddleware, async (req, res) =>
       status,
       external_id: externalId,
       error: publishError?.message || null,
+      error_code: publishError?.code || null,
       formats: format ? [format] : [],
       connection_id: conn.id,
       meta: {
@@ -5405,10 +5405,12 @@ app.post('/api/listings/:id/publish-social', authMiddleware, async (req, res) =>
       provider: publishResult?.provider || null,
       simulated: publishResult?.simulated || false,
       error: publishError?.message || null,
+      error_code: publishError?.code || null,
     })
   }
 
-  res.json({ results })
+  const credentialsMissing = results.some((result) => result.error_code === 'PUBLISH_CREDENTIALS_MISSING')
+  res.status(credentialsMissing ? 503 : 200).json({ results })
 })
 
 // ==================== WHATSAPP CLOUD API ====================
@@ -7665,6 +7667,7 @@ app.use((err, req, res, _next) => {
 // ==================== START ====================
 const startServer = async () => {
   const port = await resolveServerPort()
+  warnUnavailablePublishChannels(logger)
   const unverifiableWebhookChannels = [
     [!process.env.META_APP_SECRET, 'whatsapp'],
     [!process.env.META_APP_SECRET, 'instagram'],

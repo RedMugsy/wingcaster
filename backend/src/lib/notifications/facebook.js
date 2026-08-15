@@ -51,19 +51,7 @@ export async function publishFacebookPagePost({ pageId, message, linkUrl, access
     throw Object.assign(new Error('message or linkUrl is required'), { code: 'MISSING_CONTENT' })
   }
 
-  if (cfg.provider === 'dev' || !isFacebookEnabled()) {
-    if (cfg.devAlwaysSuccess) {
-      const postId = `${targetPage || 'devpage'}_${uuidv4().slice(0, 12)}`
-      return {
-        ok: true,
-        provider: 'facebook_dev_simulator',
-        post_id: postId,
-        external_url: `https://facebook.com/dev/posts/${postId}`,
-        simulated: true,
-      }
-    }
-    throw Object.assign(new Error('Facebook dev mode configured to fail'), { code: 'DEV_FAILURE' })
-  }
+  requireFacebookPublishing(targetPage, token)
 
   const body = new URLSearchParams()
   if (text) body.set('message', text)
@@ -97,19 +85,7 @@ export async function publishFacebookPagePhoto({ pageId, imageUrl, caption, acce
   const token = accessToken || cfg.pageAccessToken
   if (!imageUrl) throw Object.assign(new Error('imageUrl is required'), { code: 'MISSING_MEDIA' })
 
-  if (cfg.provider === 'dev' || !isFacebookEnabled()) {
-    if (cfg.devAlwaysSuccess) {
-      const postId = `${targetPage || 'devpage'}_photo_${uuidv4().slice(0, 12)}`
-      return {
-        ok: true,
-        provider: 'facebook_dev_simulator',
-        post_id: postId,
-        external_url: `https://facebook.com/dev/photos/${postId}`,
-        simulated: true,
-      }
-    }
-    throw Object.assign(new Error('Facebook dev mode configured to fail'), { code: 'DEV_FAILURE' })
-  }
+  requireFacebookPublishing(targetPage, token)
 
   const body = new URLSearchParams()
   body.set('url', imageUrl)
@@ -282,6 +258,18 @@ export async function fetchFacebookInsights({ postId, accessToken }) {
     source: 'facebook_graph_api',
     simulated: false,
     fetched_at: new Date().toISOString(),
+  }
+}
+
+function requireFacebookPublishing(pageId, token) {
+  const missing = []
+  if (!pageId) missing.push('FACEBOOK_PAGE_ID')
+  if (!token) missing.push('FACEBOOK_PAGE_ACCESS_TOKEN')
+  if (missing.length) {
+    throw Object.assign(
+      new Error(`facebook publishing requires ${missing.join(' and ')} to be set`),
+      { code: 'PUBLISH_CREDENTIALS_MISSING' },
+    )
   }
 }
 

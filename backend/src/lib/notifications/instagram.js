@@ -234,9 +234,7 @@ export async function publishInstagramFeed({ imageUrl, caption, businessAccountI
   const cfg = getInstagramConfig()
   const igAccountId = businessAccountId || cfg.businessAccountId
   const token = accessToken || cfg.pageAccessToken
-  if (!igAccountId) {
-    return simulateInstagramPublish('feed_image', { imageUrl, caption })
-  }
+  requireInstagramPublishing(igAccountId, token)
 
   const createUrl = `${GRAPH_BASE}/${igAccountId}/media?access_token=${token}`
   const createBody = new URLSearchParams({ image_url: imageUrl })
@@ -273,9 +271,7 @@ export async function publishInstagramCarousel({ imageUrls, caption, businessAcc
   const igAccountId = businessAccountId || cfg.businessAccountId
   const token = accessToken || cfg.pageAccessToken
   if (!imageUrls?.length) throw Object.assign(new Error('imageUrls is required for carousel'), { code: 'MISSING_CAROUSEL_IMAGES' })
-  if (!igAccountId) {
-    return simulateInstagramPublish('carousel', { imageUrls, caption })
-  }
+  requireInstagramPublishing(igAccountId, token)
 
   const children = []
   for (const imageUrl of imageUrls) {
@@ -324,9 +320,7 @@ export async function publishInstagramReel({ videoUrl, caption, businessAccountI
   const cfg = getInstagramConfig()
   const igAccountId = businessAccountId || cfg.businessAccountId
   const token = accessToken || cfg.pageAccessToken
-  if (!igAccountId) {
-    return simulateInstagramPublish('reel', { videoUrl, caption })
-  }
+  requireInstagramPublishing(igAccountId, token)
 
   const createUrl = `${GRAPH_BASE}/${igAccountId}/media?access_token=${token}`
   const createBody = new URLSearchParams({ media_type: 'REELS', video_url: videoUrl })
@@ -364,9 +358,7 @@ export async function publishInstagramStory({ imageUrl, businessAccountId, acces
   const cfg = getInstagramConfig()
   const igAccountId = businessAccountId || cfg.businessAccountId
   const token = accessToken || cfg.pageAccessToken
-  if (!igAccountId) {
-    return simulateInstagramPublish('story', { imageUrl })
-  }
+  requireInstagramPublishing(igAccountId, token)
 
   const createUrl = `${GRAPH_BASE}/${igAccountId}/media?access_token=${token}`
   const createBody = new URLSearchParams({ media_type: 'STORIES', image_url: imageUrl })
@@ -394,20 +386,15 @@ export async function publishInstagramStory({ imageUrl, businessAccountId, acces
   }
 }
 
-function simulateInstagramPublish(format, { imageUrl, videoUrl, caption }) {
-  const cfg = getInstagramConfig()
-  if (cfg.devAlwaysSuccess === false) {
-    throw Object.assign(new Error('Instagram dev mode configured to fail'), { code: 'DEV_FAILURE' })
-  }
-  return {
-    ok: true,
-    provider: 'instagram_dev_simulator',
-    provider_message_id: `instagram_${format}_dev_${uuidv4().slice(0, 12)}`,
-    simulated: true,
-    format,
-    imageUrl,
-    videoUrl,
-    caption,
+function requireInstagramPublishing(accountId, token) {
+  const missing = []
+  if (!accountId) missing.push('INSTAGRAM_BUSINESS_ACCOUNT_ID')
+  if (!token) missing.push('INSTAGRAM_PAGE_ACCESS_TOKEN')
+  if (missing.length) {
+    throw Object.assign(
+      new Error(`instagram publishing requires ${missing.join(' and ')} to be set`),
+      { code: 'PUBLISH_CREDENTIALS_MISSING' },
+    )
   }
 }
 

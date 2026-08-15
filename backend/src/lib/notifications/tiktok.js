@@ -103,20 +103,7 @@ export async function publishTikTokPhoto({ imageUrls, caption, accessToken }) {
   const urls = Array.isArray(imageUrls) ? imageUrls.filter(Boolean) : [imageUrls].filter(Boolean)
   if (!urls.length) throw Object.assign(new Error('imageUrls is required'), { code: 'MISSING_MEDIA' })
 
-  if (cfg.provider === 'dev' || !isTikTokEnabled()) {
-    if (cfg.devAlwaysSuccess) {
-      return {
-        ok: true,
-        provider: 'tiktok_dev_simulator',
-        publish_id: `tiktok_photo_dev_${uuidv4().slice(0, 12)}`,
-        external_url: `https://tiktok.com/dev/photo/${uuidv4().slice(0, 8)}`,
-        image_count: urls.length,
-        caption: caption || '',
-        simulated: true,
-      }
-    }
-    throw Object.assign(new Error('TikTok dev mode configured to fail'), { code: 'DEV_FAILURE' })
-  }
+  requireTikTokPublishing(token)
 
   // Live path — POST /v2/post/publish/content/init/
   const res = await fetch('https://open.tiktokapis.com/v2/post/publish/content/init/', {
@@ -164,19 +151,7 @@ export async function publishTikTokVideo({ videoUrl, caption, accessToken }) {
   const token = accessToken || cfg.accessToken
   if (!videoUrl) throw Object.assign(new Error('videoUrl is required'), { code: 'MISSING_MEDIA' })
 
-  if (cfg.provider === 'dev' || !isTikTokEnabled()) {
-    if (cfg.devAlwaysSuccess) {
-      return {
-        ok: true,
-        provider: 'tiktok_dev_simulator',
-        publish_id: `tiktok_video_dev_${uuidv4().slice(0, 12)}`,
-        external_url: `https://tiktok.com/dev/video/${uuidv4().slice(0, 8)}`,
-        caption: caption || '',
-        simulated: true,
-      }
-    }
-    throw Object.assign(new Error('TikTok dev mode configured to fail'), { code: 'DEV_FAILURE' })
-  }
+  requireTikTokPublishing(token)
 
   const res = await fetch('https://open.tiktokapis.com/v2/post/publish/video/init/', {
     method: 'POST',
@@ -270,6 +245,15 @@ export async function fetchTikTokInsights({ videoId, accessToken }) {
     source: 'tiktok_research_api',
     simulated: false,
     fetched_at: new Date().toISOString(),
+  }
+}
+
+function requireTikTokPublishing(token) {
+  if (!token) {
+    throw Object.assign(
+      new Error('tiktok publishing requires TIKTOK_ACCESS_TOKEN to be set'),
+      { code: 'PUBLISH_CREDENTIALS_MISSING' },
+    )
   }
 }
 

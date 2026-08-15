@@ -73,18 +73,12 @@ export async function publishLinkedInPost({
     })
   }
 
-  if (cfg.provider === 'dev' || !isLinkedInEnabled()) {
-    if (cfg.devAlwaysSuccess) {
-      const postUrn = `urn:li:share:dev_${uuidv4().slice(0, 12)}`
-      return {
-        ok: true,
-        provider: 'linkedin_dev_simulator',
-        post_urn: postUrn,
-        external_url: `https://linkedin.com/dev/feed/update/${postUrn}`,
-        simulated: true,
-      }
-    }
-    throw Object.assign(new Error('LinkedIn dev mode configured to fail'), { code: 'DEV_FAILURE' })
+  if (!token || !author) {
+    const missing = [!token && 'LINKEDIN_ACCESS_TOKEN', !author && 'LINKEDIN_AUTHOR_URN'].filter(Boolean)
+    throw Object.assign(
+      new Error(`linkedin publishing requires ${missing.join(' and ')} to be set`),
+      { code: 'PUBLISH_CREDENTIALS_MISSING' },
+    )
   }
 
   if (!author) {

@@ -51,9 +51,6 @@ export function getConfig() {
     recalculationJobMaxAttempts: parseNumber(process.env.MARKET_PRICING_JOB_MAX_ATTEMPTS, 3),
     trendWorkerIntervalMs: parseMs(process.env.MARKET_PRICING_TREND_WORKER_INTERVAL_MS, 86400000 * 30), // monthly
 
-    // Seed
-    seedDemoProperties: parseBool(process.env.MARKET_PRICING_SEED_DEMO, false),
-
     // WhatsApp integration
     whatsAppContextEnabled: parseBool(process.env.MARKET_PRICING_WHATSAPP_CONTEXT_ENABLED, true),
 

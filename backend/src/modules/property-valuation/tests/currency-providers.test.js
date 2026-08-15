@@ -1,7 +1,17 @@
 import { describe, it, expect, vi } from 'vitest'
-import { createCurrencyProvider, listCurrencyProviderNames } from '../application/currency-providers.js'
+import {
+  assertActiveCurrencyProvidersConfigured,
+  createCurrencyProvider,
+  listCurrencyProviderNames,
+} from '../application/currency-providers.js'
 
 describe('Currency Providers', () => {
+  it('rejects an active Sayrafa source at boot without credentials', () => {
+    expect(() => assertActiveCurrencyProvidersConfigured([
+      { provider: 'sayrafa', enabled: true },
+    ], {})).toThrow('Active Sayrafa provider requires SAYRAFA_API_URL and SAYRAFA_API_KEY to be set')
+  })
+
   it('lists all supported provider names', () => {
     expect(listCurrencyProviderNames()).toEqual(['manual', 'lira_rate', 'sayrafa', 'custom'])
   })

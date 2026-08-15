@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import {
   Building2, CheckCircle, Loader2, ArrowRight, ArrowLeft, MessageCircle,
-  Mail, ShieldCheck, MapPin, Phone, Globe, User, Lock, FileText,
+  Mail, MapPin, Phone, Globe, User, Lock, FileText,
   Languages, Target, Home, Search, ChevronDown, Check, X, Briefcase,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -943,14 +943,7 @@ export function AgentRegisterPage() {
             {/* Terms & reCAPTCHA */}
             <Card className="border shadow-sm">
               <CardContent className="space-y-4 pt-6">
-                {/* reCAPTCHA placeholder */}
-                <div className="rounded-lg border border-dashed bg-muted/30 p-4 flex items-center gap-3">
-                  <ShieldCheck className="h-5 w-5 text-muted-foreground" />
-                  <div>
-                    <div className="text-sm font-medium">Security verification</div>
-                    <div className="text-xs text-muted-foreground">reCAPTCHA v3 integration will be enabled for production</div>
-                  </div>
-                </div>
+                <div id="recaptcha-root" />
 
                 {/* Terms checkbox */}
                 <label className="flex items-start gap-3 text-sm cursor-pointer">

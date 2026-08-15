@@ -81,8 +81,8 @@ function createLiraRateProvider() {
 }
 
 /**
- * Sayrafa (official Lebanese central-bank platform). Requires an API contract
- * for production; this is a documented contract/placeholder.
+ * Sayrafa (official Lebanese central-bank platform). The production contract
+ * remains pending, so an active source requires explicit endpoint credentials.
  */
 function createSayrafaProvider() {
   return {
@@ -155,4 +155,11 @@ export function createCurrencyProvider(source, sourceConfig = {}) {
 
 export function listCurrencyProviderNames() {
   return Object.keys(PROVIDER_FACTORIES)
+}
+
+export function assertActiveCurrencyProvidersConfigured(sources, env = process.env) {
+  const sayrafaActive = sources.some((source) => source.enabled === true && source.provider === 'sayrafa')
+  if (sayrafaActive && (!env.SAYRAFA_API_URL || !env.SAYRAFA_API_KEY)) {
+    throw new Error('Active Sayrafa provider requires SAYRAFA_API_URL and SAYRAFA_API_KEY to be set')
+  }
 }
