@@ -1,16 +1,17 @@
 /**
  * Credential encryption for multi-tenant OAuth tokens and secret overrides.
  *
- * Uses AES-256-GCM with a base64-encoded master key from CREDENTIALS_ENCRYPTION_KEY.
- * Ciphertext format on disk / DB is `v1:<iv-base64>:<tag-base64>:<ct-base64>`.
+ * Uses AES-256-GCM with a base64-encoded master key from
+ * CREDENTIALS_ENCRYPTION_KEY. Ciphertext format is
+ * `v1:<iv-base64>:<tag-base64>:<ct-base64>`.
  *
  * Generate a key with:
  *   node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
- * Then set CREDENTIALS_ENCRYPTION_KEY=... in the backend .env.
+ * Then set CREDENTIALS_ENCRYPTION_KEY=... in the backend .env or Railway
+ * service Variables tab.
  *
- * In dev, if the key is missing we fall back to a static development key so
- * the local flow keeps working — never rely on that in production; a warning
- * is emitted on first use.
+ * No dev fallback. If the key is missing, encryption fails loudly. Tests
+ * that touch tenant credentials must set the env var explicitly.
  */
 
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto'
@@ -20,20 +21,14 @@ const IV_BYTES = 12
 const KEY_BYTES = 32
 const FORMAT_VERSION = 'v1'
 
-let warned = false
-
 function getKey() {
   const raw = process.env.CREDENTIALS_ENCRYPTION_KEY
   if (!raw) {
-    if (!warned) {
-      // eslint-disable-next-line no-console
-      console.warn(
-        '[credentials] CREDENTIALS_ENCRYPTION_KEY not set — using a static dev key. Do NOT use this in production.',
-      )
-      warned = true
-    }
-    // Deterministic dev key so encrypted values survive a restart in dev.
-    return Buffer.from('wingcaster-dev-key-do-not-use-in-prod-XXXX'.padEnd(KEY_BYTES, '0').slice(0, KEY_BYTES), 'utf8')
+    throw new Error(
+      'CREDENTIALS_ENCRYPTION_KEY is not configured. Generate one with '
+      + '`node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'base64\'))"` '
+      + 'and set it in the service environment.',
+    )
   }
   const buf = Buffer.from(raw, 'base64')
   if (buf.length !== KEY_BYTES) {

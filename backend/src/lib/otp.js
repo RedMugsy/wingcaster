@@ -1,55 +1,46 @@
 import logger from './logger.js'
 
-function isConfigured(channel) {
-  if (channel === 'whatsapp') {
-    return Boolean(process.env.META_ACCESS_TOKEN && process.env.WHATSAPP_PHONE_NUMBER_ID)
+/**
+ * Which OTP transports have all required env vars set.
+ * Consulted at boot for the "unconfigured channels" warn AND at request
+ * time to decide whether to send or throw.
+ */
+export function otpChannelsConfigured() {
+  return {
+    whatsapp: Boolean(process.env.META_ACCESS_TOKEN && process.env.WHATSAPP_PHONE_NUMBER_ID),
+    email: Boolean(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS),
+    gmail: Boolean(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS),
+    facebook: Boolean(process.env.FACEBOOK_ACCESS_TOKEN),
   }
-  if (channel === 'email' || channel === 'gmail') {
-    return Boolean(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS)
-  }
-  if (channel === 'facebook') {
-    return Boolean(process.env.FACEBOOK_ACCESS_TOKEN)
-  }
-  return false
 }
 
 /**
- * Send an OTP to the requested channel.
- * Returns { delivered: boolean, simulated: boolean, message: string }.
- * In production, configure the relevant provider credentials; otherwise the
- * transport is simulated and the code is only logged (in dev) or discarded.
+ * Send an OTP to the requested channel. Throws if the transport is not
+ * configured or not yet implemented. Callers must catch and surface a
+ * clear user-facing error (typically 503).
+ *
+ * @returns {Promise<{delivered: true, channel: string, contact: string}>}
  */
 export async function sendOtp({ channel, contact, code }) {
-  const configured = isConfigured(channel)
+  if (!channel) throw new Error('OTP channel is required')
+  if (!contact) throw new Error('OTP contact is required')
+  if (!code) throw new Error('OTP code is required')
 
-  if (!configured) {
-    logger.info({ channel, contact }, 'OTP transport not configured; simulating delivery')
-    return {
-      delivered: false,
-      simulated: true,
-      message: `OTP delivery for ${channel} is not configured on this server.`,
-    }
+  const configured = otpChannelsConfigured()
+  if (!configured[channel]) {
+    const err = new Error(`OTP transport for '${channel}' is not configured on this server`)
+    err.code = 'OTP_TRANSPORT_UNCONFIGURED'
+    err.channel = channel
+    throw err
   }
 
-  try {
-    if (channel === 'whatsapp') {
-      // TODO: integrate WhatsApp Cloud API template message for OTP
-      logger.info({ channel, contact }, 'WhatsApp OTP delivery not yet implemented')
-    } else if (channel === 'email' || channel === 'gmail') {
-      // TODO: integrate nodemailer / SMTP
-      logger.info({ channel, contact }, 'Email OTP delivery not yet implemented')
-    } else if (channel === 'facebook') {
-      // TODO: integrate Messenger send API
-      logger.info({ channel, contact }, 'Facebook OTP delivery not yet implemented')
-    }
-
-    return {
-      delivered: false,
-      simulated: true,
-      message: `${channel} OTP provider is configured but the sending integration is not yet wired.`,
-    }
-  } catch (err) {
-    logger.error({ err, channel, contact }, 'OTP transport error')
-    return { delivered: false, simulated: false, message: err.message || 'Delivery failed' }
-  }
+  // Real transports land here as they're implemented. Until each is
+  // wired, calling them throws — this is intentional: shipping a fake
+  // "delivered" response for an unimplemented channel is worse than
+  // failing loudly.
+  const err = new Error(`OTP transport for '${channel}' is not yet implemented`)
+  err.code = 'OTP_TRANSPORT_UNIMPLEMENTED'
+  err.channel = channel
+  logger.error({ channel, contact }, 'OTP transport not implemented — request rejected')
+  throw err
 }
