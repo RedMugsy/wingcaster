@@ -11,7 +11,8 @@
     "test:watch": "vitest",
     "test:pg": "vitest run",
     "test:pg:docker": "bash scripts/test-with-postgres.sh",
-    "test:pg:keep": "KEEP_POSTGRES=1 bash scripts/test-with-postgres.sh"
+    "test:pg:keep": "KEEP_POSTGRES=1 bash scripts/test-with-postgres.sh",
+    "test:e2e": "vitest run src/e2e"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
