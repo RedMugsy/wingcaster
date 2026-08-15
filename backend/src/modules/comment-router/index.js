@@ -13,6 +13,7 @@ import {
 } from './config.js'
 import { routeClassifiedMessage } from './router.js'
 import { findAll } from '../../db.js'
+import { listUserAgencyMemberships } from '../../tenant-authorization.js'
 
 export {
   DEFAULT_ROUTING_CONFIG,
@@ -50,11 +51,16 @@ export function registerCommentRouterRoutes(app, { authMiddleware }) {
     if (ownerType === 'agent') {
       ownerId = req.user?.id
     } else {
-      const agents = await findAll('agents', (a) => a.id === req.user?.id)
-      ownerId = agents[0]?.agency_id
-      if (!ownerId) return res.status(400).json({ error: 'You are not affiliated with an agency' })
-      // TODO: also verify the user has an agency-admin role. For now, any
-      // affiliated agent can write agency defaults.
+      // Agency defaults are settings that affect every affiliated agent —
+      // only agency admins/owners may write them. Merely belonging to the
+      // agency is not enough.
+      if (!req.user?.id) return res.status(401).json({ error: 'Auth required' })
+      const memberships = await listUserAgencyMemberships(req.user.id)
+      const adminMembership = memberships.find((m) => m.role === 'admin' || m.role === 'owner')
+      if (!adminMembership) {
+        return res.status(403).json({ error: 'Agency admin required to write agency routing defaults' })
+      }
+      ownerId = adminMembership.agency_id
     }
     try {
       const row = await upsertRoutingConfig({ ownerType, ownerId, routes: req.body?.routes || {} })

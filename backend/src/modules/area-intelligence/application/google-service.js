@@ -23,17 +23,34 @@ export function createGoogleService({ config, logger }) {
     return filtered.slice(0, limit).sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
   }
 
-  async function logUsage({ areaId, operation, endpoint, requestCount = 1, costEstimateUsd, responseStatus, errorMessage }) {
+  /**
+   * Accept both snake_case (google-client callback shape) and camelCase
+   * (any direct in-app caller). The client fires `onUsage({operation,
+   * endpoint, request_count, cost_estimate_usd, response_status,
+   * error_message})`; before this fix the destructure only knew the
+   * camelCase names, so cost/status/count all landed as null/undefined
+   * and the monthly budget cap could never trip.
+   */
+  async function logUsage(usage = {}) {
+    const areaId = usage.area_id ?? usage.areaId ?? null
+    const operation = usage.operation ?? null
+    const endpoint = usage.endpoint ?? null
+    const requestCount = usage.request_count ?? usage.requestCount ?? 1
+    const costEstimateUsd = usage.cost_estimate_usd ?? usage.costEstimateUsd ?? null
+    const responseStatus = usage.response_status ?? usage.responseStatus ?? null
+    const errorMessage = usage.error_message ?? usage.errorMessage ?? null
+    const now = new Date().toISOString()
     return insertModule('google_api_usage_log', {
       id: uuidv4(),
-      area_id: areaId || null,
+      area_id: areaId,
       operation,
       endpoint,
       request_count: requestCount,
-      cost_estimate_usd: costEstimateUsd ?? null,
-      response_status: responseStatus || null,
-      error_message: errorMessage || null,
-      created_at: new Date().toISOString(),
+      cost_estimate_usd: costEstimateUsd,
+      response_status: responseStatus,
+      error_message: errorMessage,
+      created_at: now,
+      updated_at: now,
     })
   }
 

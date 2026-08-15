@@ -1807,15 +1807,48 @@ app.get('/api/agents/:id/reviews', async (req, res) => {
   res.json(await findAll('reviews', r => r.agent_id === agent.id))
 })
 
-app.post('/api/agents/:id/reviews', async (req, res) => {
+app.post('/api/agents/:id/reviews', authMiddleware, async (req, res) => {
   const agent = await findOne('agents', a => a.id === req.params.id) || await findOne('agents', a => a.slug === req.params.id)
   if (!agent) return res.status(404).json({ error: 'Not found' })
-  const review = { id: uuidv4(), agent_id: agent.id, ...req.body, verified_transaction: 0 }
+  if (agent.id === req.user.id) return res.status(400).json({ error: 'Cannot review yourself' })
+
+  // Validate + sanitize. The old endpoint spread req.body directly into the
+  // insert, so any client-supplied field (including verified_transaction=1
+  // and arbitrary metadata) landed in the row.
+  const ratingNum = Number(req.body?.rating)
+  if (!Number.isInteger(ratingNum) || ratingNum < 1 || ratingNum > 5) {
+    return res.status(400).json({ error: 'rating must be an integer between 1 and 5' })
+  }
+  const rawTitle = typeof req.body?.title === 'string' ? req.body.title : ''
+  const rawBody = typeof req.body?.body === 'string' ? req.body.body : ''
+  const title = rawTitle.replace(/<[^>]*>/g, '').trim().slice(0, 120)
+  const body = rawBody.replace(/<[^>]*>/g, '').trim().slice(0, 2000)
+  if (!body) return res.status(400).json({ error: 'body is required' })
+
+  // Basic per-user rate-limit: one review per (author, agent) pair. This
+  // also prevents pile-on reviews from a single account without needing an
+  // IP-based limiter for this endpoint.
+  const already = await findOne('reviews', r => r.agent_id === agent.id && r.author_id === req.user.id)
+  if (already) return res.status(409).json({ error: 'You have already reviewed this agent' })
+
+  const review = {
+    id: uuidv4(),
+    agent_id: agent.id,
+    author_id: req.user.id,
+    rating: ratingNum,
+    comment: body,
+    status: 'published',
+    created_at: new Date().toISOString(),
+    data: {
+      title,
+      verified_transaction: false,
+    },
+  }
   await insert('reviews', review)
   const agentReviews = await findAll('reviews', r => r.agent_id === agent.id)
-  const avg = agentReviews.reduce((s, r) => s + r.rating, 0) / agentReviews.length
+  const avg = agentReviews.reduce((s, r) => s + (Number(r.rating) || 0), 0) / agentReviews.length
   await update('agents', a => a.id === agent.id, a => ({ ...a, rating: Math.round(avg * 10) / 10, review_count: agentReviews.length }))
-  res.json(review)
+  res.status(201).json(review)
 })
 
 /** Decision 1: detailed channel breakdown is agent-only until PA confirms agency visibility */

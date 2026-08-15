@@ -7,6 +7,7 @@
 
 import pg from 'pg'
 import { randomUUID } from 'crypto'
+import { AsyncLocalStorage } from 'async_hooks'
 import dbConfig, { resolveDatabaseUrl, setDatabaseUrl } from './config.js'
 import { logQuery } from './metrics.js'
 import { runMigrations } from './migrations/runner.js'
@@ -23,6 +24,21 @@ const { Pool } = pg
 
 let _pool = null
 let _migrationsRun = false
+
+/**
+ * Transactional-context propagation. When code runs inside `transaction(fn)`,
+ * every nested `findAll` / `findOne` / `insert` / `update` / `remove` / `query`
+ * call MUST use the SAME pg client that owns the BEGIN — otherwise a rollback
+ * discards nothing and callers get a "looks atomic but isn't" bug (surfaced
+ * in the Phase 7b re-audit). We propagate the client via AsyncLocalStorage
+ * so the DAL API surface (which is used by hundreds of call sites) does not
+ * have to thread an extra parameter through every function.
+ */
+const txStorage = new AsyncLocalStorage()
+
+function currentTxClient() {
+  return txStorage.getStore()?.client || null
+}
 
 export function getPool() {
   if (!_pool) {
@@ -83,8 +99,9 @@ export function configure(options = {}) {
 
 async function runLogged(operation, collection, sql, params) {
   const start = Date.now()
+  const executor = currentTxClient() || getPool()
   try {
-    const result = await getPool().query(sql, params)
+    const result = await executor.query(sql, params)
     logQuery({ operation, collection, durationMs: Date.now() - start })
     return result
   } catch (err) {
@@ -169,10 +186,16 @@ export async function update(collection, filter, updater) {
   if (!items.length) return 0
   const now = new Date().toISOString()
 
+  // If we're inside an outer transaction (transaction(fn)), reuse its client
+  // so the writes participate in that transaction's atomicity. Otherwise
+  // open our own BEGIN so a multi-row update is still all-or-nothing.
+  const ambient = currentTxClient()
+  const client = ambient || await getPool().connect()
+  const ownsTransaction = !ambient
+
   let changed = 0
-  const client = await getPool().connect()
   try {
-    await client.query('BEGIN')
+    if (ownsTransaction) await client.query('BEGIN')
     for (const item of items) {
       const updated = updater(item)
       if (!updated || typeof updated !== 'object') continue
@@ -201,12 +224,12 @@ export async function update(collection, filter, updater) {
       )
       changed++
     }
-    await client.query('COMMIT')
+    if (ownsTransaction) await client.query('COMMIT')
   } catch (err) {
-    await client.query('ROLLBACK').catch(() => {})
+    if (ownsTransaction) await client.query('ROLLBACK').catch(() => {})
     throw err
   } finally {
-    client.release()
+    if (ownsTransaction) client.release()
   }
 
   return changed
@@ -237,10 +260,19 @@ export async function query(sql, params) {
 
 export async function transaction(work) {
   await loadDb()
+  // Nested transaction(): reuse the ambient client so we don't try to open
+  // a second BEGIN on the same connection (Postgres errors). The outer
+  // transaction owns the commit/rollback boundary.
+  const ambient = currentTxClient()
+  if (ambient) return await work(ambient)
+
   const client = await getPool().connect()
   try {
     await client.query('BEGIN')
-    const result = await work(client)
+    // Everything inside `work` — including any nested insert/update/find/
+    // query calls that go through this module — runs with `client` as the
+    // ALS-scoped executor. This is what makes rollbacks actually roll back.
+    const result = await txStorage.run({ client }, () => work(client))
     await client.query('COMMIT')
     return result
   } catch (err) {

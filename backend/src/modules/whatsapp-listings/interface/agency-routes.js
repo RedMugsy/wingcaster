@@ -58,10 +58,21 @@ export function registerAgencyRoutes(app, { entitlements, credits, pipeline, con
   app.patch('/api/agency/entitlements/:id', authMiddleware, requireAgencyAdmin, async (req, res) => {
     try {
       const entitlement = (await entitlements.listEntitlements({})).find((e) => e.id === req.params.id)
+      // Return 404 instead of 403 for cross-agency entitlements — otherwise
+      // callers can enumerate entitlement IDs by probing for 403 vs 404.
       if (!entitlement) return res.status(404).json({ error: 'Entitlement not found' })
       if (entitlement.scope === 'agent') {
         const member = await getAgencyMembership(req.agencyId, entitlement.scope_id)
-        if (!member) return res.status(403).json({ error: 'Agent is not in your agency' })
+        if (!member) return res.status(404).json({ error: 'Entitlement not found' })
+      } else if (entitlement.scope === 'agency') {
+        // Cross-agency entitlement PATCH must be blocked — an agency admin
+        // can only mutate entitlements scoped to their OWN agency.
+        if (entitlement.scope_id !== req.agencyId) {
+          return res.status(404).json({ error: 'Entitlement not found' })
+        }
+      } else {
+        // 'platform'-scoped entitlements are platform-admin only.
+        return res.status(403).json({ error: 'Platform-scoped entitlements are managed by platform admins' })
       }
       res.json(await entitlements.updateEntitlement(req.params.id, req.body))
     } catch (err) {

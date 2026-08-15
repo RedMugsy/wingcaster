@@ -9,6 +9,19 @@ vi.mock('../../../tenant-authorization.js', () => ({
   listAgencyMemberships: vi.fn().mockResolvedValue([]),
 }))
 
+// Ownership checks in public-routes hit the real authz layer (which reads
+// `properties` + `agency_members` via ../../../db.js). Route-handler tests
+// don't spin up Postgres, so stub the helper to return the requested
+// property for the caller — real-postgres coverage lives in the
+// integration tests.
+vi.mock('../../../lib/authz.js', async () => {
+  const actual = await vi.importActual('../../../lib/authz.js')
+  return {
+    ...actual,
+    assertOwnsProperty: vi.fn(async (_userId, propertyId) => ({ id: propertyId, agent_id: _userId })),
+  }
+})
+
 function fakeExpress() {
   const routes = []
   const app = {

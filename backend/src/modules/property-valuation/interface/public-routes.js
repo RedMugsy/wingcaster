@@ -1,16 +1,23 @@
 import { authMiddleware } from '../../../auth.js'
+import { assertOwnsProperty, NotFoundError } from '../../../lib/authz.js'
 
 export function registerPublicRoutes(app, services) {
   const { analysisService, comparableService, trendService, configService, dal, logger } = services
 
-  app.get('/api/pricing/analysis/:propertyId', async (req, res, next) => {
+  // Property-level valuation exposes commercial-sensitive comparables and
+  // price ranges. Only the property's owner (or an agency-mate with access
+  // per authz rules) may read them — despite the file being named
+  // "public-routes.js", these two routes are NOT anonymous surfaces.
+  app.get('/api/pricing/analysis/:propertyId', authMiddleware, async (req, res, next) => {
     try {
+      await assertOwnsProperty(req.user.id, req.params.propertyId)
       const analysis = await analysisService.getAnalysis(req.params.propertyId, {
         matchConfigId: req.query.match_config_id || null,
       })
       res.json(analysis)
     } catch (err) {
-      logger.warn({ err: err.message, propertyId: req.params.propertyId }, 'public price analysis failed')
+      if (err instanceof NotFoundError) return res.status(404).json({ error: 'Property not found' })
+      logger.warn({ err: err.message, propertyId: req.params.propertyId }, 'price analysis failed')
       if (err.code === 'CURRENCY_RATE_UNAVAILABLE') {
         return res.status(503).json({ error: err.message, code: err.code, details: err.details })
       }
@@ -18,17 +25,17 @@ export function registerPublicRoutes(app, services) {
     }
   })
 
-  app.get('/api/pricing/comparables/:propertyId', async (req, res, next) => {
+  app.get('/api/pricing/comparables/:propertyId', authMiddleware, async (req, res, next) => {
     try {
+      const property = await assertOwnsProperty(req.user.id, req.params.propertyId)
       const config = await configService.getDefaultConfig()
-      const property = await services.adapter.getPropertyById(req.params.propertyId)
-      if (!property) return res.status(404).json({ error: 'Property not found' })
       const comparables = await comparableService.findComparables(property, {
         matchConfig: config?.config_json,
       })
       res.json(comparables)
     } catch (err) {
-      logger.warn({ err: err.message, propertyId: req.params.propertyId }, 'public comparables failed')
+      if (err instanceof NotFoundError) return res.status(404).json({ error: 'Property not found' })
+      logger.warn({ err: err.message, propertyId: req.params.propertyId }, 'comparables lookup failed')
       next(err)
     }
   })
@@ -102,6 +109,17 @@ export function registerPublicRoutes(app, services) {
       const normalizedCurrency = String(currency || 'USD').trim().toUpperCase()
       if (!/^[A-Z]{3,10}$/.test(normalizedCurrency)) {
         return res.status(400).json({ error: 'currency must be a valid currency code' })
+      }
+      // If the report references a property in our system, the reporter
+      // must own it — otherwise anyone could attach a fabricated sold-price
+      // to any listing.
+      if (property_id) {
+        try {
+          await assertOwnsProperty(req.user.id, property_id)
+        } catch (err) {
+          if (err instanceof NotFoundError) return res.status(404).json({ error: 'Property not found' })
+          throw err
+        }
       }
       const report = await dal.insert('agent_price_reports', {
         id: crypto.randomUUID(),
