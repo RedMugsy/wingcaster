@@ -75,28 +75,76 @@ Co-Authored-By: Codex <noreply@openai.com>
 
 ---
 
-## PROMPT 12 — Real-Postgres test harness
+## PROMPT 12 — Real-Postgres test harness (BYO PostGIS)
 
 ### Task
-Ship the test infrastructure the rest of this sprint requires:
-Docker-compose for local PostGIS, a `TestDatabase` helper that
-creates a scratch schema per test run, runs the migrations, and
-tears down cleanly. No feature work in this commit.
+Ship the test infrastructure the rest of this sprint requires: a
+`TestDatabase` helper that takes an EXTERNALLY-PROVISIONED Postgres+
+PostGIS instance via `TEST_DATABASE_URL`, creates a scratch schema
+per test run, runs the migrations, and tears down cleanly. Docker-
+compose is an OPTIONAL convenience for developers who have Docker
+locally; it is NOT the only way to run tests. No feature work in
+this commit.
 
 ### Why first
 Every subsequent prompt in this sprint verifies against real
-Postgres. Without this harness, verification is not possible.
+Postgres+PostGIS. Without this harness, verification is not
+possible.
+
+### Approved Postgres sources (any of these work)
+- **Railway PostGIS service** (already provisioned for this project
+  as `postgis`). The user provides a `TEST_DATABASE_URL` pointing at
+  a `wingcaster_test` database on that instance.
+- **Neon / Supabase** — both include PostGIS on free tier.
+- **Local Docker** — for developers who have it; optional.
+
+The harness must NOT assume Docker is present.
 
 ### Files to create
-- `backend/docker-compose.test.yml`
-- `backend/src/testing/postgres.js`
-- `backend/src/testing/postgres.test.js`
-- `backend/scripts/test-with-postgres.sh` (bash + `.cmd` Windows wrapper)
-- Update `backend/package.json`: add `"test:pg": "..."` script.
+- `backend/src/testing/postgres.js` — the harness (required).
+- `backend/src/testing/postgres.test.js` — self-test (required).
+- `backend/docker-compose.test.yml` — optional convenience for
+  local Docker users (required — kept for local dev, not for CI).
+- `backend/scripts/test-with-postgres.sh` (+ `.cmd`) — optional
+  wrapper that boots the docker-compose stack; skipped by users on
+  Railway/Neon/Supabase.
+- Update `backend/package.json`:
+  - `"test:pg": "vitest run"` — assumes `TEST_DATABASE_URL` already
+    exported.
+  - `"test:pg:docker": "bash scripts/test-with-postgres.sh"` — boots
+    docker-compose first.
+  - `"test:pg:keep": "KEEP_POSTGRES=1 bash scripts/test-with-postgres.sh"`.
 
 ### Requirements
 
-1. **`docker-compose.test.yml`:**
+1. **`backend/src/testing/postgres.js`** exports:
+   ```js
+   export async function createTestDatabase(name?)  // returns { url, teardown }
+   export async function withTestDb(fn)             // fn(url) → auto-teardown
+   export function skipIfNoPostgres()               // vitest helper
+   export async function verifyPostGIS(pool)        // asserts extension available
+   ```
+   - Reads `TEST_DATABASE_URL` from env — no defaults, no fallback.
+   - `createTestDatabase` connects to the pool, creates a fresh
+     schema `test_<random>` with `CREATE SCHEMA`, sets `search_path`,
+     verifies PostGIS is available (`SELECT PostGIS_Version()`), then
+     runs `runMigrations()` scoped to that schema.
+   - `teardown` drops the schema `CASCADE`.
+   - `skipIfNoPostgres` returns a `describe.skipIf` matcher so tests
+     that need Postgres are auto-skipped when `TEST_DATABASE_URL` is
+     unset, with a clear "TEST_DATABASE_URL not set — skipping"
+     message in stdout.
+   - `verifyPostGIS` throws with a clear "PostGIS extension not
+     installed on this database" if the extension is missing — this
+     is a hard requirement.
+
+2. **`postgres.test.js`** proves the harness works: create schema,
+   verify a table from migration 002 exists, verify PostGIS
+   extension present via `verifyPostGIS`, teardown. Skips itself
+   when `TEST_DATABASE_URL` unset.
+
+3. **`docker-compose.test.yml`** (unchanged from the local-dev
+   convenience path):
    ```yaml
    services:
      postgres:
@@ -105,7 +153,7 @@ Postgres. Without this harness, verification is not possible.
          POSTGRES_PASSWORD: postgres
          POSTGRES_DB: wingcaster_test
        ports: ["5433:5432"]
-       tmpfs: ["/var/lib/postgresql/data"]   # ephemeral for speed
+       tmpfs: ["/var/lib/postgresql/data"]
        healthcheck:
          test: ["CMD-SHELL", "pg_isready -U postgres"]
          interval: 1s
@@ -113,44 +161,29 @@ Postgres. Without this harness, verification is not possible.
          retries: 30
    ```
 
-2. **`backend/src/testing/postgres.js`** exports:
-   ```js
-   export async function createTestDatabase(name?)  // returns { url, teardown }
-   export async function withTestDb(fn)             // fn(url) → auto-teardown
-   export function skipIfNoPostgres()               // vitest helper
-   ```
-   - `createTestDatabase` connects to the pool from `TEST_DATABASE_URL`,
-     creates a fresh schema `test_<random>` with `CREATE SCHEMA`, sets
-     `search_path`, and runs `runMigrations()` scoped to that schema.
-   - `teardown` drops the schema `CASCADE`.
-   - `skipIfNoPostgres` returns a `describe.skipIf` matcher so tests
-     that need Postgres are auto-skipped when `TEST_DATABASE_URL` is
-     unset, with a clear "not run" message in stdout.
+4. **`test-with-postgres.sh`** (+ `.cmd`) — optional wrapper for
+   Docker users. If Docker isn't present, the script exits with
+   `Docker not detected. Set TEST_DATABASE_URL to point at your
+   Postgres+PostGIS instance and run npm run test:pg directly.`
 
-3. **`postgres.test.js`** proves the harness works: create schema,
-   verify a table from migration 002 exists, verify PostGIS extension
-   present, teardown. Skips itself when `TEST_DATABASE_URL` unset.
+5. **`package.json`** scripts as listed above.
 
-4. **`test-with-postgres.sh`** (+ `.cmd` for Windows):
-   - Starts docker-compose stack.
-   - Waits for healthcheck.
-   - Exports `TEST_DATABASE_URL=postgresql://postgres:postgres@localhost:5433/wingcaster_test`.
-   - Runs `npm test`.
-   - Tears down (unless `KEEP_POSTGRES=1`).
-
-5. **`package.json`**:
-   ```
-   "test:pg": "bash scripts/test-with-postgres.sh",
-   "test:pg:keep": "KEEP_POSTGRES=1 bash scripts/test-with-postgres.sh"
-   ```
-
-6. **Documentation:** `backend/docs/testing-with-postgres.md`
-   (create if `docs/` doesn't exist there) — one page explaining
-   how to run tests locally, in CI, and against a remote DB.
+6. **Documentation:** `backend/docs/testing-with-postgres.md` — one
+   page explaining:
+   - Recommended path: point `TEST_DATABASE_URL` at a Postgres+
+     PostGIS instance (Railway/Neon/Supabase examples).
+   - Local Docker alternative: `npm run test:pg:docker`.
+   - The `wingcaster_test` database naming convention.
+   - Why PostGIS is mandatory (migration 023).
 
 ### Non-goals
-- No CI wiring yet — that lands in a Phase 8 deployment sprint.
+- No CI wiring yet — Phase 8 deployment sprint.
 - No feature tests added yet — subsequent prompts add them.
+
+### QA verification
+Codex should run tests against BOTH paths if possible:
+- With `TEST_DATABASE_URL` set to the Railway PostGIS's test DB.
+- With `TEST_DATABASE_URL` unset (must skip cleanly, not crash).
 
 ### Commit message
 ```
