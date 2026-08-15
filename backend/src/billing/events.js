@@ -17,6 +17,12 @@ import { resolveActiveSubscription, meteredRateOverride } from './entitlements.j
 import { recordConsumption, currentBillingPeriod } from './ledger.js'
 import { resolveEffectivePrice, resolveMarketContext } from './pricing/index.js'
 
+// Sentinel territory_id for events with no market context (webhook
+// receipts, platform-scoped telemetry). commercial.usage_events is
+// LIST-partitioned by territory_id, and PRIMARY KEY (id, territory_id)
+// requires NOT NULL — see migration 036.
+export const PLATFORM_TERRITORY_ID = '__platform__'
+
 let injectedLogger = null
 
 /**
@@ -120,7 +126,7 @@ export async function emitUsageEvent({
       cogs_estimate_minor: cost.cogs_estimate_minor,
       rate_card_version: cost.rate_card_version || RATE_CARD_LATEST_VERSION,
       cast_value_minor: cost.cast_value_minor || CAST_VALUE_MINOR_SEED,
-      territory_id: cost.territory_id || territoryId,
+      territory_id: cost.territory_id || territoryId || PLATFORM_TERRITORY_ID,
       zone_id: cost.zone_id || zoneId,
       metadata: metadata || {},
       occurred_at: new Date().toISOString(),
