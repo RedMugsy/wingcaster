@@ -6,7 +6,62 @@ import { defaultEntitlementConfig } from './modules/whatsapp-listings/domain/typ
 import { buildDefaultNotificationPrefs, ensureDefaultNotificationPreferences } from './notification-preferences.js'
 import { createAgentAccount } from './identity.js'
 
-const ADMIN_EMAIL = process.env.ADMIN_EMAIL
+async function ensureSeedAdmin(email) {
+  if (!email) return null
+  const normalizedEmail = email.trim().toLowerCase()
+  const existing = await findOne('users', (user) => user.email === normalizedEmail)
+  const verifiedAt = existing?.verified_at || new Date().toISOString()
+  if (existing) {
+    await update('users', (user) => user.id === existing.id, (user) => ({
+      ...user,
+      role: 'agent',
+      platform_role: 'platform_admin',
+      verified: true,
+      verified_at: verifiedAt,
+    }))
+    await update('agents', (agent) => agent.user_id === existing.id, (agent) => ({
+      ...agent,
+      verified: true,
+      platform_role: 'platform_admin',
+    }))
+    return existing.id
+  }
+
+  const id = uuidv4()
+  const createdAt = new Date().toISOString()
+  await createAgentAccount({
+    user: {
+      id,
+      email: normalizedEmail,
+      name: 'Platform Administrator',
+      role: 'agent',
+      platform_role: 'platform_admin',
+      verified: true,
+      verified_at: verifiedAt,
+      token_version: 0,
+      created_at: createdAt,
+      updated_at: createdAt,
+    },
+    agent: {
+      id,
+      user_id: id,
+      email: normalizedEmail,
+      name: 'Platform Administrator',
+      role: 'agent',
+      platform_role: 'platform_admin',
+      verified: true,
+      slug: `platform-admin-${id.slice(0, 8)}`,
+      created_at: createdAt,
+      updated_at: createdAt,
+    },
+  })
+  return id
+}
+
+export async function ensureSeedAdmins() {
+  const emails = new Set([process.env.ADMIN_EMAIL, process.env.SMOKE_ADMIN_EMAIL].filter(Boolean))
+  for (const email of emails) await ensureSeedAdmin(email)
+}
 
 export async function ensureMigrations() {
   await loadDb()
@@ -149,13 +204,7 @@ export async function ensureMigrations() {
     }
   }
 
-  if (ADMIN_EMAIL) {
-    await update('users', (u) => u.email === ADMIN_EMAIL, (u) => ({
-      ...u,
-      role: 'agent',
-      platform_role: 'platform_admin',
-    }))
-  }
+  await ensureSeedAdmins()
 
   // Territory disclosure config (Decision 2) — Lebanon launch baseline
   if (!(territories || []).some((t) => t.id === 'territory-lb')) {

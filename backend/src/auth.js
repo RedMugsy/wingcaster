@@ -45,6 +45,9 @@ export async function authMiddleware(req, res, next) {
   if (!decoded) {
     return res.status(401).json({ error: 'Invalid token' })
   }
+  if (!decoded.verified_at) {
+    return res.status(401).json({ error: 'Session verification required' })
+  }
 
   let user
   let agent
@@ -56,6 +59,9 @@ export async function authMiddleware(req, res, next) {
   }
   if (!user || !agent) {
     return res.status(401).json({ error: 'Account no longer exists' })
+  }
+  if (!user.verified || !user.verified_at || decoded.verified_at !== user.verified_at) {
+    return res.status(401).json({ error: 'Session verification required' })
   }
 
   const tokenVersion = Number(decoded.token_version ?? 0)

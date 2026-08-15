@@ -35,8 +35,9 @@ export async function createAgentAccount({ user, agent }) {
   await transaction(async (client) => {
     await client.query(
       `INSERT INTO users (
-        id, email, phone, name, password_hash, role, platform_role, created_at, updated_at, data
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::timestamptz, $9::timestamptz, $10::jsonb)`,
+        id, email, phone, name, password_hash, role, platform_role, verified, verified_at,
+        created_at, updated_at, data
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::timestamptz, $10::timestamptz, $11::timestamptz, $12::jsonb)`,
       [
         principal.id,
         principal.email,
@@ -45,6 +46,8 @@ export async function createAgentAccount({ user, agent }) {
         principal.password_hash || null,
         principal.role || 'agent',
         principal.platform_role || null,
+        Boolean(principal.verified),
+        principal.verified_at || null,
         principal.created_at,
         principal.updated_at,
         JSON.stringify(principal),

@@ -11,7 +11,7 @@ const ID_COLUMNS = ['id', 'created_at', 'updated_at']
 
 const TABLE_MAP = {
   // Identity / org
-  users: { schema: 'public', table: 'users', columns: ['email', 'phone', 'name', 'password_hash', 'role', 'platform_role'] },
+  users: { schema: 'public', table: 'users', columns: ['email', 'phone', 'name', 'password_hash', 'role', 'platform_role', 'verified', 'verified_at'] },
   agents: {
     schema: 'public',
     table: 'agents',
@@ -272,7 +272,7 @@ const TABLE_MAP = {
   // Auth / support
   auth_recovery_tokens: { schema: 'public', table: 'auth_recovery_tokens', columns: ['user_id', 'email', 'type', 'token_hash', 'status', 'case_id', 'expires_at', 'attempts', 'ip', 'user_agent'] },
   account_recovery_cases: { schema: 'public', table: 'account_recovery_cases', columns: ['user_id', 'email', 'status', 'requested_at', 'reviewed_at', 'reviewed_by', 'ip', 'user_agent'] },
-  otp_verifications: { schema: 'public', table: 'otp_verifications', columns: ['user_id', 'channel', 'value_hash', 'code_hash', 'expires_at', 'verified'] },
+  otp_verifications: { schema: 'public', table: 'otp_verifications', columns: ['user_id', 'channel', 'value_hash', 'code_hash', 'expires_at', 'verified', 'attempts', 'last_attempt_at', 'locked_at'] },
 
   // Profile / reviews
   profile_followers: { schema: 'public', table: 'profile_followers', columns: ['follower_id', 'following_id'] },

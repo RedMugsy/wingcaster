@@ -41,7 +41,6 @@ export const registerSchema = z.object({
   agency_mode: z.enum(['existing', 'new', 'none']).optional().default('none'),
   territories: z.array(z.string().max(120)).max(100).optional().default([]),
   property_types: z.array(z.string().max(120)).max(100).optional().default([]),
-  otp_verified: z.boolean().optional().default(false),
   terms_accepted: z.boolean().optional().default(false),
 })
 
@@ -87,8 +86,12 @@ export const otpSendSchema = z.object({
 })
 
 export const otpVerifySchema = z.object({
-  contact: z.string().min(3).max(120),
+  otp_id: z.string().uuid(),
   code: z.string().min(4).max(10),
+})
+
+export const otpRequestSchema = z.object({
+  email: emailSchema,
 })
 
 export const propertyCreateSchema = z.object({

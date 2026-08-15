@@ -2,7 +2,7 @@ import 'dotenv/config'
 import { join, dirname, extname } from 'path'
 import { fileURLToPath } from 'url'
 import { existsSync, mkdirSync } from 'fs'
-import { randomBytes, createHash } from 'crypto'
+import { randomBytes, createHash, randomInt, timingSafeEqual } from 'crypto'
 import express from 'express'
 import cors from 'cors'
 import helmet from 'helmet'
@@ -70,8 +70,8 @@ import {
   accountRecoveryRequestSchema,
   accountRecoveryReviewSchema,
   accountRecoveryCompleteSchema,
-  otpSendSchema,
   otpVerifySchema,
+  otpRequestSchema,
   propertyCreateSchema,
   propertyUpdateSchema,
   inquirySchema,
@@ -899,7 +899,7 @@ app.post('/api/auth/register', validate(registerSchema), async (req, res) => {
   if (await findUserByEmail(body.email) || await findOne('agents', a => a.email === body.email)) {
     return res.status(409).json({ error: 'Email already registered' })
   }
-  const contactVerified = Boolean(body.otp_verified)
+  const contactVerified = false
   const profileCompleted = Boolean(body.specialization || body.bio || body.office_address)
   const hasAgencyPath = body.agency_mode === 'existing' || body.agency_mode === 'new'
   const onboardingSteps = {
@@ -917,12 +917,6 @@ app.post('/api/auth/register', validate(registerSchema), async (req, res) => {
 
   const id = uuidv4()
   const slug = await ensureUniqueAgentSlug(body.name || body.email.split('@')[0] || id, id)
-  const adminEmails = new Set([
-    process.env.ADMIN_EMAIL,
-    process.env.SMOKE_ADMIN_EMAIL,
-  ].filter(Boolean))
-  const isAdmin = adminEmails.has(body.email)
-
   const createdAt = new Date().toISOString()
   const role = 'agent'
   const user = {
@@ -932,7 +926,9 @@ app.post('/api/auth/register', validate(registerSchema), async (req, res) => {
     phone: body.phone,
     password_hash: bcrypt.hashSync(body.password, 10),
     role,
-    platform_role: isAdmin ? 'platform_admin' : null,
+    platform_role: null,
+    verified: false,
+    verified_at: null,
     token_version: 0,
     created_at: createdAt,
     updated_at: createdAt,
@@ -968,23 +964,18 @@ app.post('/api/auth/register', validate(registerSchema), async (req, res) => {
     if (err?.code === '23505') return res.status(409).json({ error: 'Email already registered' })
     throw err
   }
-  res.json({
-    token: signToken({ id, email: body.email, name: body.name, token_version: 0 }),
-    agent: {
-      ...serializeAgent(agent),
-      role,
-      platform_role: user.platform_role,
-      affiliation: null,
-      affiliations: [],
-      personal_tenant_id: `personal:${id}`,
-    },
-  })
+  const otp = await issueUserOtp(user)
+  res.status(202).json({ status: 'otp_sent', otp_id: otp.id })
 })
 
 app.post('/api/auth/login', validate(loginSchema), async (req, res) => {
   const { email, password } = req.validated
   const user = await findUserByEmail(email)
   if (!user?.password_hash || !bcrypt.compareSync(password, user.password_hash)) return res.status(401).json({ error: 'Invalid credentials' })
+  if (!user.verified || !user.verified_at) {
+    const otp = await latestUserOtp(user.id)
+    return res.status(401).json({ error: 'email_not_verified', otp_id: otp?.id || null })
+  }
   const agent = await findAgentForUser(user.id)
   if (!agent) return res.status(401).json({ error: 'Invalid credentials' })
   const affiliation = await getActiveAffiliation(user.id)
@@ -992,7 +983,7 @@ app.post('/api/auth/login', validate(loginSchema), async (req, res) => {
   const affiliations = await listUserAgencyMemberships(user.id)
   const tokenVersion = Number(user.token_version ?? 0)
   res.json({
-    token: signToken({ id: user.id, email: user.email, name: user.name, token_version: tokenVersion }),
+    token: signToken({ id: user.id, email: user.email, name: user.name, token_version: tokenVersion, verified_at: user.verified_at }),
     agent: {
       ...serializeAgent(agent),
       role: user.role,
@@ -1309,75 +1300,106 @@ app.post('/api/auth/recovery/complete', validate(accountRecoveryCompleteSchema),
 
 // ==================== OTP VERIFICATION ====================
 function generateOtp() {
-  return String(Math.floor(100000 + Math.random() * 900000))
+  return String(randomInt(100000, 1000000))
 }
 
-function cleanContact(channel, contact) {
-  if (channel === 'whatsapp') return contact.replace(/\s+/g, '').replace(/^0/, '+961')
-  return contact.trim().toLowerCase()
+function otpMatches(code, expectedHash) {
+  const actual = Buffer.from(hashToken(String(code).trim()), 'hex')
+  const expected = Buffer.from(expectedHash, 'hex')
+  return actual.length === expected.length && timingSafeEqual(actual, expected)
 }
 
-app.post('/api/auth/send-otp', validate(otpSendSchema), async (req, res) => {
-  const { channel, contact } = req.validated
-  const cleaned = cleanContact(channel, contact)
+async function latestUserOtp(userId) {
+  const records = await findAll('otp_verifications', (otp) => otp.user_id === userId && !otp.verified)
+  return records.sort((left, right) => new Date(right.created_at) - new Date(left.created_at))[0] || null
+}
+
+async function issueUserOtp(user) {
+  await remove('otp_verifications', (otp) => otp.user_id === user.id && otp.channel === 'email' && !otp.verified)
   const code = generateOtp()
-  const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString() // 10 min
-
-  // Remove any existing OTP for this contact
-  await remove('otp_verifications', o => o.contact === cleaned && o.channel === channel)
-
-  await insert('otp_verifications', {
+  const record = {
     id: uuidv4(),
-    channel,
-    contact: cleaned,
-    code,
-    expires_at: expiresAt,
+    user_id: user.id,
+    channel: 'email',
+    value_hash: hashToken(user.email),
+    code_hash: hashToken(code),
+    expires_at: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
     verified: false,
     attempts: 0,
     created_at: new Date().toISOString(),
-  })
+  }
+  await insert('otp_verifications', record)
+  await sendOtp({ channel: 'email', contact: user.email, code })
+  return record
+}
 
-  const delivery = await sendOtp({ channel, contact: cleaned, code })
-
-  logger.info({ channel, contact: cleaned, code, delivered: delivery.delivered, simulated: delivery.simulated }, 'OTP generated')
-
-  res.json({
-    success: true,
-    message: delivery.simulated
-      ? `OTP for ${channel} is simulated; configure a provider to enable live delivery.`
-      : `OTP sent to ${channel === 'whatsapp' ? 'WhatsApp' : channel}.`,
-    contact: cleaned,
-    delivery,
-    // Only include code in dev environments
-    ...(process.env.NODE_ENV !== 'production' ? { _dev_code: code } : {}),
-  })
+app.post('/api/auth/request-otp', validate(otpRequestSchema), async (req, res) => {
+  const user = await findUserByEmail(req.validated.email)
+  if (!user) return res.status(404).json({ error: 'Account not found' })
+  if (user.verified) return res.status(409).json({ error: 'email_already_verified' })
+  const otp = await issueUserOtp(user)
+  res.status(202).json({ status: 'otp_sent', otp_id: otp.id })
 })
 
 app.post('/api/auth/verify-otp', validate(otpVerifySchema), async (req, res) => {
-  const { contact, code } = req.validated
+  const { otp_id: otpId, code } = req.validated
+  const result = await transaction(async (client) => {
+    const otpResult = await client.query('SELECT * FROM otp_verifications WHERE id = $1 FOR UPDATE', [otpId])
+    const otp = otpResult.rows[0]
+    if (!otp) return { status: 401, error: 'Invalid OTP' }
+    if (otp.verified) return { status: 401, error: 'OTP already used' }
+    if (new Date(otp.expires_at).getTime() <= Date.now()) return { status: 410, error: 'OTP has expired' }
+    if (otp.locked_at || otp.attempts >= 5) return { status: 429, error: 'Too many failed attempts' }
 
-  const cleaned = contact.trim().toLowerCase()
-  const record = await findOne('otp_verifications', o => o.contact === cleaned)
-  if (!record) return res.status(404).json({ error: 'No OTP found for this contact. Please request a new one.' })
+    if (!otpMatches(code, otp.code_hash)) {
+      const attempts = otp.attempts + 1
+      const lockedAt = attempts >= 5 ? new Date().toISOString() : null
+      await client.query(
+        'UPDATE otp_verifications SET attempts = $2, last_attempt_at = CURRENT_TIMESTAMP, locked_at = $3::timestamptz WHERE id = $1',
+        [otpId, attempts, lockedAt],
+      )
+      return attempts >= 5
+        ? { status: 429, error: 'Too many failed attempts' }
+        : { status: 401, error: 'Invalid OTP', remaining_attempts: 5 - attempts }
+    }
 
-  if (new Date(record.expires_at) < new Date()) {
-    await remove('otp_verifications', o => o.id === record.id)
-    return res.status(410).json({ error: 'OTP has expired. Please request a new one.' })
-  }
+    const verifiedAt = new Date().toISOString()
+    await client.query(
+      `UPDATE users
+       SET verified = true,
+           verified_at = $2::timestamptz,
+           updated_at = $2::timestamptz,
+           data = jsonb_set(jsonb_set(COALESCE(data, '{}'::jsonb), '{verified}', 'true'::jsonb, true), '{verified_at}', to_jsonb($2::timestamptz), true)
+       WHERE id = $1`,
+      [otp.user_id, verifiedAt],
+    )
+    await client.query(
+      `UPDATE agents
+       SET verified = true,
+           updated_at = $2::timestamptz,
+           data = jsonb_set(COALESCE(data, '{}'::jsonb), '{verified}', 'true'::jsonb, true)
+       WHERE user_id = $1`,
+      [otp.user_id, verifiedAt],
+    )
+    await client.query(
+      'UPDATE otp_verifications SET verified = true, updated_at = $2::timestamptz WHERE id = $1',
+      [otpId, verifiedAt],
+    )
+    return { userId: otp.user_id, verifiedAt }
+  })
 
-  if (record.attempts >= 5) {
-    await remove('otp_verifications', o => o.id === record.id)
-    return res.status(429).json({ error: 'Too many failed attempts. Please request a new OTP.' })
-  }
-
-  await update('otp_verifications', o => o.id === record.id, o => ({ ...o, attempts: o.attempts + 1 }))
-
-  if (record.code !== String(code).trim()) {
-    return res.status(401).json({ error: 'Invalid OTP. Please try again.', remaining_attempts: 5 - record.attempts - 1 })
-  }
-
-  await update('otp_verifications', o => o.id === record.id, o => ({ ...o, verified: true }))
-  res.json({ success: true, verified: true, contact: cleaned })
+  if (result.status) return res.status(result.status).json({ error: result.error, ...(result.remaining_attempts === undefined ? {} : { remaining_attempts: result.remaining_attempts }) })
+  const user = await findUserById(result.userId)
+  res.json({
+    token: signToken({
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      token_version: Number(user.token_version ?? 0),
+      verified_at: result.verifiedAt,
+    }),
+    verified: true,
+  })
 })
 
 // ==================== PROPERTIES ====================
@@ -7833,4 +7855,6 @@ const startServer = async () => {
   })
 }
 
-void startServer()
+if (NODE_ENV !== 'test') void startServer()
+
+export { app }
