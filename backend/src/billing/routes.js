@@ -14,9 +14,9 @@
  * zone UI). Subscription + topup + payment endpoints land in 7c–7e.
  */
 
-import { findAll, findOne } from '../db.js'
+import { findAll, findOne, insert } from '../db.js'
 import { CAST_RATES_V1, CAST_VALUE_MINOR_SEED, RATE_CARD_LATEST_VERSION } from './rate-card.js'
-import { periodSummary, currentBillingPeriod } from './ledger.js'
+import { periodSummary, quotaBalance, recordTopup, currentBillingPeriod } from './ledger.js'
 import { resolveActiveSubscription } from './entitlements.js'
 import {
   effectiveCastValueMinor,
@@ -164,6 +164,85 @@ export function registerBillingRoutes(app, { authMiddleware, requirePlatformAdmi
       .sort((a, b) => new Date(b.occurred_at).getTime() - new Date(a.occurred_at).getTime())
       .slice(0, limit)
     res.json({ billing_period: period, event_count: events.length, events })
+  })
+
+  /**
+   * Platform-wide manual credit grant — the ONLY path that mints ledger
+   * credit for a tenant until Phase 7e wires a real payment gateway.
+   * Tenant-facing top-up endpoints return 501 by design (see the
+   * whatsapp-listings agent/agency routes for the mirrored gating).
+   *
+   * Body:
+   *   tenant_id       — target tenant (agent id OR agency id; the ledger
+   *                     is scope-agnostic and uses tenant_id as the key)
+   *   quota_key       — which quota bucket to credit (e.g. 'outbound_whatsapp',
+   *                     'x_posts', 'active_listings'). Not restricted to a
+   *                     hard-coded catalog — new quotas defined by future
+   *                     entitlements are grantable immediately.
+   *   amount          — positive number of quota units to add
+   *   reason          — required free-text audit reason
+   *   subscription_id — optional; associates the entry with a subscription
+   *   billing_period  — optional YYYY-MM; defaults to current UTC period
+   *
+   * Response: 201 { entry, balance }
+   * Audit: writes public.audit_log { type: 'billing', action:
+   *        'admin_credit_grant', agent_id: <actor>, metadata: {...} }.
+   */
+  app.post('/api/admin/billing/credit', auth, adminGuard, async (req, res) => {
+    try {
+      const { tenant_id, quota_key, amount, reason, subscription_id, billing_period } = req.body || {}
+      if (!tenant_id || typeof tenant_id !== 'string') {
+        return res.status(400).json({ error: 'tenant_id is required' })
+      }
+      if (!quota_key || typeof quota_key !== 'string') {
+        return res.status(400).json({ error: 'quota_key is required' })
+      }
+      const amountNumber = Number(amount)
+      if (!Number.isFinite(amountNumber) || amountNumber <= 0) {
+        return res.status(400).json({ error: 'amount must be a positive number' })
+      }
+      const reasonText = String(reason || '').trim()
+      if (!reasonText) {
+        return res.status(400).json({ error: 'reason is required for audit trail' })
+      }
+      const period = billing_period || currentBillingPeriod()
+
+      const entry = await recordTopup({
+        tenantId: tenant_id,
+        subscriptionId: subscription_id || null,
+        billingPeriod: period,
+        quotaKey: quota_key,
+        amount: amountNumber,
+        metadata: {
+          source: 'admin_manual_credit',
+          actor_id: req.user?.id || null,
+          reason: reasonText,
+        },
+      })
+      const balance = await quotaBalance({
+        tenantId: tenant_id,
+        quotaKey: quota_key,
+        billingPeriod: period,
+      })
+      await insert('audit_log', {
+        agent_id: req.user?.id || null,
+        type: 'billing',
+        action: 'admin_credit_grant',
+        entity_type: 'ledger_entry',
+        entity_id: entry?.id || null,
+        metadata: {
+          tenant_id,
+          quota_key,
+          amount: amountNumber,
+          billing_period: period,
+          subscription_id: subscription_id || null,
+          reason: reasonText,
+        },
+      })
+      res.status(201).json({ entry, balance })
+    } catch (err) {
+      res.status(500).json({ error: err.message })
+    }
   })
 
   app.get('/api/admin/billing/telemetry', auth, adminGuard, async (req, res) => {
