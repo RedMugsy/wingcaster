@@ -141,6 +141,24 @@ const TABLE_MAP = {
       'code', 'version', 'name', 'description', 'billing_cadence',
       'base_price_minor', 'currency', 'entitlements', 'bundle_items',
       'is_public', 'status',
+      'product_type', 'published_at', 'deprecated_at', 'retired_at', 'created_by',
+    ],
+  },
+  billing_product_tiers: {
+    schema: 'commercial',
+    table: 'billing_product_tiers',
+    columns: [
+      'product_id', 'product_version', 'code', 'name', 'description',
+      'sort_order', 'price_minor', 'currency', 'quotas', 'features',
+      'is_public', 'status', 'metadata',
+    ],
+  },
+  billing_product_territory_pricing: {
+    schema: 'commercial',
+    table: 'billing_product_territory_pricing',
+    columns: [
+      'product_id', 'product_version', 'tier_id', 'territory_id',
+      'price_minor', 'currency', 'active', 'metadata',
     ],
   },
   billing_subscriptions: {
@@ -151,6 +169,17 @@ const TABLE_MAP = {
       'territory_id', 'zone_id', 'rate_card_version', 'cast_value_minor',
       'price_locked_minor', 'billing_period_start', 'billing_period_end',
       'trial_ends_at', 'cancelled_at', 'metadata',
+      'tier_id', 'grandfathered_at', 'eligible_for_migration',
+      'next_renewal_at', 'auto_renew', 'cancellation_reason',
+      'cancel_at_period_end',
+    ],
+  },
+  billing_subscription_history: {
+    schema: 'commercial',
+    table: 'billing_subscription_history',
+    columns: [
+      'subscription_id', 'event', 'from_state', 'to_state',
+      'reason', 'actor_id', 'actor_type', 'metadata',
     ],
   },
   // Aliases used by billing/entitlements.js and billing/ledger.js
@@ -162,6 +191,9 @@ const TABLE_MAP = {
       'territory_id', 'zone_id', 'rate_card_version', 'cast_value_minor',
       'price_locked_minor', 'billing_period_start', 'billing_period_end',
       'trial_ends_at', 'cancelled_at', 'metadata',
+      'tier_id', 'grandfathered_at', 'eligible_for_migration',
+      'next_renewal_at', 'auto_renew', 'cancellation_reason',
+      'cancel_at_period_end',
     ],
   },
   products: {
@@ -171,6 +203,7 @@ const TABLE_MAP = {
       'code', 'version', 'name', 'description', 'billing_cadence',
       'base_price_minor', 'currency', 'entitlements', 'bundle_items',
       'is_public', 'status',
+      'product_type', 'published_at', 'deprecated_at', 'retired_at', 'created_by',
     ],
   },
   properties: {

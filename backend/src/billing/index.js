@@ -20,6 +20,7 @@ import {
   resolveMarketContext, resolveEffectivePrice, effectiveCastValueMinor,
   getActiveRateCard, listTerritories, listZones, listCities,
 } from './pricing/index.js'
+import { registerProductCatalogRoutes } from './products/index.js'
 
 export const MODULE_NAME = 'billing'
 
@@ -55,6 +56,7 @@ export function createModule() {
       const requirePlatformAdmin = isPlatformAdmin ? makePlatformAdminGuard(isPlatformAdmin) : null
       registerBillingRoutes(app, { authMiddleware, requirePlatformAdmin })
       registerPricingRoutes(app, { authMiddleware, requirePlatformAdmin })
+      registerProductCatalogRoutes(app, { authMiddleware, requirePlatformAdmin })
     },
   }
 }
