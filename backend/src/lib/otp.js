@@ -1,34 +1,59 @@
 import nodemailer from 'nodemailer'
+import { Resend } from 'resend'
 import logger from './logger.js'
 
 /**
  * OTP delivery for account signup, sign-in, and step-up flows.
  *
  * Email delivery is the primary channel and the only one implemented
- * today. WhatsApp / Messenger transports throw OTP_TRANSPORT_UNIMPLEMENTED
- * until real integrations are wired.
+ * today. Provider is auto-selected from env:
+ *   1. RESEND_API_KEY set  → Resend REST API (preferred, richer
+ *                            deliverability + native webhooks).
+ *   2. SMTP_HOST/USER/PASS → nodemailer SMTP (works with SendGrid,
+ *                            Postmark, Amazon SES, Mailgun, Resend's
+ *                            own SMTP relay, or a self-hosted server).
+ *   3. Neither             → throw OTP_TRANSPORT_UNCONFIGURED.
  *
- * Email requires all of SMTP_HOST, SMTP_USER, SMTP_PASS to be set.
- * SMTP_PORT defaults to 587 (submission), SMTP_SECURE=true switches to
- * 465, SMTP_FROM controls the visible From address (defaults to the
- * SMTP_USER).
+ * Swapping providers later is one env-var change — no code change.
+ *
+ * WhatsApp / Messenger transports throw OTP_TRANSPORT_UNIMPLEMENTED
+ * until real integrations are wired.
  */
 
-let emailTransportInstance = null
+let resendClient = null
+let smtpTransport = null
 
-function emailTransport() {
-  if (emailTransportInstance) return emailTransportInstance
+function getResend() {
+  if (resendClient) return resendClient
+  const apiKey = process.env.RESEND_API_KEY
+  if (!apiKey) return null
+  resendClient = new Resend(apiKey)
+  return resendClient
+}
+
+function getSmtpTransport() {
+  if (smtpTransport) return smtpTransport
   const host = process.env.SMTP_HOST
   const user = process.env.SMTP_USER
   const pass = process.env.SMTP_PASS
   if (!host || !user || !pass) return null
-  emailTransportInstance = nodemailer.createTransport({
+  smtpTransport = nodemailer.createTransport({
     host,
     port: Number(process.env.SMTP_PORT || 587),
     secure: process.env.SMTP_SECURE === 'true',
     auth: { user, pass },
   })
-  return emailTransportInstance
+  return smtpTransport
+}
+
+function emailProvider() {
+  if (process.env.RESEND_API_KEY) return 'resend'
+  if (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS) return 'smtp'
+  return null
+}
+
+function fromAddress() {
+  return process.env.OTP_FROM || process.env.SMTP_FROM || process.env.RESEND_FROM || null
 }
 
 /**
@@ -36,7 +61,7 @@ function emailTransport() {
  * boot for the "unconfigured channels" warn AND at request time.
  */
 export function otpChannelsConfigured() {
-  const emailReady = Boolean(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS)
+  const emailReady = Boolean(emailProvider() && fromAddress())
   return {
     email: emailReady,
     gmail: emailReady,
@@ -45,23 +70,13 @@ export function otpChannelsConfigured() {
   }
 }
 
-async function sendEmailOtp({ contact, code, purpose }) {
-  const transport = emailTransport()
-  if (!transport) {
-    const err = new Error('Email OTP transport is not configured (SMTP_HOST/SMTP_USER/SMTP_PASS)')
-    err.code = 'OTP_TRANSPORT_UNCONFIGURED'
-    err.channel = 'email'
-    throw err
-  }
-  const from = process.env.SMTP_FROM || process.env.SMTP_USER
+function otpCopy({ code, purpose }) {
   const purposeLine = purpose === 'signin'
     ? 'Use this code to finish signing in:'
     : purpose === 'stepup'
       ? 'Use this code to approve the requested action:'
       : 'Use this code to verify your Wingcaster account:'
-  await transport.sendMail({
-    from,
-    to: contact,
+  return {
     subject: `Your Wingcaster verification code: ${code}`,
     text: `${purposeLine}\n\n    ${code}\n\nThis code expires in 10 minutes. If you did not request it, you can ignore this email.`,
     html: `
@@ -69,7 +84,43 @@ async function sendEmailOtp({ contact, code, purpose }) {
       <p style="font-size:24px;font-weight:600;letter-spacing:4px;margin:16px 0;">${code}</p>
       <p style="color:#6b7280;font-size:13px;">This code expires in 10 minutes. If you did not request it, you can ignore this email.</p>
     `,
-  })
+  }
+}
+
+async function sendEmailOtp({ contact, code, purpose }) {
+  const provider = emailProvider()
+  const from = fromAddress()
+  if (!provider || !from) {
+    const err = new Error('Email OTP transport is not configured (need RESEND_API_KEY or SMTP_* + OTP_FROM/SMTP_FROM)')
+    err.code = 'OTP_TRANSPORT_UNCONFIGURED'
+    err.channel = 'email'
+    throw err
+  }
+  const { subject, text, html } = otpCopy({ code, purpose })
+
+  if (provider === 'resend') {
+    const resend = getResend()
+    const { data, error } = await resend.emails.send({
+      from,
+      to: contact,
+      subject,
+      text,
+      html,
+    })
+    if (error) {
+      const err = new Error(`Resend rejected the OTP email: ${error.message || 'unknown error'}`)
+      err.code = 'OTP_TRANSPORT_FAILED'
+      err.channel = 'email'
+      err.cause = error
+      throw err
+    }
+    return { provider_message_id: data?.id }
+  }
+
+  // provider === 'smtp'
+  const transport = getSmtpTransport()
+  const info = await transport.sendMail({ from, to: contact, subject, text, html })
+  return { provider_message_id: info?.messageId }
 }
 
 /**
@@ -82,7 +133,7 @@ async function sendEmailOtp({ contact, code, purpose }) {
  * @param {string} args.contact - destination address/handle
  * @param {string} args.code - the OTP itself
  * @param {'signup'|'signin'|'stepup'} [args.purpose] - shapes the copy
- * @returns {Promise<{delivered: true, channel: string}>}
+ * @returns {Promise<{delivered: true, channel: string, provider: string}>}
  */
 export async function sendOtp({ channel, contact, code, purpose = 'signup' }) {
   if (!channel) throw new Error('OTP channel is required')
@@ -90,9 +141,10 @@ export async function sendOtp({ channel, contact, code, purpose = 'signup' }) {
   if (!code) throw new Error('OTP code is required')
 
   if (channel === 'email' || channel === 'gmail') {
-    await sendEmailOtp({ contact, code, purpose })
-    logger.info({ channel, contact, purpose }, 'OTP delivered via email')
-    return { delivered: true, channel }
+    const result = await sendEmailOtp({ contact, code, purpose })
+    const provider = emailProvider()
+    logger.info({ channel, contact, purpose, provider, provider_message_id: result.provider_message_id }, 'OTP delivered via email')
+    return { delivered: true, channel, provider }
   }
 
   const err = new Error(`OTP transport for '${channel}' is not yet implemented`)
