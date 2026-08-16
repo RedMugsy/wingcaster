@@ -49,6 +49,7 @@ import { ProductDetailPage } from '@/pages/admin/commercial-pricing/ProductDetai
 import { SubscriptionsAdminPage } from '@/pages/admin/commercial-pricing/SubscriptionsAdminPage'
 import { SubscriptionDetailPage } from '@/pages/admin/commercial-pricing/SubscriptionDetailPage'
 import { CreditNotesAdminPage } from '@/pages/admin/commercial-pricing/CreditNotesAdminPage'
+import { ReportsAdminPage } from '@/pages/admin/commercial-pricing/ReportsAdminPage'
 import { PlansPage } from '@/pages/PlansPage'
 import { MySubscriptionPage } from '@/pages/MySubscriptionPage'
 import { MyCreditNotesPage } from '@/pages/MyCreditNotesPage'
@@ -115,6 +116,7 @@ function AppShell() {
           <Route path="/admin/commercial-pricing/subscriptions" element={<SubscriptionsAdminPage />} />
           <Route path="/admin/commercial-pricing/subscriptions/:id" element={<SubscriptionDetailPage />} />
           <Route path="/admin/commercial-pricing/credit-notes" element={<CreditNotesAdminPage />} />
+          <Route path="/admin/commercial-pricing/reports" element={<ReportsAdminPage />} />
           <Route path="/pricing" element={<PlansPage />} />
           <Route path="/subscription" element={<MySubscriptionPage />} />
           <Route path="/credit-notes" element={<MyCreditNotesPage />} />

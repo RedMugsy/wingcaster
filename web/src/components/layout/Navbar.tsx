@@ -40,6 +40,7 @@ export function Navbar() {
     { path: '/admin/commercial-pricing/products', label: 'Products' },
     { path: '/admin/commercial-pricing/subscriptions', label: 'Subscriptions' },
     { path: '/admin/commercial-pricing/credit-notes', label: 'Credit notes' },
+    { path: '/admin/commercial-pricing/reports', label: 'Reports' },
   ]
   const commercialPricingActive = location.pathname.startsWith('/admin/commercial-pricing')
 

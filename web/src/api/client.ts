@@ -8,13 +8,16 @@ import type {
   PricingTrendSnapshot,
 } from '@/types/marketPricing'
 import type {
+  ChurnReport,
   City,
   CoreRateCard,
+  CreditExposureRow,
   CreditNote,
   CreditNoteStatus,
   CreditNoteType,
   ListAdminOpts,
   MarketContext,
+  MrrReport,
   PricePreview,
   PricePreviewInput,
   Product,
@@ -29,6 +32,8 @@ import type {
   SubscriptionStatus,
   TenantPlanEntry,
   Territory,
+  TerritoryMrrReport,
+  TierSubscribersRow,
   Zone,
 } from '@/types/commercialPricing'
 
@@ -1578,6 +1583,29 @@ export const api = {
     return fetchJson(`/billing/my-credit-notes${parts.length ? '?' + parts.join('&') : ''}`)
   },
   listBillingPlans: (): Promise<{ plans: TenantPlanEntry[] }> => fetchJson('/billing/plans'),
+
+  // ============================================================
+  // Reporting (Phase 7c/6b)
+  // ============================================================
+
+  getAdminMrrReport: (): Promise<MrrReport> =>
+    fetchJson('/admin/billing/reports/mrr'),
+  getAdminMrrByTerritory: (): Promise<TerritoryMrrReport> =>
+    fetchJson('/admin/billing/reports/mrr-by-territory'),
+  getAdminChurnReport: (windowDays: number = 30): Promise<ChurnReport> =>
+    fetchJson(`/admin/billing/reports/churn?window_days=${windowDays}`),
+  getAdminSubscribersByTier: (): Promise<{ rows: TierSubscribersRow[] }> =>
+    fetchJson('/admin/billing/reports/subscriptions-by-tier'),
+  getAdminCreditExposure: (): Promise<{ rows: CreditExposureRow[] }> =>
+    fetchJson('/admin/billing/reports/credit-exposure'),
+
+  // CSV export URLs — the browser downloads directly from these hrefs
+  // when authenticated. The client returns the URL rather than the
+  // blob so the UI can use anchor download without an XHR round-trip.
+  adminCsvExportUrl: (kind: 'subscriptions' | 'credit-notes' | 'subscription-history', query: Record<string, string> = {}) => {
+    const params = new URLSearchParams(query).toString()
+    return `${API_BASE}/admin/billing/exports/${kind}.csv${params ? `?${params}` : ''}`
+  },
 }
 
 function buildQuery(opts: ListAdminOpts): string {

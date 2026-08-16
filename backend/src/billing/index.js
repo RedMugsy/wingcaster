@@ -22,6 +22,7 @@ import {
 } from './pricing/index.js'
 import { registerProductCatalogRoutes, startRenewalScheduler } from './products/index.js'
 import { registerNotificationRoutes } from './notifications/index.js'
+import { registerReportingRoutes } from './reporting/index.js'
 
 export const MODULE_NAME = 'billing'
 
@@ -67,6 +68,7 @@ export function createModule() {
       registerPricingRoutes(app, { authMiddleware, requirePlatformAdmin })
       registerProductCatalogRoutes(app, { authMiddleware, requirePlatformAdmin })
       registerNotificationRoutes(app, { authMiddleware, requirePlatformAdmin })
+      registerReportingRoutes(app, { authMiddleware, requirePlatformAdmin })
     },
   }
 }

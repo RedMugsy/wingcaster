@@ -312,3 +312,64 @@ export interface TenantPlanEntry {
   product: Product
   tiers: ProductTier[]
 }
+
+// ==========================================================
+// Reporting (Phase 7c/6b)
+// ==========================================================
+
+export interface MrrCurrencyBucket {
+  currency: string
+  active_mrr_minor: number
+  trialing_mrr_minor: number
+  past_due_mrr_minor: number
+  paused_mrr_minor: number
+  total_committed_mrr_minor: number
+  arr_minor: number
+  subscribers: number
+}
+
+export interface MrrReport {
+  as_of: string
+  by_currency: MrrCurrencyBucket[]
+}
+
+export interface TerritoryMrrRow {
+  territory_code: string
+  territory_name: string
+  currency: string
+  active_mrr_minor: number
+  subscribers: number
+}
+
+export interface TerritoryMrrReport {
+  as_of: string
+  by_territory: TerritoryMrrRow[]
+}
+
+export interface ChurnReport {
+  window_days: number
+  started_at: string
+  ended_at: string
+  opening_subscribers: number
+  churned: number
+  churn_rate: number
+}
+
+export interface TierSubscribersRow {
+  status: SubscriptionStatus | string
+  product_code: string
+  product_version: string
+  tier_code: string
+  tier_name: string
+  subscribers: number
+  total_price_minor: number
+  currency: string
+}
+
+export interface CreditExposureRow {
+  currency: string
+  credit_owed_minor: number
+  debit_owed_minor: number
+  net_liability_minor: number
+  pending_count: number
+}
