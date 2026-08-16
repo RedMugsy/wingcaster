@@ -15,6 +15,7 @@ import { getPool, query } from './persistence/postgres-adapter.js'
 import { seedData } from './seed.js'
 import { signToken, authMiddleware } from './auth.js'
 import { registerTwoFactorRoutes, startSigninChallengeIfRequired } from './auth-2fa.js'
+import { registerPlatformTemplateAdminRoutes } from './notifications/platform-templates/routes.js'
 import {
   createAgentAccount,
   findAgentForUser,
@@ -580,6 +581,16 @@ registerTwoFactorRoutes(app, {
   authMiddleware,
   buildAuthSession,
   findAgentForUser,
+  logActivity,
+})
+
+// Platform notifications — admin CRUD for message templates the platform
+// sends TO tenants (signup OTP, welcome, WhatsApp guide, …). Distinct
+// from the tenant-owned message_templates surface. WRITE routes are
+// step-up gated via requireElevated from 7f/1.
+registerPlatformTemplateAdminRoutes(app, {
+  authMiddleware,
+  requirePlatformAdmin,
   logActivity,
 })
 
