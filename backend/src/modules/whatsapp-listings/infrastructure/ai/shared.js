@@ -38,7 +38,12 @@ function isBlockedAddress(address) {
 }
 
 async function assertPublicDestination(target) {
-  const hostname = target.hostname.toLowerCase().replace(/\.$/, '')
+  // URL.hostname keeps the brackets around an IPv6 literal ("[::1]"), and
+  // ipaddr.isValid rejects that form — so without stripping them the IP check
+  // below is skipped entirely and every IPv6 literal falls through to the DNS
+  // path, i.e. the SSRF guard fails open. The trailing-dot strip handles the
+  // fully-qualified form of a blocked hostname.
+  const hostname = target.hostname.toLowerCase().replace(/\.$/, '').replace(/^\[(.+)\]$/, '$1')
   if (BLOCKED_HOSTNAMES.has(hostname)) throw new Error('Image URL resolves to a blocked network address')
   if (ipaddr.isValid(hostname)) {
     if (isBlockedAddress(hostname)) throw new Error('Image URL resolves to a blocked network address')

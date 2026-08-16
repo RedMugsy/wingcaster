@@ -9,6 +9,7 @@ import pg from 'pg'
 import { randomUUID } from 'crypto'
 import { AsyncLocalStorage } from 'async_hooks'
 import dbConfig, { resolveDatabaseUrl, setDatabaseUrl } from './config.js'
+import logger from '../lib/logger.js'
 import { logQuery } from './metrics.js'
 import { runMigrations } from './migrations/runner.js'
 import {
@@ -50,6 +51,14 @@ export function getPool() {
       idleTimeoutMillis: 60000,
       keepAlive: true,
       keepAliveInitialDelayMillis: 10000,
+    })
+    // node-postgres emits 'error' on IDLE clients — a server restart, an
+    // administrator terminating the backend (57P01), a dropped network link.
+    // An EventEmitter 'error' with no listener is rethrown by Node and takes
+    // the process down, so without this a single Postgres restart would crash
+    // the API rather than letting the pool reconnect on the next query.
+    _pool.on('error', (err) => {
+      logger.warn({ err: err.message, code: err.code }, 'postgres pool: idle client error (connection will be replaced)')
     })
   }
   return _pool
@@ -127,6 +136,12 @@ function serializeParam(value) {
   return value
 }
 
+/**
+ * Columns every INSERT names regardless of whether the record carries them —
+ * the adapter supplies these itself.
+ */
+const ALWAYS_WRITTEN_COLUMNS = new Set(['id', 'created_at', 'updated_at', 'data', 'collection'])
+
 function isLegacy(mapping) {
   return mapping.table === 'legacy_collections'
 }
@@ -163,15 +178,34 @@ export async function insert(collection, item) {
   const updatedAt = now
 
   const generated = new Set(generatedColumnsFor(mapping.schema, mapping.table))
-  const cols = columnNames(collection).filter((c) => !generated.has(c))
+  const cols = columnNames(collection)
+    .filter((c) => !generated.has(c))
+    // Only name columns the record actually carries. Naming a column and
+    // passing NULL overrides its DEFAULT, so a `NOT NULL DEFAULT false`
+    // column (billing_subscriptions.eligible_for_migration,
+    // notification_preferences.metadata, …) blew up on every insert whose
+    // JS object simply had not set it. `toRow` builds `row` with `pick`, so
+    // presence here means the caller genuinely supplied the field — an
+    // explicit `null` is still honoured and still writes NULL.
+    .filter((c) => ALWAYS_WRITTEN_COLUMNS.has(c) || c in row)
   const vals = cols.map((c) => serializeParam(row[c] ?? (c === 'id' ? id : c === 'created_at' ? createdAt : c === 'updated_at' ? updatedAt : null)))
-  const conflictTarget = isLegacy(mapping) ? '(collection, id)' : '(id)'
+  // The conflict target must name a real unique constraint. Partitioned
+  // tables must include the partition key in theirs, so a mapping can declare
+  // its own — see usage_events, whose PK is (id, territory_id).
+  const conflictCols = isLegacy(mapping) ? ['collection', 'id'] : (mapping.conflictColumns || ['id'])
+  const conflictTarget = `(${conflictCols.map((c) => `"${c}"`).join(', ')})`
+  // Never re-assign a conflict column: for usage_events that would mean
+  // updating the partition key, which moves the row between partitions.
+  const updatable = cols.filter((c) => !conflictCols.includes(c))
+
+  const onConflict = updatable.length
+    ? `DO UPDATE SET ${updatable.map((c) => `"${c}" = EXCLUDED."${c}"`).join(', ')}`
+    : 'DO NOTHING'
 
   const sql = `
     INSERT INTO ${table} (${cols.map((c) => `"${c}"`).join(', ')})
     VALUES (${placeholders(1, cols.length)})
-    ON CONFLICT ${conflictTarget} DO UPDATE SET
-      ${cols.filter((c) => c !== 'id' && c !== 'collection').map((c, i) => `"${c}" = EXCLUDED."${c}"`).join(', ')}
+    ON CONFLICT ${conflictTarget} ${onConflict}
   `
 
   await runLogged('insert', collection, sql, vals)
@@ -209,8 +243,15 @@ export async function update(collection, filter, updater) {
       const cols = columnNames(collection)
         .filter((c) => !['id', 'collection', 'created_at', 'updated_at'].includes(c))
         .filter((c) => !generated.has(c))
+        // Same rule as insert, and here it also prevents data loss: assigning
+        // every mapped column meant a record that had never carried a field
+        // wrote NULL over whatever was already in that column.
+        .filter((c) => c in row)
       const setClause = cols.map((c, i) => `"${c}" = $${i + 1}`).join(', ')
       const vals = cols.map((c) => serializeParam(row[c] ?? null))
+      // `data` is always present, so this is defensive — but an empty SET
+      // list would be a syntax error rather than a no-op.
+      const assignments = setClause ? `${setClause}, ` : ''
       const updatedAtIdx = cols.length + 1
       const pkStartIdx = cols.length + 2
       const pkClause = isLegacy(mapping)
@@ -219,7 +260,7 @@ export async function update(collection, filter, updater) {
       const pkValues = isLegacy(mapping) ? [collection, id] : [id]
 
       await client.query(
-        `UPDATE ${table} SET ${setClause}, "updated_at" = $${updatedAtIdx}::timestamptz WHERE ${pkClause}`,
+        `UPDATE ${table} SET ${assignments}"updated_at" = $${updatedAtIdx}::timestamptz WHERE ${pkClause}`,
         [...vals, now, ...pkValues]
       )
       changed++

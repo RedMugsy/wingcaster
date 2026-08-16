@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import request from 'supertest'
 import { closeDb, configure, findOne } from './db.js'
@@ -42,10 +43,27 @@ skipIfNoPostgres()('registration verification boundary', () => {
       process.env.SMOKE_ADMIN_EMAIL = 'seeded-admin@example.test'
 
       try {
+        // Importing the server runs seedData() → ensureMigrations() →
+        // ensureSeedAdmins(), so ADMIN_EMAIL already exists as a platform
+        // admin by the time the first request is made.
         const { app } = await import('./server.js')
-      const registration = await request(app).post('/api/auth/register').send({
+
+      // Registration must not be able to claim an existing platform admin's
+      // address — that would be the takeover this test is named for.
+      const takeover = await request(app).post('/api/auth/register').send({
         name: 'Takeover Attempt',
         email: process.env.ADMIN_EMAIL,
+        password: 'secret123',
+        otp_verified: true,
+      })
+      expect(takeover.status).toBe(409)
+
+      // An ordinary registration must not be able to grant itself
+      // platform_role or mark itself verified.
+      const attackerEmail = `takeover-${randomUUID()}@example.test`
+      const registration = await request(app).post('/api/auth/register').send({
+        name: 'Takeover Attempt',
+        email: attackerEmail,
         password: 'secret123',
         otp_verified: true,
       })
@@ -53,17 +71,18 @@ skipIfNoPostgres()('registration verification boundary', () => {
       expect(registration.status).toBe(202)
       expect(registration.body).toMatchObject({ status: 'otp_sent' })
       expect(registration.body.token).toBeUndefined()
-      const registeredUser = await findOne('users', (user) => user.email === process.env.ADMIN_EMAIL)
+      const registeredUser = await findOne('users', (user) => user.email === attackerEmail)
       expect(registeredUser).toMatchObject({ verified: false, platform_role: null })
 
       const unverifiedLogin = await request(app).post('/api/auth/login').send({
-        email: process.env.ADMIN_EMAIL,
+        email: attackerEmail,
         password: 'secret123',
       })
       expect(unverifiedLogin.status).toBe(401)
       expect(unverifiedLogin.body).toEqual({ error: 'email_not_verified', otp_id: registration.body.otp_id })
 
-      const firstCode = otpTransport.sendOtp.mock.calls[0][0].code
+      // The most recent send is the one belonging to registration.body.otp_id.
+      const firstCode = otpTransport.sendOtp.mock.calls.at(-1)[0].code
       const wrongOtp = await request(app).post('/api/auth/verify-otp').send({
         otp_id: registration.body.otp_id,
         code: '000000',

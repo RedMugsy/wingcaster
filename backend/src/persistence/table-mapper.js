@@ -11,7 +11,25 @@ const ID_COLUMNS = ['id', 'created_at', 'updated_at']
 
 const TABLE_MAP = {
   // Identity / org
-  users: { schema: 'public', table: 'users', columns: ['email', 'phone', 'name', 'password_hash', 'role', 'platform_role', 'verified', 'verified_at'] },
+  // NOTE: `totp_secret_encrypted` and `totp_last_time_step` are absent from
+  // this list so that DAL writes never touch them — Phase 7f reads and writes
+  // both with explicit SQL in auth-2fa.js. Absence alone does NOT keep them
+  // off a hydrated record, because reads are `SELECT *`; see PRIVATE_COLUMNS
+  // below, which is what actually strips them.
+  users: {
+    schema: 'public',
+    table: 'users',
+    columns: [
+      'email', 'phone', 'name', 'password_hash', 'role', 'platform_role', 'verified', 'verified_at',
+      'totp_enabled', 'totp_enrolled_at', 'preferred_2fa',
+    ],
+  },
+  user_backup_codes: { schema: 'public', table: 'user_backup_codes', columns: ['user_id', 'code_hash', 'used_at'] },
+  auth_challenges: {
+    schema: 'public',
+    table: 'auth_challenges',
+    columns: ['user_id', 'purpose', 'method', 'code_hash', 'expires_at', 'consumed_at', 'attempts', 'last_attempt_at', 'locked_at', 'created_ip'],
+  },
   agents: {
     schema: 'public',
     table: 'agents',
@@ -118,6 +136,12 @@ const TABLE_MAP = {
   usage_events: {
     schema: 'commercial',
     table: 'usage_events',
+    // LIST-partitioned by territory_id. Postgres requires the partition key in
+    // any unique constraint, so the primary key is (id, territory_id) — see
+    // migration 031. The adapter's default `ON CONFLICT (id)` has no matching
+    // constraint here and Postgres rejects the statement outright (42P10),
+    // which meant every usage event insert failed.
+    conflictColumns: ['id', 'territory_id'],
     columns: [
       'tenant_id', 'subscription_id', 'action_key', 'quantity', 'channel',
       'destination_country', 'whatsapp_category', 'listing_id',
@@ -606,11 +630,29 @@ export function toRow(collection, item) {
   return row
 }
 
+/**
+ * Columns that must never appear on a hydrated record.
+ *
+ * Omitting a column from a mapping's `columns` list does NOT keep it out:
+ * reads are `SELECT *`, so every column on the table comes back regardless.
+ * Without stripping here the encrypted TOTP secret would ride along in every
+ * generic user object — and worse, a later `update()` would copy it into the
+ * `data` JSONB blob, duplicating the ciphertext outside its own column.
+ *
+ * Code that genuinely needs these reads them with explicit SQL (auth-2fa.js).
+ */
+const PRIVATE_COLUMNS = {
+  users: ['totp_secret_encrypted', 'totp_last_time_step'],
+}
+
 export function fromRow(collection, row) {
   const data = row.data ? (typeof row.data === 'string' ? JSON.parse(row.data) : row.data) : {}
   // Typed columns take precedence over data JSON in case of drift.
   const result = { ...data, ...row }
   delete result.data
+  for (const column of PRIVATE_COLUMNS[collection] || []) {
+    delete result[column]
+  }
   return result
 }
 

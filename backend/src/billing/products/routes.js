@@ -20,8 +20,10 @@ import {
 import {
   cancelSubscription, createSubscription, expireSubscription, getSubscription,
   markPastDue, migrateSubscription, pauseSubscription, resolvePastDue,
-  resumeSubscription, tickRenewals,
+  resumeSubscription,
 } from './lifecycle.js'
+// tickRenewals lives in the renewal scanner, not the lifecycle engine.
+import { tickRenewals } from './renewal-scanner.js'
 import {
   bulkCancel, bulkExpire, bulkIssueCredits, bulkMigrate, bulkPause, bulkResume,
 } from './bulk-ops.js'

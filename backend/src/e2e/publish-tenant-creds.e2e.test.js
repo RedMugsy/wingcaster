@@ -14,10 +14,39 @@
  */
 import { randomUUID } from 'node:crypto'
 import { describe, expect, it, beforeEach, afterEach } from 'vitest'
-import { closeDb, configure, insert } from '../db.js'
+import { closeDb, configure, insert, query } from '../db.js'
 import { skipIfNoPostgres, withTestDb } from '../testing/postgres.js'
 import { resolveConnectionCredentials } from '../lib/credentials.js'
 import { assertPublishChannelConfigured, tenantHasPublishToken } from '../lib/publish-readiness.js'
+
+/**
+ * PUBLISH_CREDENTIALS_MISSING is the error's `code`; the message names the
+ * specific env vars. `.toThrow(/PUBLISH_CREDENTIALS_MISSING/)` matches against
+ * the message, so it could never pass — assert on the code instead.
+ */
+function expectPublishCredentialsMissing(channel) {
+  let thrown = null
+  try {
+    assertPublishChannelConfigured(channel)
+  } catch (err) {
+    thrown = err
+  }
+  expect(thrown).not.toBeNull()
+  expect(thrown.code).toBe('PUBLISH_CREDENTIALS_MISSING')
+  expect(thrown.status).toBe(503)
+}
+
+/** marketplace_connections.agent_id is a real FK to agents(id). */
+async function seedAgent() {
+  const id = randomUUID()
+  const email = `publish-${id}@example.test`
+  await query('INSERT INTO users (id, email, name) VALUES ($1, $2, $3)', [id, email, 'Publish Tester'])
+  await query(
+    'INSERT INTO agents (id, user_id, email, name, slug) VALUES ($1, $1, $2, $3, $4)',
+    [id, email, 'Publish Tester', `publish-${id.slice(0, 8)}`],
+  )
+  return id
+}
 
 const ORIGINAL_ENV = { ...process.env }
 
@@ -68,7 +97,7 @@ skipIfNoPostgres()('E2E: publish-social tenant-cred gating', () => {
         // Env is unset — assertPublishChannelConfigured would throw. The
         // gating logic in /publish-social skips this check when the tenant
         // has its own token, so publish must NOT be 503'd.
-        expect(() => assertPublishChannelConfigured('x')).toThrow(/PUBLISH_CREDENTIALS_MISSING|X_BEARER_TOKEN/)
+        expectPublishCredentialsMissing('x')
       } finally {
         await closeDb()
       }
@@ -82,7 +111,7 @@ skipIfNoPostgres()('E2E: publish-social tenant-cred gating', () => {
         expect(tenantHasPublishToken('facebook', null)).toBe(false)
         expect(tenantHasPublishToken('facebook', { fb_page_id: 'page-1' })).toBe(false)
         // No override token → gate must fall through to env → env is empty → 503.
-        expect(() => assertPublishChannelConfigured('facebook')).toThrow(/PUBLISH_CREDENTIALS_MISSING/)
+        expectPublishCredentialsMissing('facebook')
       } finally {
         await closeDb()
       }
@@ -114,7 +143,7 @@ skipIfNoPostgres()('E2E: publish-social tenant-cred gating', () => {
         const connectionId = randomUUID()
         await insert('marketplace_connections', {
           id: connectionId,
-          agent_id: randomUUID(),
+          agent_id: await seedAgent(),
           platform: 'linkedin',
           status: 'connected',
           settings: {

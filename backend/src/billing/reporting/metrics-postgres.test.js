@@ -109,10 +109,17 @@ skipIfNoPostgres()('reporting.metrics — mrrByTerritory', () => {
         // Insert two territories.
         const lb = randomUUID()
         const sa = randomUUID()
+        // name/currency live on the public row; commercial.territories holds
+        // only the commercial fields and references public.territories(id).
         await query(
-          `INSERT INTO commercial.territories (id, code, name, currency, pricing_multiplier, launch_status, active)
-           VALUES ($1, 'LB', 'Lebanon', 'USD', 0.4, 'launched', true),
-                  ($2, 'SA', 'Saudi', 'USD', 2.5, 'launched', true)`,
+          `INSERT INTO public.territories (id, code, name, currency)
+           VALUES ($1, 'LB', 'Lebanon', 'USD'), ($2, 'SA', 'Saudi', 'USD')`,
+          [lb, sa],
+        )
+        await query(
+          `INSERT INTO commercial.territories (id, code, pricing_multiplier, launch_status, active)
+           VALUES ($1, 'LB', 0.4, 'launched', true),
+                  ($2, 'SA', 2.5, 'launched', true)`,
           [lb, sa],
         )
         await seedSubscription({ productId, tierId, status: 'active', priceMinor: 4000, territoryId: lb })

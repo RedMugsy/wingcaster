@@ -73,7 +73,10 @@ skipIfNoPostgres()('migration — grandfathering on publishProduct', () => {
         const v3 = await cloneAsNewVersion(v2.id)
         await publishProduct(v3.id)
         const second = await findOne('billing_subscriptions', (s) => s.id === sub.id)
-        expect(second.grandfathered_at).toBe(firstStamp)
+        // Both are Date objects hydrated by pg; toBe would compare identity,
+        // which is never true for two separately-constructed Dates. The claim
+        // under test is that the stamp is unchanged in value.
+        expect(second.grandfathered_at).toEqual(firstStamp)
       } finally {
         await closeDb()
       }
