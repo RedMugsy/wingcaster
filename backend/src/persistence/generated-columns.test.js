@@ -81,7 +81,13 @@ skipIfNoPostgres()('properties.geom generated column', () => {
         // findOne round-trip should still return latitude/longitude fields
         // even though geom is not surfaced.
         const fetched = await findOne('properties', (p) => p.id === id)
-        expect(fetched).toMatchObject({ id, latitude: 25.2048, longitude: 55.2708 })
+        expect(fetched.id).toBe(id)
+        // latitude/longitude are NUMERIC(10,8), and node-postgres returns
+        // numerics as strings to avoid float precision loss. That is the DAL's
+        // contract — serializeProperty() is what coerces them to numbers for
+        // API responses — so compare on value rather than on type.
+        expect(Number(fetched.latitude)).toBeCloseTo(25.2048, 6)
+        expect(Number(fetched.longitude)).toBeCloseTo(55.2708, 6)
       } finally {
         await closeDb()
       }

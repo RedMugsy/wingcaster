@@ -68,7 +68,13 @@ export async function claimProcessedMessage(messageId, fromNumber) {
        RETURNING id`,
     [id, messageId, fromNumber || null],
   )
-  const won = Array.isArray(result?.rows) ? result.rows.length > 0 : (result?.rowCount ?? 0) > 0
+  // The DAL's query() resolves to the ROWS ARRAY, not a pg result object.
+  // Reading result.rows / result.rowCount therefore always yielded undefined,
+  // so this returned { claimed: false } for every call — including the very
+  // first one. Every inbound WhatsApp message looked like a duplicate and was
+  // dropped without ever entering the pipeline.
+  const rows = Array.isArray(result) ? result : (result?.rows ?? [])
+  const won = rows.length > 0
   return won ? { claimed: true, id } : { claimed: false }
 }
 

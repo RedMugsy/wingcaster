@@ -180,13 +180,23 @@ export async function insert(collection, item) {
     // explicit `null` is still honoured and still writes NULL.
     .filter((c) => ALWAYS_WRITTEN_COLUMNS.has(c) || c in row)
   const vals = cols.map((c) => serializeParam(row[c] ?? (c === 'id' ? id : c === 'created_at' ? createdAt : c === 'updated_at' ? updatedAt : null)))
-  const conflictTarget = isLegacy(mapping) ? '(collection, id)' : '(id)'
+  // The conflict target must name a real unique constraint. Partitioned
+  // tables must include the partition key in theirs, so a mapping can declare
+  // its own — see usage_events, whose PK is (id, territory_id).
+  const conflictCols = isLegacy(mapping) ? ['collection', 'id'] : (mapping.conflictColumns || ['id'])
+  const conflictTarget = `(${conflictCols.map((c) => `"${c}"`).join(', ')})`
+  // Never re-assign a conflict column: for usage_events that would mean
+  // updating the partition key, which moves the row between partitions.
+  const updatable = cols.filter((c) => !conflictCols.includes(c))
+
+  const onConflict = updatable.length
+    ? `DO UPDATE SET ${updatable.map((c) => `"${c}" = EXCLUDED."${c}"`).join(', ')}`
+    : 'DO NOTHING'
 
   const sql = `
     INSERT INTO ${table} (${cols.map((c) => `"${c}"`).join(', ')})
     VALUES (${placeholders(1, cols.length)})
-    ON CONFLICT ${conflictTarget} DO UPDATE SET
-      ${cols.filter((c) => c !== 'id' && c !== 'collection').map((c, i) => `"${c}" = EXCLUDED."${c}"`).join(', ')}
+    ON CONFLICT ${conflictTarget} ${onConflict}
   `
 
   await runLogged('insert', collection, sql, vals)

@@ -136,6 +136,12 @@ const TABLE_MAP = {
   usage_events: {
     schema: 'commercial',
     table: 'usage_events',
+    // LIST-partitioned by territory_id. Postgres requires the partition key in
+    // any unique constraint, so the primary key is (id, territory_id) — see
+    // migration 031. The adapter's default `ON CONFLICT (id)` has no matching
+    // constraint here and Postgres rejects the statement outright (42P10),
+    // which meant every usage event insert failed.
+    conflictColumns: ['id', 'territory_id'],
     columns: [
       'tenant_id', 'subscription_id', 'action_key', 'quantity', 'channel',
       'destination_country', 'whatsapp_category', 'listing_id',

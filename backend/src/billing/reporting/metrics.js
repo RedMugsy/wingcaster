@@ -156,7 +156,7 @@ export async function mrrByTerritory({ now = new Date() } = {}) {
   const rows = await query(
     `SELECT
         COALESCE(t.code, 'UNASSIGNED') AS territory_code,
-        COALESCE(t.name, 'Unassigned') AS territory_name,
+        COALESCE(pt.name, 'Unassigned') AS territory_name,
         COALESCE(s.resolved_plan_currency, 'USD') AS currency,
         COALESCE(bp.billing_cadence, 'monthly') AS billing_cadence,
         s.metadata->>'custom_period_days' AS custom_period_days,
@@ -164,6 +164,9 @@ export async function mrrByTerritory({ now = new Date() } = {}) {
        FROM commercial.billing_subscriptions s
        LEFT JOIN commercial.billing_products bp ON bp.id = s.product_id
        LEFT JOIN commercial.territories t ON t.id = s.territory_id
+       -- A territory's display name lives on the public row; the commercial
+       -- row carries only pricing/launch fields and shares its id.
+       LEFT JOIN public.territories pt ON pt.id = t.id
       WHERE s.status IN ('trialing','active','past_due','paused')`,
   )
   const byTerritory = new Map()

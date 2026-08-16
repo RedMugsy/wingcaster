@@ -168,8 +168,11 @@ export async function ensureUsageEventsPartition(territoryId, code) {
       WHERE table_schema = 'commercial' AND table_name = $1
       LIMIT 1`,
     [partitionName],
-  ).catch(() => ({ rows: [] }))
-  if (exists.rows && exists.rows.length) return
+  ).catch(() => [])
+  // query() resolves to the rows array, not a pg result object — reading
+  // .rows here made this guard dead, so the partition DDL below was attempted
+  // on every territory create even when the partition already existed.
+  if (Array.isArray(exists) && exists.length) return
   // Wrap in try — partitioning may not be applied yet (e.g. old DB) or
   // the DB user may lack DDL rights. Either case is a no-op.
   try {
