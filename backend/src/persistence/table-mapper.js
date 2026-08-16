@@ -360,6 +360,32 @@ const TABLE_MAP = {
 
   // Templates / entitlements / credits
   message_templates: { schema: 'public', table: 'message_templates', columns: ['owner_type', 'owner_id', 'name', 'channel', 'category', 'subject', 'body', 'variables', 'language', 'approval_status', 'is_default'] },
+
+  // Platform-owned templates — separate from the tenant-owned
+  // `message_templates` above. The service layer (platform-templates/service.js)
+  // owns validation and version-history bookkeeping; the DAL just persists.
+  platform_message_templates: {
+    schema: 'public',
+    table: 'platform_message_templates',
+    columns: [
+      'code', 'display_name', 'description', 'channel', 'category',
+      'language', 'territory_id',
+      'subject', 'html_body', 'text_body', 'design_json', 'editor_mode',
+      'required_variables', 'optional_variables',
+      'is_active', 'is_seed', 'version',
+      'created_by', 'updated_by',
+    ],
+  },
+  platform_message_template_versions: {
+    schema: 'public',
+    table: 'platform_message_template_versions',
+    columns: [
+      'template_id', 'version',
+      'subject', 'html_body', 'text_body', 'design_json', 'editor_mode',
+      'required_variables', 'optional_variables',
+      'change_note', 'created_by',
+    ],
+  },
   feature_entitlements: { schema: 'public', table: 'feature_entitlements', columns: ['scope', 'scope_id', 'feature', 'enabled', 'config'] },
   ai_credit_balances: { schema: 'public', table: 'ai_credit_balances', columns: ['scope', 'scope_id', 'credits_remaining', 'credits_reserved'] },
   ai_credit_transactions: { schema: 'public', table: 'ai_credit_transactions', columns: ['scope', 'scope_id', 'type', 'amount', 'description', 'related_draft_id'] },
