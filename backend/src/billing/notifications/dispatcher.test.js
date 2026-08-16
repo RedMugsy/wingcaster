@@ -21,9 +21,11 @@ const emailMod = await import('../../lib/notifications/email.js')
 
 async function seedTenant(email = null) {
   const id = randomUUID()
+  // token_version is not a column — it lives inside the users.data document
+  // (see migration 027), so naming it here failed every insert.
   await query(
-    `INSERT INTO users (id, name, email, password_hash, role, verified, verified_at, token_version)
-     VALUES ($1, $2, $3, 'x', 'agent', true, CURRENT_TIMESTAMP, 0)`,
+    `INSERT INTO users (id, name, email, password_hash, role, verified, verified_at, data)
+     VALUES ($1, $2, $3, 'x', 'agent', true, CURRENT_TIMESTAMP, '{"token_version": 0}'::jsonb)`,
     [id, 'Test Tenant', email || `test-${id}@example.com`],
   )
   return id

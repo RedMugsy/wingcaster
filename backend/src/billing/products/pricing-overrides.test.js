@@ -8,10 +8,17 @@ import { createOverride, resolveEffectivePrice } from './pricing-overrides.js'
 
 async function seedTerritory(code) {
   const id = randomUUID()
+  // A territory is split across two tables: name/currency live on the public
+  // row, and commercial.territories holds only the commercial fields with its
+  // id referencing public.territories(id). The public row must exist first.
   await query(
-    `INSERT INTO commercial.territories (id, code, name, currency, pricing_multiplier, launch_status, active)
-     VALUES ($1, $2, $3, 'USD', 1.0, 'launched', true)`,
-    [id, code, `Territory ${code}`],
+    'INSERT INTO public.territories (id, code, name, currency) VALUES ($1, $2, $3, $4)',
+    [id, code, `Territory ${code}`, 'USD'],
+  )
+  await query(
+    `INSERT INTO commercial.territories (id, code, pricing_multiplier, launch_status, active)
+     VALUES ($1, $2, 1.0, 'launched', true)`,
+    [id, code],
   )
   return { id, code }
 }

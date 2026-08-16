@@ -12,13 +12,28 @@ import { describe, expect, it } from 'vitest'
 import { closeDb, configure, insert, query, update } from '../db.js'
 import { skipIfNoPostgres, withTestDb } from '../testing/postgres.js'
 
+/**
+ * properties.agent_id is a real foreign key to agents(id), so a property
+ * cannot be inserted against an invented agent id. Seed the row the FK needs.
+ */
+async function seedAgent() {
+  const id = randomUUID()
+  const email = `geom-${id}@example.test`
+  await query('INSERT INTO users (id, email, name) VALUES ($1, $2, $3)', [id, email, 'Geom Tester'])
+  await query(
+    'INSERT INTO agents (id, user_id, email, name, slug) VALUES ($1, $1, $2, $3, $4)',
+    [id, email, 'Geom Tester', `geom-${id.slice(0, 8)}`],
+  )
+  return id
+}
+
 skipIfNoPostgres()('E2E: properties.geom generated column', () => {
   it('insert with lat/lng populates geom; update of lat/lng recomputes geom', async () => {
     await withTestDb(async (databaseUrl) => {
       configure({ databaseUrl, force: true })
       try {
         const propertyId = randomUUID()
-        const agentId = randomUUID()
+        const agentId = await seedAgent()
 
         // Beirut, LB
         await insert('properties', {
@@ -74,7 +89,7 @@ skipIfNoPostgres()('E2E: properties.geom generated column', () => {
         const propertyId = randomUUID()
         await insert('properties', {
           id: propertyId,
-          agent_id: randomUUID(),
+          agent_id: await seedAgent(),
           title: 'No-geo property',
           price: 100000,
           currency: 'USD',
