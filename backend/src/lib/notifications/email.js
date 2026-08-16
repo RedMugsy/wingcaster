@@ -1,22 +1,32 @@
 /**
- * Email dispatcher for the Conversation Orchestrator.
- * Supports Resend/SendGrid/SMTP/SES live modes and dev simulation mode.
+ * Unified email dispatcher.
  *
- * Recommended split:
- *   - Resend  -> transactional/conversation email (better deliverability, simpler API)
- *   - SendGrid -> marketing and bulk distribution campaigns later
+ * Every path that sends email in this codebase — the conversation
+ * orchestrator, the billing notification dispatcher, the OTP transport, the
+ * platform-notification system — resolves through `sendEmail()` here.
+ * Provider selection is driven by which credentials are present, or by an
+ * explicit EMAIL_PROVIDER override.
+ *
+ * The canonical from-address env is `EMAIL_FROM`. Each provider still accepts
+ * its own historical variant (RESEND_FROM_EMAIL, SMTP_FROM_EMAIL, MAIL_FROM,
+ * …) for back-compat with anything already deployed, but new setups should
+ * use EMAIL_FROM. When more than one is set the provider-specific one wins,
+ * so a mixed-provider environment can override per-provider without touching
+ * the shared default.
  *
  * Env:
- *   EMAIL_PROVIDER=resend|sendgrid|smtp|ses        (optional; auto-detected from creds)
- *   RESEND_API_KEY
- *   RESEND_FROM_EMAIL
- *   SENDGRID_API_KEY
- *   SENDGRID_FROM_EMAIL
+ *   EMAIL_PROVIDER=graph|resend|sendgrid|smtp|ses   optional; auto-detected
+ *   EMAIL_FROM                                       shared default from-address
+ *
+ *   AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET, MAIL_FROM
+ *   RESEND_API_KEY, RESEND_FROM_EMAIL
+ *   SENDGRID_API_KEY, SENDGRID_FROM_EMAIL
  *   SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_FROM_EMAIL
  *   SES_ACCESS_KEY_ID, SES_SECRET_ACCESS_KEY, SES_REGION, SES_FROM_EMAIL
  */
 
 import { v4 as uuidv4 } from 'uuid'
+import { isGraphConfigured, sendViaGraph } from './transports/graph.js'
 
 function normalizeEmail(email) {
   if (!email) return ''
@@ -25,15 +35,23 @@ function normalizeEmail(email) {
 
 export function getEmailConfig() {
   const explicit = (process.env.EMAIL_PROVIDER || '').toLowerCase()
-  const auto = process.env.RESEND_API_KEY
-    ? 'resend'
-    : process.env.SENDGRID_API_KEY
-      ? 'sendgrid'
-      : (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS)
-        ? 'smtp'
-        : null
+  // Auto-detection order matters. Graph is checked first because a
+  // Microsoft 365 tenant is the most opinionated setup — if all four Graph
+  // vars are present, the operator clearly intended Graph and would be
+  // surprised to see mail leaving via Resend just because a leftover key is
+  // still set. Everything else is checked in the historical order.
+  const auto = isGraphConfigured()
+    ? 'graph'
+    : process.env.RESEND_API_KEY
+      ? 'resend'
+      : process.env.SENDGRID_API_KEY
+        ? 'sendgrid'
+        : (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS)
+          ? 'smtp'
+          : null
   return {
     provider: explicit || auto,
+    graphFrom: normalizeEmail(process.env.MAIL_FROM || process.env.EMAIL_FROM || ''),
     resendApiKey: process.env.RESEND_API_KEY || '',
     resendFrom: normalizeEmail(process.env.RESEND_FROM_EMAIL || process.env.EMAIL_FROM || ''),
     sendgridApiKey: process.env.SENDGRID_API_KEY || '',
@@ -52,6 +70,7 @@ export function getEmailConfig() {
 
 export function isEmailEnabled() {
   const cfg = getEmailConfig()
+  if (cfg.provider === 'graph') return isGraphConfigured() && Boolean(cfg.graphFrom)
   if (cfg.provider === 'resend') return Boolean(cfg.resendApiKey && cfg.resendFrom)
   if (cfg.provider === 'sendgrid') return Boolean(cfg.sendgridApiKey && cfg.sendgridFrom)
   if (cfg.provider === 'smtp') return Boolean(cfg.smtpHost && cfg.smtpUser && cfg.smtpPass && cfg.smtpFrom)
@@ -66,20 +85,58 @@ export async function sendEmail({ to, subject, body, html, replyTo }) {
   if (!body?.trim() && !html?.trim()) throw Object.assign(new Error('Message body or html is required'), { code: 'MISSING_BODY' })
 
   if (!isEmailEnabled()) {
-    const err = new Error('Email transport is not configured (need RESEND_API_KEY, SENDGRID_API_KEY, or SMTP_* + EMAIL_FROM)')
+    const err = new Error(
+      'Email transport is not configured '
+        + '(set AZURE_TENANT_ID/CLIENT_ID/CLIENT_SECRET + MAIL_FROM for Microsoft Graph, '
+        + 'or RESEND_API_KEY, SENDGRID_API_KEY, or SMTP_* + EMAIL_FROM for another provider)',
+    )
     err.code = 'EMAIL_UNCONFIGURED'
     throw err
   }
 
+  if (cfg.provider === 'graph') return sendViaGraph({ to: recipient, subject, body, html, replyTo })
   if (cfg.provider === 'resend') return sendResend(cfg, { to: recipient, subject, body, html, replyTo })
   if (cfg.provider === 'sendgrid') return sendSendGrid(cfg, { to: recipient, subject, body, html, replyTo })
-  if (cfg.provider === 'smtp') {
-    throw Object.assign(new Error('SMTP provider not wired here — use lib/otp.js path for signup OTP; general SMTP mail is Phase 7f'), { code: 'SMTP_NOT_IMPLEMENTED' })
-  }
+  if (cfg.provider === 'smtp') return sendSmtp(cfg, { to: recipient, subject, body, html, replyTo })
   if (cfg.provider === 'ses') {
     throw Object.assign(new Error('SES provider requires AWS SDK — not yet wired'), { code: 'SES_NOT_IMPLEMENTED' })
   }
   throw Object.assign(new Error(`Unknown email provider: ${cfg.provider}`), { code: 'UNKNOWN_PROVIDER' })
+}
+
+/**
+ * SMTP path — used to be marked "not implemented here", but the OTP module
+ * was carrying its own duplicate SMTP transport with a different set of env
+ * vars. Bringing the SMTP path in unifies them so a Microsoft-365-via-SMTP
+ * deployment (or any other SMTP server) sends every email through one
+ * transport instead of three.
+ */
+async function sendSmtp(cfg, { to, subject, body, html, replyTo }) {
+  // Lazy import so environments that never need SMTP (Graph tenants, Resend
+  // users) don't pay the nodemailer cost at boot.
+  const { default: nodemailer } = await import('nodemailer')
+  const transport = nodemailer.createTransport({
+    host: cfg.smtpHost,
+    port: cfg.smtpPort,
+    secure: process.env.SMTP_SECURE === 'true',
+    auth: { user: cfg.smtpUser, pass: cfg.smtpPass },
+  })
+  const info = await transport.sendMail({
+    from: cfg.smtpFrom,
+    to,
+    subject: subject || '',
+    text: body || '',
+    html: html || undefined,
+    replyTo: replyTo || undefined,
+  })
+  return {
+    ok: true,
+    provider: 'smtp',
+    provider_message_id: info?.messageId || null,
+    to,
+    subject: subject || '',
+    status: 'accepted',
+  }
 }
 
 async function sendResend(cfg, { to, subject, body, html, replyTo }) {
