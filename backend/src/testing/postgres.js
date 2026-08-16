@@ -98,14 +98,34 @@ async function createDatabaseWithRetry(adminPool, database, attempts = 5) {
   }
 }
 
+/**
+ * Drop the scratch database, preferring a graceful drop.
+ *
+ * WITH (FORCE) terminates whatever is still connected, and pg reports that to
+ * the victim client as an 'error' event (57P01). If nothing is listening —
+ * which is the default for a plain `new Pool` in a test — Node rethrows it as
+ * an uncaught exception and fails the run even though every test passed.
+ *
+ * Pools closing is asynchronous, so a plain DROP can briefly see the database
+ * as still in use (55006). Retry a few times before resorting to FORCE, which
+ * then only fires for a genuinely leaked connection.
+ */
 async function dropDatabase(adminPool, database) {
+  for (let attempt = 1; attempt <= 5; attempt += 1) {
+    try {
+      await adminPool.query(`DROP DATABASE IF EXISTS ${identifier(database)}`)
+      return
+    } catch (error) {
+      if (error.code !== '55006') throw error
+      if (attempt === 5) break
+      await new Promise((resolve) => setTimeout(resolve, 100 * attempt))
+    }
+  }
   try {
-    // FORCE (PG13+) terminates any connection the application under test left
-    // behind, so a leaked pool cannot wedge teardown.
     await adminPool.query(`DROP DATABASE IF EXISTS ${identifier(database)} WITH (FORCE)`)
   } catch (error) {
+    // FORCE is PG13+; on anything older there is nothing further to try.
     if (error.code !== '42601') throw error
-    await adminPool.query(`DROP DATABASE IF EXISTS ${identifier(database)}`)
   }
 }
 
