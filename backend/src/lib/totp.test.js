@@ -95,6 +95,31 @@ describe('verifyTotp', () => {
     expect(replay.valid).toBe(false)
   })
 
+  it('refuses a replay when the watermark arrives as a string', async () => {
+    // THE REGRESSION: totp_last_time_step is a BIGINT, and node-postgres hands
+    // int8 back as a string to avoid precision loss. Number.isFinite does not
+    // coerce, so testing the raw value skipped the guard entirely and every
+    // used code stayed replayable for the rest of its window.
+    const token = await tokenAt(EPOCH)
+    const first = await verifyTotp({ secret: SECRET, token, epoch: EPOCH })
+
+    const replay = await verifyTotp({
+      secret: SECRET,
+      token,
+      epoch: EPOCH,
+      afterTimeStep: String(first.timeStep),
+    })
+    expect(replay.valid).toBe(false)
+  })
+
+  it('ignores a null or empty watermark rather than treating it as step 0', async () => {
+    const token = await tokenAt(EPOCH)
+    for (const watermark of [null, undefined, '']) {
+      const result = await verifyTotp({ secret: SECRET, token, epoch: EPOCH, afterTimeStep: watermark })
+      expect(result.valid).toBe(true)
+    }
+  })
+
   it('still accepts the next window after a replay watermark is set', async () => {
     const token = await tokenAt(EPOCH)
     const first = await verifyTotp({ secret: SECRET, token, epoch: EPOCH })

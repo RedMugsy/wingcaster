@@ -11,11 +11,11 @@ const ID_COLUMNS = ['id', 'created_at', 'updated_at']
 
 const TABLE_MAP = {
   // Identity / org
-  // NOTE: `totp_secret_encrypted` and `totp_last_time_step` are deliberately
-  // absent from this column list. Listing them would make the AES-GCM
-  // ciphertext ride along in every generic user object the DAL hands out (and
-  // therefore into any response that serialises one). Phase 7f reads and
-  // writes both via explicit SQL in auth-2fa.js instead.
+  // NOTE: `totp_secret_encrypted` and `totp_last_time_step` are absent from
+  // this list so that DAL writes never touch them — Phase 7f reads and writes
+  // both with explicit SQL in auth-2fa.js. Absence alone does NOT keep them
+  // off a hydrated record, because reads are `SELECT *`; see PRIVATE_COLUMNS
+  // below, which is what actually strips them.
   users: {
     schema: 'public',
     table: 'users',
@@ -624,11 +624,29 @@ export function toRow(collection, item) {
   return row
 }
 
+/**
+ * Columns that must never appear on a hydrated record.
+ *
+ * Omitting a column from a mapping's `columns` list does NOT keep it out:
+ * reads are `SELECT *`, so every column on the table comes back regardless.
+ * Without stripping here the encrypted TOTP secret would ride along in every
+ * generic user object — and worse, a later `update()` would copy it into the
+ * `data` JSONB blob, duplicating the ciphertext outside its own column.
+ *
+ * Code that genuinely needs these reads them with explicit SQL (auth-2fa.js).
+ */
+const PRIVATE_COLUMNS = {
+  users: ['totp_secret_encrypted', 'totp_last_time_step'],
+}
+
 export function fromRow(collection, row) {
   const data = row.data ? (typeof row.data === 'string' ? JSON.parse(row.data) : row.data) : {}
   // Typed columns take precedence over data JSON in case of drift.
   const result = { ...data, ...row }
   delete result.data
+  for (const column of PRIVATE_COLUMNS[collection] || []) {
+    delete result[column]
+  }
   return result
 }
 

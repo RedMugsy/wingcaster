@@ -78,8 +78,18 @@ export async function verifyTotp({ secret, token, afterTimeStep = null, epoch })
     token: normalized,
     epochTolerance: DRIFT_TOLERANCE_SECONDS,
   }
-  if (Number.isFinite(afterTimeStep)) options.afterTimeStep = Number(afterTimeStep)
-  if (Number.isFinite(epoch)) options.epoch = Number(epoch)
+  // `totp_last_time_step` is a BIGINT, and node-postgres hands int8 back as a
+  // STRING to avoid precision loss. Number.isFinite does not coerce, so
+  // testing the raw value silently skipped the replay guard entirely and every
+  // used code stayed replayable for the rest of its window. Coerce first.
+  const lastStep = Number(afterTimeStep)
+  if (afterTimeStep !== null && afterTimeStep !== undefined && afterTimeStep !== '' && Number.isFinite(lastStep)) {
+    options.afterTimeStep = lastStep
+  }
+  const at = Number(epoch)
+  if (epoch !== null && epoch !== undefined && epoch !== '' && Number.isFinite(at)) {
+    options.epoch = at
+  }
 
   let result
   try {
