@@ -94,6 +94,38 @@ export const otpRequestSchema = z.object({
   email: emailSchema,
 })
 
+// ---------------------------------------------------------------------------
+// Phase 7f — TOTP + step-up
+// ---------------------------------------------------------------------------
+
+// Enrolment is password-gated. Without this an attacker with a borrowed
+// unlocked laptop could bind their own authenticator to the session's account
+// and hold it permanently.
+export const totpSetupSchema = z.object({
+  current_password: z.string().min(1).max(128),
+})
+
+// `secret` is echoed back from the setup response rather than held server-side
+// between the two calls: an unverified secret is not yet a credential, and
+// stashing it would leave half-finished enrolments littering the users table.
+export const totpVerifySchema = z.object({
+  secret: z.string().min(16).max(128).regex(/^[A-Z2-7]+=*$/, 'Secret must be base32'),
+  code: z.string().min(6).max(10),
+})
+
+export const totpDisableSchema = z.object({
+  code: z.string().min(6).max(20),
+})
+
+// A submitted second factor: a 6-digit TOTP token, an emailed OTP, or a
+// formatted backup code (`ABCDE-FGHJK`). Length range spans all three.
+export const twoFactorChallengeSchema = z.object({
+  challenge_id: z.string().uuid(),
+  code: z.string().min(4).max(24),
+})
+
+export const stepUpVerifySchema = twoFactorChallengeSchema
+
 export const propertyCreateSchema = z.object({
   title: z.string().min(3).max(200),
   description: z.string().max(5000).optional().default(''),

@@ -14,6 +14,7 @@ import { loadDb, getDb, findAll, findOne, insert, remove, update, transaction } 
 import { getPool, query } from './persistence/postgres-adapter.js'
 import { seedData } from './seed.js'
 import { signToken, authMiddleware } from './auth.js'
+import { registerTwoFactorRoutes, startSigninChallengeIfRequired } from './auth-2fa.js'
 import {
   createAgentAccount,
   findAgentForUser,
@@ -568,6 +569,14 @@ if (billingModule.enabled) {
 
 registerCommentRouterRoutes(app, { authMiddleware })
 
+// Phase 7f — TOTP enrolment, sign-in second factor, step-up elevation.
+registerTwoFactorRoutes(app, {
+  authMiddleware,
+  buildAuthSession,
+  findAgentForUser,
+  logActivity,
+})
+
 setCommentRouterHook(async (message) => {
   await routeClassifiedMessage({
     message,
@@ -972,21 +981,19 @@ app.post('/api/auth/register', validate(registerSchema), async (req, res) => {
   res.status(202).json({ status: 'otp_sent', otp_id: otp.id })
 })
 
-app.post('/api/auth/login', validate(loginSchema), async (req, res) => {
-  const { email, password } = req.validated
-  const user = await findUserByEmail(email)
-  if (!user?.password_hash || !bcrypt.compareSync(password, user.password_hash)) return res.status(401).json({ error: 'Invalid credentials' })
-  if (!user.verified || !user.verified_at) {
-    const otp = await latestUserOtp(user.id)
-    return res.status(401).json({ error: 'email_not_verified', otp_id: otp?.id || null })
-  }
-  const agent = await findAgentForUser(user.id)
-  if (!agent) return res.status(401).json({ error: 'Invalid credentials' })
+/**
+ * Build the signed-session payload returned on any successful authentication.
+ *
+ * Extracted in Phase 7f so the sign-in 2FA challenge (auth-2fa.js) issues an
+ * identical response shape to /api/auth/login — the frontend must not care
+ * which of the two produced its session.
+ */
+async function buildAuthSession(user, agent) {
   const affiliation = await getActiveAffiliation(user.id)
   const agency = affiliation ? await findOne('agencies', a => a.id === affiliation.agency_id) : null
   const affiliations = await listUserAgencyMemberships(user.id)
   const tokenVersion = Number(user.token_version ?? 0)
-  res.json({
+  return {
     token: signToken({ id: user.id, email: user.email, name: user.name, token_version: tokenVersion, verified_at: user.verified_at }),
     agent: {
       ...serializeAgent(agent),
@@ -1003,7 +1010,30 @@ app.post('/api/auth/login', validate(loginSchema), async (req, res) => {
       })),
       personal_tenant_id: `personal:${user.id}`,
     },
-  })
+  }
+}
+
+app.post('/api/auth/login', validate(loginSchema), async (req, res) => {
+  const { email, password } = req.validated
+  const user = await findUserByEmail(email)
+  if (!user?.password_hash || !bcrypt.compareSync(password, user.password_hash)) return res.status(401).json({ error: 'Invalid credentials' })
+  if (!user.verified || !user.verified_at) {
+    const otp = await latestUserOtp(user.id)
+    return res.status(401).json({ error: 'email_not_verified', otp_id: otp?.id || null })
+  }
+  const agent = await findAgentForUser(user.id)
+  if (!agent) return res.status(401).json({ error: 'Invalid credentials' })
+
+  // Phase 7f — the password is correct, but an account with a second factor
+  // gets a challenge instead of a session. Deliberately after the agent lookup
+  // so a 2FA-enabled account with a broken profile still fails as bad
+  // credentials rather than leaking that the password was right.
+  const challenge = await startSigninChallengeIfRequired(user, req)
+  if (challenge) {
+    return res.json({ status: '2fa_required', challenge_id: challenge.id, method: challenge.method })
+  }
+
+  res.json(await buildAuthSession(user, agent))
 })
 
 app.get('/api/auth/me', authMiddleware, async (req, res) => {

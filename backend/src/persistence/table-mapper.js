@@ -11,7 +11,25 @@ const ID_COLUMNS = ['id', 'created_at', 'updated_at']
 
 const TABLE_MAP = {
   // Identity / org
-  users: { schema: 'public', table: 'users', columns: ['email', 'phone', 'name', 'password_hash', 'role', 'platform_role', 'verified', 'verified_at'] },
+  // NOTE: `totp_secret_encrypted` and `totp_last_time_step` are deliberately
+  // absent from this column list. Listing them would make the AES-GCM
+  // ciphertext ride along in every generic user object the DAL hands out (and
+  // therefore into any response that serialises one). Phase 7f reads and
+  // writes both via explicit SQL in auth-2fa.js instead.
+  users: {
+    schema: 'public',
+    table: 'users',
+    columns: [
+      'email', 'phone', 'name', 'password_hash', 'role', 'platform_role', 'verified', 'verified_at',
+      'totp_enabled', 'totp_enrolled_at', 'preferred_2fa',
+    ],
+  },
+  user_backup_codes: { schema: 'public', table: 'user_backup_codes', columns: ['user_id', 'code_hash', 'used_at'] },
+  auth_challenges: {
+    schema: 'public',
+    table: 'auth_challenges',
+    columns: ['user_id', 'purpose', 'method', 'code_hash', 'expires_at', 'consumed_at', 'attempts', 'last_attempt_at', 'locked_at', 'created_ip'],
+  },
   agents: {
     schema: 'public',
     table: 'agents',
