@@ -72,20 +72,32 @@ export function getPool() {
  * The result was a 42P01 on first DAL call, failing the whole file. Marking
  * the URL as already migrated is the fix; production sets no marks and its
  * migrate-on-boot behaviour is unchanged.
+ *
+ * Held on globalThis, NOT in a module-level Set. Nearly every gated test calls
+ * `vi.resetModules()` and then dynamically imports server.js, which builds a
+ * brand-new copy of this module — module state would be empty in exactly the
+ * copy that needs to read it. Process-global state is the only channel that
+ * survives a module reset, which is the same reason `setDatabaseUrl` puts the
+ * URL on `process.env` rather than keeping it in a variable.
  */
-const _preMigratedUrls = new Set()
+const PRE_MIGRATED_URLS = Symbol.for('wingcaster.persistence.preMigratedUrls')
+
+function preMigratedUrls() {
+  if (!globalThis[PRE_MIGRATED_URLS]) globalThis[PRE_MIGRATED_URLS] = new Set()
+  return globalThis[PRE_MIGRATED_URLS]
+}
 
 export function markMigrationsApplied(databaseUrl) {
-  if (databaseUrl) _preMigratedUrls.add(databaseUrl)
+  if (databaseUrl) preMigratedUrls().add(databaseUrl)
 }
 
 export function unmarkMigrationsApplied(databaseUrl) {
-  if (databaseUrl) _preMigratedUrls.delete(databaseUrl)
+  if (databaseUrl) preMigratedUrls().delete(databaseUrl)
 }
 
 export async function loadDb() {
   if (_migrationsRun) return
-  if (_preMigratedUrls.has(resolveDatabaseUrl())) {
+  if (preMigratedUrls().has(resolveDatabaseUrl())) {
     _migrationsRun = true
     return
   }
