@@ -1,0 +1,55 @@
+name: web tests
+
+# The web suite had no CI at all until Phase 7f/2 — 93 tests that never ran
+# anywhere except a developer's machine. That is exactly the trap the backend
+# suite fell into: tests exist, a document cites their count as proof, and
+# nothing actually executes them. This workflow closes it.
+#
+# Typecheck and production build run alongside the tests because the project's
+# quality bar requires both to be green before a commit, and neither was
+# enforced automatically either.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'web/**'
+      - '.github/workflows/web-tests.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'web/**'
+      - '.github/workflows/web-tests.yml'
+
+concurrency:
+  group: web-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  web:
+    name: Typecheck, tests, production build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: web/package-lock.json
+
+      # `npm ci` in web/ triggers a postinstall that installs the backend too;
+      # --ignore-scripts keeps this job to the frontend, which is all it tests.
+      - name: Install
+        run: npm ci --ignore-scripts
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Tests
+        run: npx vitest run
+
+      - name: Production build
+        run: npx vite build

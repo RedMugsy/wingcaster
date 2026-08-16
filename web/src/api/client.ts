@@ -1,4 +1,11 @@
 import type {
+  StepUpChallenge,
+  StepUpResult,
+  TotpEnrolmentResult,
+  TotpSetup,
+  TwoFactorStatus,
+} from '@/types/twoFactor'
+import type {
   AgencyPricingPortfolio,
   AgentPriceReport,
   AgentPricingPortfolio,
@@ -206,10 +213,51 @@ export function setAuthToken(token: string) {
   localStorage.removeItem('sa_token')
 }
 
+/**
+ * Step-up elevation (Phase 7f).
+ *
+ * Deliberately a SECOND token rather than a replacement session: the normal
+ * Bearer token is never touched, so obtaining elevation cannot disturb the
+ * session and a second open tab is never left holding a stale one.
+ *
+ * Held in sessionStorage, not localStorage — an elevation is worth 15 minutes
+ * and should not outlive the browser tab that earned it.
+ */
+const ELEVATED_TOKEN_KEY = 'fi_elevated_token'
+
+export function getElevatedToken(): string | null {
+  try {
+    return sessionStorage.getItem(ELEVATED_TOKEN_KEY)
+  } catch {
+    return null
+  }
+}
+
+export function setElevatedToken(token: string) {
+  try {
+    sessionStorage.setItem(ELEVATED_TOKEN_KEY, token)
+  } catch {
+    /* private-mode browsers: elevation simply won't persist across requests */
+  }
+}
+
+export function clearElevatedToken() {
+  try {
+    sessionStorage.removeItem(ELEVATED_TOKEN_KEY)
+  } catch {
+    /* ignore */
+  }
+}
+
 function headers() {
   const h: Record<string, string> = { 'Content-Type': 'application/json' }
   const token = getToken()
   if (token) h['Authorization'] = `Bearer ${token}`
+  // Sent on every request so a gated endpoint sees it without each call site
+  // having to know it is gated. Endpoints that don't require elevation ignore
+  // the header entirely.
+  const elevated = getElevatedToken()
+  if (elevated) h['X-Elevated-Token'] = elevated
   return h
 }
 
@@ -284,6 +332,21 @@ export const api = {
     fetchJson(`/admin/account-recovery/${caseId}/approve`, { method: 'POST', body: JSON.stringify({ notes }) }),
   rejectAccountRecoveryCase: (caseId: string, notes = '') =>
     fetchJson(`/admin/account-recovery/${caseId}/reject`, { method: 'POST', body: JSON.stringify({ notes }) }),
+
+  // Two-factor / step-up (Phase 7f)
+  twoFactorStatus: (): Promise<TwoFactorStatus> => fetchJson('/auth/2fa/status'),
+  totpSetup: (current_password: string): Promise<TotpSetup> =>
+    fetchJson('/auth/2fa/totp/setup', { method: 'POST', body: JSON.stringify({ current_password }) }),
+  totpVerify: (secret: string, code: string): Promise<TotpEnrolmentResult> =>
+    fetchJson('/auth/2fa/totp/verify', { method: 'POST', body: JSON.stringify({ secret, code }) }),
+  totpDisable: (code: string): Promise<{ totp_enabled: false; token: string | null }> =>
+    fetchJson('/auth/2fa/totp/disable', { method: 'POST', body: JSON.stringify({ code }) }),
+  /** Redeems a sign-in challenge. Unauthenticated — there is no session yet. */
+  twoFactorChallenge: (challenge_id: string, code: string) =>
+    fetchJson('/auth/2fa/challenge', { method: 'POST', body: JSON.stringify({ challenge_id, code }) }),
+  stepUp: (): Promise<StepUpChallenge> => fetchJson('/auth/step-up', { method: 'POST', body: '{}' }),
+  stepUpVerify: (challenge_id: string, code: string): Promise<StepUpResult> =>
+    fetchJson('/auth/step-up/verify', { method: 'POST', body: JSON.stringify({ challenge_id, code }) }),
 
   // OTP
   sendOtp: (channel: string, contact: string) =>

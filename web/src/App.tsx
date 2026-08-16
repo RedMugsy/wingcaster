@@ -1,5 +1,6 @@
 import { Routes, Route, useLocation, Navigate } from 'react-router-dom'
 import { AuthProvider } from '@/context/AuthContext'
+import { StepUpProvider } from '@/context/StepUpContext'
 import { BrandProvider } from '@/context/BrandContext'
 import { ToastProvider } from '@/components/ui/toast'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
@@ -55,6 +56,7 @@ import { PlansPage } from '@/pages/PlansPage'
 import { MySubscriptionPage } from '@/pages/MySubscriptionPage'
 import { MyCreditNotesPage } from '@/pages/MyCreditNotesPage'
 import { NotificationPreferencesPage } from '@/pages/NotificationPreferencesPage'
+import { TotpSettingsPage } from '@/pages/TotpSettingsPage'
 import { InspectorPage } from '@/pages/inspector/InspectorPage'
 import { AreaProfilePage } from '@/pages/AreaProfilePage'
 import { PublicAgencyPage } from '@/pages/PublicAgencyPage'
@@ -100,6 +102,7 @@ function AppShell() {
           <Route path="/white-label" element={<WhiteLabelBuilderPage />} />
           <Route path="/widgets" element={<WidgetBuilderPage />} />
           <Route path="/integrations" element={<IntegrationSettingsPage />} />
+          <Route path="/settings/2fa" element={<TotpSettingsPage />} />
           <Route path="/settings/channels" element={<SocialChannelsPage />} />
           <Route path="/settings/routing" element={<RoutingSettingsPage />} />
           <Route path="/settings/historical-transactions" element={<HistoricalTransactionsPage />} />
@@ -148,7 +151,10 @@ function App() {
       <BrandProvider>
         <ToastProvider>
           <AuthProvider>
-            <AppShell />
+            {/* Inside AuthProvider: step-up acts on the current session. */}
+            <StepUpProvider>
+              <AppShell />
+            </StepUpProvider>
           </AuthProvider>
         </ToastProvider>
       </BrandProvider>
