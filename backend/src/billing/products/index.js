@@ -71,4 +71,13 @@ export {
 
 export { prorateMigration, daysBetween } from './proration.js'
 
+export {
+  bulkCancel,
+  bulkExpire,
+  bulkMigrate,
+  bulkPause,
+  bulkResume,
+  bulkIssueCredits,
+} from './bulk-ops.js'
+
 export { registerProductCatalogRoutes } from './routes.js'

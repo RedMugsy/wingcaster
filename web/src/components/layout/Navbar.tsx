@@ -41,6 +41,7 @@ export function Navbar() {
     { path: '/admin/commercial-pricing/subscriptions', label: 'Subscriptions' },
     { path: '/admin/commercial-pricing/credit-notes', label: 'Credit notes' },
     { path: '/admin/commercial-pricing/reports', label: 'Reports' },
+    { path: '/admin/commercial-pricing/reconciliation', label: 'Reconciliation' },
   ]
   const commercialPricingActive = location.pathname.startsWith('/admin/commercial-pricing')
 
@@ -134,6 +135,10 @@ export function Navbar() {
                   </DropdownMenuItem>
                   <DropdownMenuItem asChild>
                     <Link to="/credit-notes">My credit notes</Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem asChild>
+                    <Link to="/notifications">Notification preferences</Link>
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>

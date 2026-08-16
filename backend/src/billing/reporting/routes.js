@@ -24,6 +24,7 @@ import {
   subscriptionHistoryCsv,
   subscriptionsCsv,
 } from './exports.js'
+import { tenantReconciliation } from './reconciliation.js'
 
 export function registerReportingRoutes(app, { authMiddleware, requirePlatformAdmin } = {}) {
   const guards = [authMiddleware, requirePlatformAdmin].filter(Boolean)
@@ -89,6 +90,20 @@ export function registerReportingRoutes(app, { authMiddleware, requirePlatformAd
       res.send(csv)
     } catch (err) {
       res.status(500).json({ error: err.message })
+    }
+  })
+
+  // Reconciliation — per-tenant commercial roll-up (subs + quota
+  // ledger + credit-note balance + history counts + anomalies).
+  app.get('/api/admin/billing/tenants/:tenantId/reconciliation', ...guards, async (req, res) => {
+    try {
+      const report = await tenantReconciliation(req.params.tenantId, {
+        billingPeriod: req.query.billing_period || null,
+      })
+      res.json(report)
+    } catch (err) {
+      const status = err?.code === 'MISSING_FIELD' ? 400 : 500
+      res.status(status).json({ error: err.message, code: err.code })
     }
   })
 

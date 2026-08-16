@@ -22,6 +22,9 @@ import {
   markPastDue, migrateSubscription, pauseSubscription, resolvePastDue,
   resumeSubscription, tickRenewals,
 } from './lifecycle.js'
+import {
+  bulkCancel, bulkExpire, bulkIssueCredits, bulkMigrate, bulkPause, bulkResume,
+} from './bulk-ops.js'
 import { listEvents as listSubscriptionEvents } from './subscription-history.js'
 import {
   getNote, issueNote, listNotes, pendingBalance, voidNote,
@@ -481,6 +484,84 @@ export function registerProductCatalogRoutes(app, { authMiddleware, requirePlatf
       res.json({ subscription: updated })
     } catch (err) {
       res.status(subStatus(err, 400)).json({ error: err.message, code: err.code })
+    }
+  })
+
+  // --- Bulk admin operations ---
+  app.post('/api/admin/billing/subscriptions/bulk-cancel', ...guards, async (req, res) => {
+    try {
+      const { subscription_ids, reason, immediate } = req.body || {}
+      const result = await bulkCancel({
+        subscriptionIds: subscription_ids, reason, immediate: immediate === true, actorId: actorFrom(req),
+      })
+      res.json(result)
+    } catch (err) {
+      res.status(err?.code === 'INVALID_INPUT' || err?.code === 'BULK_LIMIT' ? 400 : 500)
+        .json({ error: err.message, code: err.code })
+    }
+  })
+
+  app.post('/api/admin/billing/subscriptions/bulk-expire', ...guards, async (req, res) => {
+    try {
+      const { subscription_ids, reason } = req.body || {}
+      const result = await bulkExpire({ subscriptionIds: subscription_ids, reason, actorId: actorFrom(req) })
+      res.json(result)
+    } catch (err) {
+      res.status(err?.code === 'INVALID_INPUT' || err?.code === 'BULK_LIMIT' ? 400 : 500)
+        .json({ error: err.message, code: err.code })
+    }
+  })
+
+  app.post('/api/admin/billing/subscriptions/bulk-migrate', ...guards, async (req, res) => {
+    try {
+      const { subscription_ids, target_tier_id, target_product_id, prorate, reason } = req.body || {}
+      const result = await bulkMigrate({
+        subscriptionIds: subscription_ids,
+        targetTierId: target_tier_id,
+        targetProductId: target_product_id,
+        prorate: prorate !== false,
+        reason,
+        actorId: actorFrom(req),
+      })
+      res.json(result)
+    } catch (err) {
+      const status =
+        err?.code === 'INVALID_INPUT' || err?.code === 'BULK_LIMIT' || err?.code === 'MISSING_FIELD'
+          ? 400 : 500
+      res.status(status).json({ error: err.message, code: err.code })
+    }
+  })
+
+  app.post('/api/admin/billing/subscriptions/bulk-pause', ...guards, async (req, res) => {
+    try {
+      const { subscription_ids, reason } = req.body || {}
+      const result = await bulkPause({ subscriptionIds: subscription_ids, reason, actorId: actorFrom(req) })
+      res.json(result)
+    } catch (err) {
+      res.status(err?.code === 'INVALID_INPUT' || err?.code === 'BULK_LIMIT' ? 400 : 500)
+        .json({ error: err.message, code: err.code })
+    }
+  })
+
+  app.post('/api/admin/billing/subscriptions/bulk-resume', ...guards, async (req, res) => {
+    try {
+      const { subscription_ids } = req.body || {}
+      const result = await bulkResume({ subscriptionIds: subscription_ids, actorId: actorFrom(req) })
+      res.json(result)
+    } catch (err) {
+      res.status(err?.code === 'INVALID_INPUT' || err?.code === 'BULK_LIMIT' ? 400 : 500)
+        .json({ error: err.message, code: err.code })
+    }
+  })
+
+  app.post('/api/admin/billing/credit-notes/bulk-issue', ...guards, async (req, res) => {
+    try {
+      const { entries } = req.body || {}
+      const result = await bulkIssueCredits({ entries, actorId: actorFrom(req), actorType: 'admin' })
+      res.json(result)
+    } catch (err) {
+      res.status(err?.code === 'INVALID_INPUT' || err?.code === 'BULK_LIMIT' ? 400 : 500)
+        .json({ error: err.message, code: err.code })
     }
   })
 

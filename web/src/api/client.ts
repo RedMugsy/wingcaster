@@ -8,6 +8,7 @@ import type {
   PricingTrendSnapshot,
 } from '@/types/marketPricing'
 import type {
+  BulkOperationResult,
   ChurnReport,
   City,
   CoreRateCard,
@@ -18,6 +19,8 @@ import type {
   ListAdminOpts,
   MarketContext,
   MrrReport,
+  NotificationEventRow,
+  NotificationPreferenceRow,
   PricePreview,
   PricePreviewInput,
   Product,
@@ -31,6 +34,7 @@ import type {
   SubscriptionHistoryEvent,
   SubscriptionStatus,
   TenantPlanEntry,
+  TenantReconciliation,
   Territory,
   TerritoryMrrReport,
   TierSubscribersRow,
@@ -1606,6 +1610,37 @@ export const api = {
     const params = new URLSearchParams(query).toString()
     return `${API_BASE}/admin/billing/exports/${kind}.csv${params ? `?${params}` : ''}`
   },
+
+  // ============================================================
+  // Notifications (Phase 7c/6a + 7c/6c UI)
+  // ============================================================
+
+  getMyNotificationPreferences: (): Promise<{ preferences: NotificationPreferenceRow[]; event_kinds: string[] }> =>
+    fetchJson('/billing/notifications/preferences'),
+  updateMyNotificationPreferences: (updates: Array<{ event_kind: string; channel: string; enabled: boolean }>): Promise<{ preferences: NotificationPreferenceRow[] }> =>
+    fetchJson('/billing/notifications/preferences', { method: 'PUT', body: JSON.stringify({ updates }) }),
+  getMyNotificationHistory: (limit = 100): Promise<{ events: NotificationEventRow[] }> =>
+    fetchJson(`/billing/notifications/history?limit=${limit}`),
+
+  // ============================================================
+  // Reconciliation + Bulk ops (Phase 7c/6c)
+  // ============================================================
+
+  getAdminTenantReconciliation: (tenantId: string, billingPeriod?: string): Promise<TenantReconciliation> =>
+    fetchJson(`/admin/billing/tenants/${tenantId}/reconciliation${billingPeriod ? `?billing_period=${encodeURIComponent(billingPeriod)}` : ''}`),
+
+  bulkCancelSubscriptions: (body: { subscription_ids: string[]; reason?: string; immediate?: boolean }): Promise<BulkOperationResult> =>
+    fetchJson('/admin/billing/subscriptions/bulk-cancel', { method: 'POST', body: JSON.stringify(body) }),
+  bulkExpireSubscriptions: (body: { subscription_ids: string[]; reason?: string }): Promise<BulkOperationResult> =>
+    fetchJson('/admin/billing/subscriptions/bulk-expire', { method: 'POST', body: JSON.stringify(body) }),
+  bulkMigrateSubscriptions: (body: { subscription_ids: string[]; target_tier_id: string; target_product_id?: string; prorate?: boolean; reason?: string }): Promise<BulkOperationResult> =>
+    fetchJson('/admin/billing/subscriptions/bulk-migrate', { method: 'POST', body: JSON.stringify(body) }),
+  bulkPauseSubscriptions: (body: { subscription_ids: string[]; reason?: string }): Promise<BulkOperationResult> =>
+    fetchJson('/admin/billing/subscriptions/bulk-pause', { method: 'POST', body: JSON.stringify(body) }),
+  bulkResumeSubscriptions: (body: { subscription_ids: string[] }): Promise<BulkOperationResult> =>
+    fetchJson('/admin/billing/subscriptions/bulk-resume', { method: 'POST', body: JSON.stringify(body) }),
+  bulkIssueCreditNotes: (body: { entries: Array<{ tenant_id: string; subscription_id?: string; type: CreditNoteType; amount_minor: number; currency: string; reason?: string; expires_at?: string; metadata?: Record<string, unknown> }> }): Promise<BulkOperationResult> =>
+    fetchJson('/admin/billing/credit-notes/bulk-issue', { method: 'POST', body: JSON.stringify(body) }),
 }
 
 function buildQuery(opts: ListAdminOpts): string {

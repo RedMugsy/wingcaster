@@ -50,9 +50,11 @@ import { SubscriptionsAdminPage } from '@/pages/admin/commercial-pricing/Subscri
 import { SubscriptionDetailPage } from '@/pages/admin/commercial-pricing/SubscriptionDetailPage'
 import { CreditNotesAdminPage } from '@/pages/admin/commercial-pricing/CreditNotesAdminPage'
 import { ReportsAdminPage } from '@/pages/admin/commercial-pricing/ReportsAdminPage'
+import { ReconciliationLookupPage } from '@/pages/admin/commercial-pricing/ReconciliationLookupPage'
 import { PlansPage } from '@/pages/PlansPage'
 import { MySubscriptionPage } from '@/pages/MySubscriptionPage'
 import { MyCreditNotesPage } from '@/pages/MyCreditNotesPage'
+import { NotificationPreferencesPage } from '@/pages/NotificationPreferencesPage'
 import { InspectorPage } from '@/pages/inspector/InspectorPage'
 import { AreaProfilePage } from '@/pages/AreaProfilePage'
 import { PublicAgencyPage } from '@/pages/PublicAgencyPage'
@@ -117,9 +119,11 @@ function AppShell() {
           <Route path="/admin/commercial-pricing/subscriptions/:id" element={<SubscriptionDetailPage />} />
           <Route path="/admin/commercial-pricing/credit-notes" element={<CreditNotesAdminPage />} />
           <Route path="/admin/commercial-pricing/reports" element={<ReportsAdminPage />} />
+          <Route path="/admin/commercial-pricing/reconciliation" element={<ReconciliationLookupPage />} />
           <Route path="/pricing" element={<PlansPage />} />
           <Route path="/subscription" element={<MySubscriptionPage />} />
           <Route path="/credit-notes" element={<MyCreditNotesPage />} />
+          <Route path="/notifications" element={<NotificationPreferencesPage />} />
           <Route path="/agency/whatsapp-listings" element={<AgencyWhatsAppListingsPage />} />
           <Route path="/agent/whatsapp-listings" element={<AgentWhatsAppListingsPage />} />
           <Route path="/areas/:slug" element={<AreaProfilePage />} />

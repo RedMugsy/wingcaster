@@ -373,3 +373,96 @@ export interface CreditExposureRow {
   net_liability_minor: number
   pending_count: number
 }
+
+// ==========================================================
+// Notifications (Phase 7c/6a) — read from tenant + admin UIs.
+// ==========================================================
+
+export type NotificationChannel = 'email' | 'sms' | 'whatsapp' | 'in_app'
+export type NotificationDeliveryStatus = 'pending' | 'sent' | 'failed' | 'skipped'
+
+export interface NotificationPreferenceRow {
+  event_kind: string
+  channel: NotificationChannel
+  enabled: boolean
+  explicit: boolean
+  pref_id: string | null
+  updated_at: string | null
+}
+
+export interface NotificationEventRow {
+  id: string
+  event_kind: string
+  subscription_id: string | null
+  subject: string | null
+  created_at: string
+  deliveries_sent?: number
+  deliveries_skipped?: number
+  deliveries_failed?: number
+}
+
+// ==========================================================
+// Reconciliation (Phase 7c/6c)
+// ==========================================================
+
+export interface QuotaLedgerRow {
+  quota_key: string
+  allowance_grant: number
+  topup: number
+  consumption: number
+  overage: number
+  adjustment: number
+  balance: number
+}
+
+export interface ReconciliationAnomaly {
+  severity: 'info' | 'low' | 'medium' | 'high'
+  kind: string
+  detail: string
+}
+
+export interface HistoryCountRow {
+  event: string
+  count: number
+}
+
+export interface TenantReconciliation {
+  tenant_id: string
+  billing_period: string
+  subscriptions: Array<{
+    id: string
+    status: SubscriptionStatus
+    product_code: string | null
+    product_name: string | null
+    product_version: number | null
+    tier_name: string | null
+    billing_cadence: string | null
+    resolved_plan_price_minor: number | null
+    resolved_plan_currency: string | null
+    billing_period_start: string | null
+    billing_period_end: string | null
+    next_renewal_at: string | null
+    trial_ends_at: string | null
+    cancel_at_period_end: boolean
+    auto_renew: boolean
+    grandfathered_at: string | null
+  }>
+  quota_ledger: QuotaLedgerRow[]
+  credit_notes: { pending_by_currency: Record<string, number> }
+  history_counts: HistoryCountRow[]
+  anomalies: ReconciliationAnomaly[]
+}
+
+export interface BulkOperationResult {
+  total: number
+  results: Array<{
+    id?: string
+    tenant_id?: string
+    ok: boolean
+    error?: string
+    code?: string | null
+    status?: string
+    tier_id?: string
+    note_id?: string
+  }>
+}
