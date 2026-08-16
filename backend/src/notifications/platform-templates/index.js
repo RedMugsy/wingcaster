@@ -16,6 +16,7 @@ export {
 } from './service.js'
 
 export { resolveTemplate } from './resolver.js'
+export { sendPlatformNotification } from './send.js'
 
 export {
   extractVariables,

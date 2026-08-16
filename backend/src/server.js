@@ -16,6 +16,7 @@ import { seedData } from './seed.js'
 import { signToken, authMiddleware } from './auth.js'
 import { registerTwoFactorRoutes, startSigninChallengeIfRequired } from './auth-2fa.js'
 import { registerPlatformTemplateAdminRoutes } from './notifications/platform-templates/routes.js'
+import { sendPlatformNotification } from './notifications/platform-templates/index.js'
 import {
   createAgentAccount,
   findAgentForUser,
@@ -1441,6 +1442,20 @@ app.post('/api/auth/verify-otp', validate(otpVerifySchema), async (req, res) => 
 
   if (result.status) return res.status(result.status).json({ error: result.error, ...(result.remaining_attempts === undefined ? {} : { remaining_attempts: result.remaining_attempts }) })
   const user = await findUserById(result.userId)
+
+  // Fire-and-forget welcome email. Deliberately non-blocking: a
+  // transient email failure must not fail the verification the user
+  // just completed successfully. The template can be edited by the
+  // platform admin via the admin API (commit 3); no template row is a
+  // no-op here rather than a failure.
+  sendPlatformNotification({
+    code: 'welcome',
+    to: user.email,
+    variables: { name: user.name, support_email: process.env.SUPPORT_EMAIL || '' },
+  }).catch((err) => {
+    logger.warn({ err: err.message, code: err.code, user_id: user.id }, 'welcome email failed (non-blocking)')
+  })
+
   res.json({
     token: signToken({
       id: user.id,
@@ -4756,6 +4771,25 @@ app.put('/api/social-channels/:platform', authMiddleware, async (req, res) => {
   }
   await insert('marketplace_connections', created)
   await logActivity({ type: 'social_connection_created', agent_id: req.user.id, meta: { platform, connection_id: created.id } })
+
+  // Fire the WhatsApp welcome guide on first-connect only (this is the
+  // insert path — the update path above fires no notification). Non-
+  // blocking: an email failure must not fail the connect the tenant
+  // just completed successfully. Template is edited by the platform
+  // admin via the admin API.
+  if (platform === 'whatsapp' && req.user?.email) {
+    const phoneNumber = enterpriseTargets.wa_phone_number_id
+      ? `+${String(enterpriseTargets.wa_phone_number_id).replace(/[^\d]/g, '')}`
+      : 'your registered number'
+    sendPlatformNotification({
+      code: 'whatsapp_welcome',
+      to: req.user.email,
+      variables: { name: req.user.name || 'there', phone_number: phoneNumber },
+    }).catch((err) => {
+      logger.warn({ err: err.message, code: err.code, agent_id: req.user.id }, 'whatsapp_welcome email failed (non-blocking)')
+    })
+  }
+
   res.json(sanitizeSocialConnection(created))
 })
 

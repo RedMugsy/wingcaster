@@ -1,22 +1,27 @@
 import logger from './logger.js'
 import { getEmailConfig, isEmailEnabled, sendEmail } from './notifications/email.js'
+import { sendPlatformNotification } from '../notifications/platform-templates/index.js'
 
 /**
  * OTP delivery for account signup, sign-in, and step-up flows.
  *
- * Every OTP goes through the unified transport in
- * `lib/notifications/email.js`. This module used to keep its own Resend and
- * nodemailer clients and its own OTP_FROM/SMTP_FROM/RESEND_FROM env vars —
- * three code paths and three from-address conventions for the same operation.
- * The upcoming platform-notification system needs one shared surface, and the
- * Microsoft Graph transport lands there rather than being duplicated here.
+ * The copy for each purpose is resolved from platform_message_templates
+ * via sendPlatformNotification — so a platform admin can edit the OTP
+ * email in the admin UI without a code change. Each purpose has its own
+ * template code so signin and step-up wording stays independent:
  *
- * The hardcoded copy below is a temporary default. It becomes an editable
- * platform_message_template in the next commits; wiring here does not change
- * when it does, only the source of `subject` / `text` / `html`.
+ *   signup   → template code 'signup_otp'
+ *   signin   → 'signin_otp'
+ *   stepup   → 'stepup_otp'
  *
- * WhatsApp / Messenger transports throw OTP_TRANSPORT_UNIMPLEMENTED until
- * real integrations are wired.
+ * Only signup_otp is seeded by migration 044; signin_otp and stepup_otp
+ * fall through to the hardcoded fallback below until an admin creates
+ * them. That fallback is what the whole product ran on before commit 4
+ * and keeps working forever as defence in depth — an accidentally-
+ * deleted seed cannot brick signup.
+ *
+ * WhatsApp / Messenger transports throw OTP_TRANSPORT_UNIMPLEMENTED
+ * until real integrations are wired.
  */
 
 /**
@@ -33,7 +38,12 @@ export function otpChannelsConfigured() {
   }
 }
 
-function otpCopy({ code, purpose }) {
+/**
+ * Fallback copy for each OTP purpose. Used when a template row is
+ * missing (accidentally-deleted seed) or a render fails. Keeps signup
+ * working even against a database that never received migration 044.
+ */
+function fallbackOtpCopy({ code, purpose }) {
   const purposeLine = purpose === 'signin'
     ? 'Use this code to finish signing in:'
     : purpose === 'stepup'
@@ -50,6 +60,13 @@ function otpCopy({ code, purpose }) {
   }
 }
 
+/** Template code per purpose — same mapping in one place. */
+function templateCodeFor(purpose) {
+  if (purpose === 'signin') return 'signin_otp'
+  if (purpose === 'stepup') return 'stepup_otp'
+  return 'signup_otp'
+}
+
 async function sendEmailOtp({ contact, code, purpose }) {
   if (!isEmailEnabled()) {
     const err = new Error(
@@ -61,15 +78,27 @@ async function sendEmailOtp({ contact, code, purpose }) {
     err.channel = 'email'
     throw err
   }
-  const { subject, text, html } = otpCopy({ code, purpose })
 
   try {
-    const result = await sendEmail({ to: contact, subject, body: text, html })
-    return { provider: result.provider, provider_message_id: result.provider_message_id }
+    const result = await sendPlatformNotification({
+      code: templateCodeFor(purpose),
+      to: contact,
+      variables: { code },
+      // Defence: an accidentally-deleted seed template must not brick
+      // signup. If no template row is found the fallback keeps the
+      // pre-migration behaviour verbatim.
+      fallback: fallbackOtpCopy({ code, purpose }),
+    })
+    return {
+      provider: result.provider,
+      provider_message_id: result.provider_message_id,
+      used_fallback: result.used_fallback,
+      used_template_id: result.used_template_id,
+    }
   } catch (err) {
     // Preserve the transport's specific code (GRAPH_SEND_FAILED, RESEND_403,
-    // …) so ops can tell WHY it failed, but rewrap with a stable OTP code so
-    // callers don't have to grep for provider strings.
+    // …) so ops can tell WHY it failed, but rewrap with a stable OTP code
+    // so callers don't have to grep for provider strings.
     const wrapped = new Error(`OTP email send failed: ${err.message}`)
     wrapped.code = 'OTP_TRANSPORT_FAILED'
     wrapped.channel = 'email'
@@ -99,7 +128,13 @@ export async function sendOtp({ channel, contact, code, purpose = 'signup' }) {
   if (channel === 'email' || channel === 'gmail') {
     const result = await sendEmailOtp({ contact, code, purpose })
     logger.info(
-      { channel, contact, purpose, provider: result.provider, provider_message_id: result.provider_message_id },
+      {
+        channel, contact, purpose,
+        provider: result.provider,
+        provider_message_id: result.provider_message_id,
+        used_template_id: result.used_template_id,
+        used_fallback: result.used_fallback,
+      },
       'OTP delivered via email',
     )
     return { delivered: true, channel, provider: result.provider }
