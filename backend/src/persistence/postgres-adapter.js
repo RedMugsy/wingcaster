@@ -55,11 +55,42 @@ export function getPool() {
   return _pool
 }
 
+/**
+ * Database URLs whose migrations have already been applied by someone else —
+ * in practice, the real-Postgres test harness (src/testing/postgres.js).
+ *
+ * Migrating on first use is correct in production, but wrong when the caller
+ * has already migrated. The test harness applies all migrations into an
+ * isolated scratch schema via `runMigrations({ schemaMap })`. `loadDb()` knew
+ * nothing about that and re-ran them unscoped, which meant:
+ *
+ *   * the migrations ledger it consulted was `"public".schema_migrations`,
+ *     empty on a fresh database, so every migration looked unapplied; and
+ *   * replaying from 001 reached 024_market_pricing.sql, which hardcodes
+ *     `public.properties` — a table that only exists in the scratch schema.
+ *
+ * The result was a 42P01 on first DAL call, failing the whole file. Marking
+ * the URL as already migrated is the fix; production sets no marks and its
+ * migrate-on-boot behaviour is unchanged.
+ */
+const _preMigratedUrls = new Set()
+
+export function markMigrationsApplied(databaseUrl) {
+  if (databaseUrl) _preMigratedUrls.add(databaseUrl)
+}
+
+export function unmarkMigrationsApplied(databaseUrl) {
+  if (databaseUrl) _preMigratedUrls.delete(databaseUrl)
+}
+
 export async function loadDb() {
-  if (!_migrationsRun) {
-    await runMigrations()
+  if (_migrationsRun) return
+  if (_preMigratedUrls.has(resolveDatabaseUrl())) {
     _migrationsRun = true
+    return
   }
+  await runMigrations()
+  _migrationsRun = true
 }
 
 export async function closeDb() {

@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto'
 import pg from 'pg'
 import { describe } from 'vitest'
 import { runMigrations } from '../persistence/migrations/runner.js'
+import { markMigrationsApplied, unmarkMigrationsApplied } from '../persistence/postgres-adapter.js'
 
 const { Pool } = pg
 let skipNoticePrinted = false
@@ -83,6 +84,11 @@ export async function createTestDatabase(name) {
     throw error
   }
 
+  // Every migration is now applied inside the scratch schemas. Tell the
+  // adapter so its migrate-on-first-use does not replay them unscoped against
+  // the real `public` schema — see markMigrationsApplied for what that broke.
+  markMigrationsApplied(url)
+
   let tornDown = false
   return {
     url,
@@ -91,6 +97,7 @@ export async function createTestDatabase(name) {
     async teardown() {
       if (tornDown) return
       tornDown = true
+      unmarkMigrationsApplied(url)
       await migrationPool.end()
       try {
         for (const schema of [...schemaList].reverse()) {
