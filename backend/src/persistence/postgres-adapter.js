@@ -9,6 +9,7 @@ import pg from 'pg'
 import { randomUUID } from 'crypto'
 import { AsyncLocalStorage } from 'async_hooks'
 import dbConfig, { resolveDatabaseUrl, setDatabaseUrl } from './config.js'
+import logger from '../lib/logger.js'
 import { logQuery } from './metrics.js'
 import { runMigrations } from './migrations/runner.js'
 import {
@@ -50,6 +51,14 @@ export function getPool() {
       idleTimeoutMillis: 60000,
       keepAlive: true,
       keepAliveInitialDelayMillis: 10000,
+    })
+    // node-postgres emits 'error' on IDLE clients — a server restart, an
+    // administrator terminating the backend (57P01), a dropped network link.
+    // An EventEmitter 'error' with no listener is rethrown by Node and takes
+    // the process down, so without this a single Postgres restart would crash
+    // the API rather than letting the pool reconnect on the next query.
+    _pool.on('error', (err) => {
+      logger.warn({ err: err.message, code: err.code }, 'postgres pool: idle client error (connection will be replaced)')
     })
   }
   return _pool
