@@ -53,7 +53,7 @@ const OTP_TEMPLATE = {
 }
 
 skipIfNoPostgres()('platform-templates service (real Postgres)', () => {
-  it('creates a template and stamps version 1 in the history', async () => {
+  it('creates a template at version 1 with no history entries yet', async () => {
     await withTestDb(async (databaseUrl) => {
       configure({ databaseUrl, force: true })
       try {
@@ -66,10 +66,13 @@ skipIfNoPostgres()('platform-templates service (real Postgres)', () => {
         expect(created.is_active).toBe(true)
         expect(created.created_by).toBe('admin-1')
 
+        // History holds only SUPERSEDED versions. The parent row IS the
+        // canonical version-1 state, so at create-time history is empty.
+        // Writing v1 here would collide with the first update's archive
+        // (which also copies v1 into history) and violate the
+        // (template_id, version) UNIQUE.
         const history = await getVersionHistory(created.id)
-        expect(history).toHaveLength(1)
-        expect(history[0].version).toBe(1)
-        expect(history[0].change_note).toMatch(/initial/i)
+        expect(history).toEqual([])
       } finally {
         await closeDb()
       }
@@ -80,8 +83,13 @@ skipIfNoPostgres()('platform-templates service (real Postgres)', () => {
     await withTestDb(async (databaseUrl) => {
       configure({ databaseUrl, force: true })
       try {
+        // Override subject too — the base template's subject contains
+        // {{code}}, and required-variable enforcement checks any part
+        // (subject, html, text), so leaving the subject intact would
+        // satisfy the requirement and mask the check.
         await expect(createTemplate({
           ...OTP_TEMPLATE,
+          subject: 'Welcome to Wingcaster',
           html_body: '<p>Hello, welcome</p>',
           text_body: 'Hello, welcome',
           required_variables: ['code'],
@@ -166,13 +174,14 @@ skipIfNoPostgres()('platform-templates service (real Postgres)', () => {
         expect(updated.updated_by).toBe('admin-2')
 
         const history = await getVersionHistory(created.id)
-        // Version 1 (initial) + version 2 (the PRE-update snapshot copied
-        // from the row before the change landed).
-        expect(history.map((h) => h.version)).toEqual([2, 1])
-        // The archived version is the one that was current when the
-        // update fired — so its subject matches version 1's content.
-        expect(history[0].version).toBe(2)
+        // History holds only SUPERSEDED versions. The parent is now v2,
+        // and v1's pre-change snapshot is the only archived row.
+        expect(history.map((h) => h.version)).toEqual([1])
         expect(history[0].change_note).toBe('Sharpened subject line')
+        // The archived row carries version-1 CONTENT, not version-1
+        // metadata — the label is what the change note stamped when
+        // v1 was superseded.
+        expect(history[0].subject).toBe(OTP_TEMPLATE.subject)
       } finally {
         await closeDb()
       }
@@ -197,8 +206,10 @@ skipIfNoPostgres()('platform-templates service (real Postgres)', () => {
         expect(still.version).toBe(1)
         expect(still.html_body).toContain('{{code}}')
 
+        // History was empty at v1 and should still be empty (no
+        // superseded version to archive).
         const history = await getVersionHistory(created.id)
-        expect(history).toHaveLength(1)
+        expect(history).toEqual([])
       } finally {
         await closeDb()
       }
@@ -223,11 +234,12 @@ skipIfNoPostgres()('platform-templates service (real Postgres)', () => {
         expect(reverted.subject).toBe(OTP_TEMPLATE.subject)
 
         const history = await getVersionHistory(created.id)
-        // 1 (initial) + 2 + 3 (both archived when their successor was
-        // written) + the pre-revert state = 4 rows.
-        expect(history).toHaveLength(4)
-        // The most recent archive carries the revert note.
-        expect(history[0].version).toBe(4)
+        // v1 -> v2: archives v1.
+        // v2 -> v3: archives v2.
+        // revert: archives v3 (as "reverted to version 1"), writes v4
+        // with v1's content.
+        // → 3 archived rows: v1, v2, v3.
+        expect(history.map((h) => h.version)).toEqual([3, 2, 1])
         expect(history[0].change_note).toMatch(/Reverted to version 1/i)
       } finally {
         await closeDb()

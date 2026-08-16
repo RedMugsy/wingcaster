@@ -148,9 +148,12 @@ export async function createTemplate(input, actor = null) {
       }
       throw err
     }
-    const created = result.rows[0]
-    await writeVersionRow(client, created, { changeNote: 'Initial version', actor })
-    return created
+    // NO history row here. The parent template row IS the canonical
+    // version-1 state; writing history at create time would collide
+    // with the first update's archive of the pre-change (still v1)
+    // state and violate UNIQUE(template_id, version). History only
+    // ever holds SUPERSEDED versions.
+    return result.rows[0]
   })
 
   return row
