@@ -119,6 +119,21 @@ export function requireElevated({ maxAgeSeconds = ELEVATION_TTL_SECONDS } = {}) 
   }
 }
 
+/**
+ * Normalise a timestamp for comparison against a JWT claim.
+ *
+ * `node-postgres` hydrates `timestamptz` columns into JS Date objects, while
+ * the claim inside the token is always an ISO string — JSON has no date type.
+ * Comparing the two directly with `!==` is therefore ALWAYS true, which
+ * rejected every authenticated request with "Session verification required".
+ * It went unnoticed because there are no live tenants and the gated tests that
+ * would have caught it had never run in CI.
+ */
+function isoTimestamp(value) {
+  if (value instanceof Date) return value.toISOString()
+  return value
+}
+
 export async function authMiddleware(req, res, next) {
   const authHeader = req.headers.authorization
   if (!authHeader?.startsWith('Bearer ')) {
@@ -144,7 +159,7 @@ export async function authMiddleware(req, res, next) {
   if (!user || !agent) {
     return res.status(401).json({ error: 'Account no longer exists' })
   }
-  if (!user.verified || !user.verified_at || decoded.verified_at !== user.verified_at) {
+  if (!user.verified || !user.verified_at || decoded.verified_at !== isoTimestamp(user.verified_at)) {
     return res.status(401).json({ error: 'Session verification required' })
   }
 
