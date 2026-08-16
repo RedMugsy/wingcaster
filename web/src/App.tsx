@@ -49,6 +49,9 @@ import { ProductDetailPage } from '@/pages/admin/commercial-pricing/ProductDetai
 import { SubscriptionsAdminPage } from '@/pages/admin/commercial-pricing/SubscriptionsAdminPage'
 import { SubscriptionDetailPage } from '@/pages/admin/commercial-pricing/SubscriptionDetailPage'
 import { CreditNotesAdminPage } from '@/pages/admin/commercial-pricing/CreditNotesAdminPage'
+import { PlansPage } from '@/pages/PlansPage'
+import { MySubscriptionPage } from '@/pages/MySubscriptionPage'
+import { MyCreditNotesPage } from '@/pages/MyCreditNotesPage'
 import { InspectorPage } from '@/pages/inspector/InspectorPage'
 import { AreaProfilePage } from '@/pages/AreaProfilePage'
 import { PublicAgencyPage } from '@/pages/PublicAgencyPage'
@@ -112,6 +115,9 @@ function AppShell() {
           <Route path="/admin/commercial-pricing/subscriptions" element={<SubscriptionsAdminPage />} />
           <Route path="/admin/commercial-pricing/subscriptions/:id" element={<SubscriptionDetailPage />} />
           <Route path="/admin/commercial-pricing/credit-notes" element={<CreditNotesAdminPage />} />
+          <Route path="/pricing" element={<PlansPage />} />
+          <Route path="/subscription" element={<MySubscriptionPage />} />
+          <Route path="/credit-notes" element={<MyCreditNotesPage />} />
           <Route path="/agency/whatsapp-listings" element={<AgencyWhatsAppListingsPage />} />
           <Route path="/agent/whatsapp-listings" element={<AgentWhatsAppListingsPage />} />
           <Route path="/areas/:slug" element={<AreaProfilePage />} />

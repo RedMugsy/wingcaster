@@ -106,6 +106,20 @@ export function formatShortIso(iso: string | null | undefined): string {
 }
 
 /**
+ * Whole days from `now` until `iso`. Returns null when iso is invalid,
+ * null/undefined, or already past. Rounded up (a 12-hour remainder still
+ * reads as 1 day left, matching the "your trial ends in N day(s)" UX).
+ */
+export function daysUntilIso(iso: string | null | undefined, now: Date = new Date()): number | null {
+  if (!iso) return null
+  const target = new Date(iso).getTime()
+  if (Number.isNaN(target)) return null
+  const ms = target - now.getTime()
+  if (ms <= 0) return null
+  return Math.ceil(ms / (24 * 60 * 60 * 1000))
+}
+
+/**
  * Compute how many minor units per DAY a plan costs, given period bounds.
  * Used by the admin subscription-detail proration preview.
  */

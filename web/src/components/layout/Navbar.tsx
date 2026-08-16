@@ -3,7 +3,7 @@ import { useState } from 'react'
 import {
   Menu, X, LogIn, UserPlus, LayoutDashboard, LogOut, User, Inbox,
   ListTodo, Users as UsersIcon, Building2, Megaphone, Calendar, Radar,
-  Coins, ChevronDown,
+  Coins, ChevronDown, CreditCard,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
@@ -116,6 +116,26 @@ export function Navbar() {
                 <User className="h-4 w-4 text-muted-foreground" />
                 <span className="text-sm font-medium">{agent.name}</span>
               </div>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button className="flex items-center gap-1 rounded-md p-1.5 text-sm text-muted-foreground hover:bg-accent">
+                    <CreditCard className="h-4 w-4" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-48">
+                  <DropdownMenuLabel>Billing</DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem asChild>
+                    <Link to="/pricing">Plans</Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem asChild>
+                    <Link to="/subscription">My subscription</Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem asChild>
+                    <Link to="/credit-notes">My credit notes</Link>
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
               <Button variant="ghost" size="sm" className="gap-1.5" onClick={logout}>
                 <LogOut className="h-4 w-4" />
               </Button>

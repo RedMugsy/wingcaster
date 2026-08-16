@@ -8,6 +8,7 @@ import {
   SUBSCRIPTION_STATUS_CLASSES,
   SUBSCRIPTION_STATUS_LABELS,
   dailyRateMinor,
+  daysUntilIso,
   formatCreditNoteAmount,
   formatMoneyMinor,
   formatRelativeIso,
@@ -130,6 +131,32 @@ describe('dailyRateMinor', () => {
   it('rounds to nearest minor unit', () => {
     // $10 across 7 days = 142.857... → 143
     expect(dailyRateMinor(1000, '2026-08-01T00:00:00Z', '2026-08-08T00:00:00Z')).toBe(143)
+  })
+})
+
+describe('daysUntilIso', () => {
+  const now = new Date('2026-08-16T00:00:00Z')
+
+  it('returns null for null / invalid / undefined inputs', () => {
+    expect(daysUntilIso(null, now)).toBeNull()
+    expect(daysUntilIso(undefined, now)).toBeNull()
+    expect(daysUntilIso('bogus', now)).toBeNull()
+  })
+
+  it('returns null for already-past dates', () => {
+    expect(daysUntilIso('2026-08-15T00:00:00Z', now)).toBeNull()
+    expect(daysUntilIso('2026-08-16T00:00:00Z', now)).toBeNull() // exactly now
+  })
+
+  it('rounds partial days up so a 12h remainder still reads as "1 day left"', () => {
+    expect(daysUntilIso('2026-08-16T12:00:00Z', now)).toBe(1)
+    expect(daysUntilIso('2026-08-17T00:00:00Z', now)).toBe(1)
+    expect(daysUntilIso('2026-08-17T00:00:01Z', now)).toBe(2)
+  })
+
+  it('handles multi-day gaps', () => {
+    expect(daysUntilIso('2026-08-23T00:00:00Z', now)).toBe(7)
+    expect(daysUntilIso('2027-08-16T00:00:00Z', now)).toBe(365)
   })
 })
 
