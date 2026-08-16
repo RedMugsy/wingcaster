@@ -116,10 +116,16 @@ import {
   parseSMSStatusWebhook,
 } from './lib/notifications/sms.js'
 import {
+  getEmailConfig,
   isEmailEnabled,
   parseIncomingEmailWebhook,
   parseEmailStatusWebhook,
 } from './lib/notifications/email.js'
+import {
+  getGraphConfig,
+  isGraphConfigured,
+  _resetTokenCache as _resetGraphTokenCache,
+} from './lib/notifications/transports/graph.js'
 import {
   isInstagramEnabled,
   parseIncomingInstagramCommentWebhook,
@@ -7724,6 +7730,105 @@ app.get('/api/health', async (req, res) => {
     x: isXEnabled() ? 'enabled' : 'disabled',
   }
   res.status(postgresHealth.ok ? 200 : 503).json(readiness)
+})
+
+/**
+ * Email transport diagnostic.
+ *
+ * Unauthenticated on purpose — you need to be able to reach this before you
+ * have a working way to send yourself a login OTP. Reveals nothing sensitive:
+ * no tokens, no full addresses, no client secrets. Reports:
+ *
+ *   * which provider the shared dispatcher selected
+ *   * whether it considers itself configured
+ *   * for Graph specifically, whether the OAuth2 credentials can actually
+ *     obtain a token from Microsoft (this is where wrong tenant IDs, wrong
+ *     secrets, and missing admin consent surface)
+ *
+ * A green report here means "credentials will work when a send is attempted".
+ * It does not attempt an actual sendMail — that would need a recipient, and
+ * we would rather not accidentally spam anyone from a health check.
+ */
+app.get('/api/health/email', async (req, res) => {
+  const cfg = getEmailConfig()
+  const provider = cfg.provider || null
+  const enabled = isEmailEnabled()
+
+  // Mask everything but the domain so a screenshot of this endpoint is safe
+  // to share in a support ticket or a Slack thread.
+  const maskAddress = (addr) => {
+    if (!addr) return null
+    const at = addr.indexOf('@')
+    if (at <= 0) return '***'
+    return `***${addr.slice(at)}`
+  }
+
+  const result = {
+    provider,
+    enabled,
+    from: maskAddress(
+      provider === 'graph' ? cfg.graphFrom
+      : provider === 'resend' ? cfg.resendFrom
+      : provider === 'sendgrid' ? cfg.sendgridFrom
+      : provider === 'smtp' ? cfg.smtpFrom
+      : provider === 'ses' ? cfg.sesFrom
+      : null,
+    ),
+    timestamp: new Date().toISOString(),
+  }
+
+  if (provider === 'graph') {
+    result.graph = {
+      tenant_id_present: Boolean(process.env.AZURE_TENANT_ID),
+      client_id_present: Boolean(process.env.AZURE_CLIENT_ID),
+      client_secret_present: Boolean(process.env.AZURE_CLIENT_SECRET),
+      mail_from_present: Boolean(getGraphConfig().from),
+    }
+
+    if (isGraphConfigured()) {
+      // Force a fresh acquisition. A cached token from an earlier successful
+      // request would mask a subsequent tenant-side breakage (rotated secret,
+      // revoked consent), which is the exact thing this endpoint exists to
+      // catch. Import lazily so the module load has already happened.
+      try {
+        _resetGraphTokenCache()
+        const { getGraphConfig: cfgFn } = await import('./lib/notifications/transports/graph.js')
+        // Minimal token acquisition, reusing the transport's own path.
+        const graphCfg = cfgFn()
+        const params = new URLSearchParams({
+          client_id: graphCfg.clientId,
+          client_secret: graphCfg.clientSecret,
+          scope: 'https://graph.microsoft.com/.default',
+          grant_type: 'client_credentials',
+        })
+        const tokRes = await fetch(
+          `https://login.microsoftonline.com/${encodeURIComponent(graphCfg.tenantId)}/oauth2/v2.0/token`,
+          { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: params.toString() },
+        )
+        const data = await tokRes.json().catch(() => ({}))
+        if (tokRes.ok && data?.access_token) {
+          result.graph.token_check = 'ok'
+          result.graph.token_expires_in_seconds = Number(data.expires_in || 0)
+        } else {
+          result.graph.token_check = 'failed'
+          // Microsoft's error codes are stable and diagnostic on their own —
+          // AADSTS7000215 (wrong secret), AADSTS65001 (consent missing),
+          // AADSTS700016 (wrong tenant / client id). Passing them through
+          // means an admin can search for the exact code.
+          result.graph.error_code = data?.error || `HTTP_${tokRes.status}`
+          result.graph.error_description = data?.error_description || null
+        }
+      } catch (err) {
+        result.graph.token_check = 'error'
+        result.graph.error_message = err?.message || String(err)
+      }
+    } else {
+      result.graph.token_check = 'skipped_missing_config'
+    }
+  }
+
+  const httpStatus = enabled && (provider !== 'graph' || result.graph?.token_check === 'ok') ? 200 : 503
+  res.status(httpStatus).json(result)
 })
 
 app.get('/api/ready', async (req, res) => {
