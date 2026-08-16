@@ -127,6 +127,11 @@ export async function createTestDatabase(name) {
 
   const url = urlForDatabase(databaseUrl, database)
   const migrationPool = new Pool({ connectionString: url })
+  // DROP DATABASE ... WITH (FORCE) terminates whatever is still connected,
+  // and pg surfaces that as an 'error' on the idle client. Unhandled, it
+  // fails the run after every test has already passed.
+  migrationPool.on('error', () => {})
+  adminPool.on('error', () => {})
 
   try {
     // The postgis image seeds template1, so a fresh database usually inherits
@@ -138,11 +143,15 @@ export async function createTestDatabase(name) {
     // `commercial`, `wa_listings`, … schemas inside this database.
     await runMigrations({ pool: migrationPool })
   } catch (error) {
-    await migrationPool.end()
+    await migrationPool.end().catch(() => {})
     await dropDatabase(adminPool, database).catch(() => {})
     await adminPool.end()
     throw error
   }
+
+  // Nothing needs this pool once the schema exists, and holding it open until
+  // teardown just leaves a connection for the FORCE drop to kill.
+  await migrationPool.end().catch(() => {})
 
   let tornDown = false
   return {
@@ -151,7 +160,6 @@ export async function createTestDatabase(name) {
     async teardown() {
       if (tornDown) return
       tornDown = true
-      await migrationPool.end()
       try {
         await dropDatabase(adminPool, database)
       } finally {
