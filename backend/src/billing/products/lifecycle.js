@@ -45,6 +45,8 @@ import { recordEvent } from './subscription-history.js'
 import { resolveEffectivePrice } from './pricing-overrides.js'
 import { issueNote } from './credit-notes.js'
 import { prorateMigration } from './proration.js'
+import { notifyForHistoryEvent, notifyCreditNoteIssued } from '../notifications/wire-hooks.js'
+import logger from '../../lib/logger.js'
 
 const SUBSCRIPTIONS = 'billing_subscriptions'
 
@@ -294,7 +296,21 @@ export async function createSubscription(input) {
     return row
   })
 
-  return await getSubscription(created.id)
+  const final = await getSubscription(created.id)
+  fireAndForgetNotify(final, 'created')
+  return final
+}
+
+/**
+ * Fire-and-forget notification dispatch. Never blocks the lifecycle
+ * flow; failures are logged but not propagated. Called AFTER the
+ * lifecycle transaction has committed so we don't emit against a
+ * rolled-back subscription state.
+ */
+function fireAndForgetNotify(subscription, historyEvent, opts = {}) {
+  Promise.resolve()
+    .then(() => notifyForHistoryEvent(subscription, historyEvent, opts))
+    .catch((err) => logger.warn({ err: err.message, historyEvent }, 'notify fire-and-forget failed'))
 }
 
 /**
@@ -345,7 +361,9 @@ export async function endTrial(subscriptionId, { actorId = null, actorType = 'sy
     })
   })
 
-  return await getSubscription(sub.id)
+  const final = await getSubscription(sub.id)
+  fireAndForgetNotify(final, 'trial_ended', { actorId })
+  return final
 }
 
 /**
@@ -399,7 +417,9 @@ export async function renewSubscription(subscriptionId, { actorId = null, actorT
     })
   })
 
-  return await getSubscription(sub.id)
+  const final = await getSubscription(sub.id)
+  fireAndForgetNotify(final, 'renewed', { actorId })
+  return final
 }
 
 /**
@@ -439,6 +459,7 @@ export async function cancelSubscription(subscriptionId, {
       toState: snapshot(updated),
       reason, actorId, actorType,
     })
+    fireAndForgetNotify(updated, 'cancelled_at_period_end', { actorId })
     return updated
   }
 
@@ -462,6 +483,7 @@ export async function cancelSubscription(subscriptionId, {
     toState: snapshot(updated),
     reason, actorId, actorType,
   })
+  fireAndForgetNotify(updated, 'cancelled_immediately', { actorId })
   return updated
 }
 
@@ -492,6 +514,7 @@ export async function expireSubscription(subscriptionId, { reason = null, actorI
     toState: snapshot(updated),
     reason, actorId, actorType,
   })
+  fireAndForgetNotify(updated, 'expired', { actorId })
   return updated
 }
 
@@ -521,6 +544,7 @@ export async function pauseSubscription(subscriptionId, { reason = null, actorId
     toState: snapshot(updated),
     reason, actorId, actorType,
   })
+  fireAndForgetNotify(updated, 'paused', { actorId })
   return updated
 }
 
@@ -579,7 +603,9 @@ export async function resumeSubscription(subscriptionId, { actorId = null, actor
       metadata: { rolled_period_forward: didRoll, allowances_granted: allowances },
     })
   })
-  return await getSubscription(sub.id)
+  const final = await getSubscription(sub.id)
+  fireAndForgetNotify(final, 'resumed', { actorId })
+  return final
 }
 
 /**
@@ -609,6 +635,7 @@ export async function markPastDue(subscriptionId, { reason = null, actorId = nul
     toState: snapshot(updated),
     reason, actorId, actorType,
   })
+  fireAndForgetNotify(updated, 'past_due', { actorId })
   return updated
 }
 
@@ -638,6 +665,7 @@ export async function resolvePastDue(subscriptionId, { reason = null, actorId = 
     toState: snapshot(updated),
     reason, actorId, actorType,
   })
+  fireAndForgetNotify(updated, 'reactivated', { actorId })
   return updated
 }
 
@@ -847,6 +875,16 @@ export async function migrateSubscription(subscriptionId, input = {}) {
     return after
   })
 
+  fireAndForgetNotify(updated, event, { actorId: input.actorId })
+  // If a proration credit note was issued, ALSO notify — but skip if it's
+  // one of the proration_* types (notifyCreditNoteIssued handles the
+  // "don't spam proration" rule internally).
+  const finalCreditNote = updated?.__creditNote || null
+  if (finalCreditNote) {
+    Promise.resolve()
+      .then(() => notifyCreditNoteIssued(finalCreditNote, { subscription: updated, actorId: input.actorId }))
+      .catch(() => {})
+  }
   return updated
 }
 

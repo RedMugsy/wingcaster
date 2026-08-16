@@ -192,6 +192,29 @@ const TABLE_MAP = {
       'expires_at', 'reason', 'actor_id', 'actor_type', 'metadata',
     ],
   },
+  notification_events: {
+    schema: 'commercial',
+    table: 'notification_events',
+    columns: [
+      'event_kind', 'tenant_id', 'subscription_id', 'subject', 'context',
+    ],
+  },
+  notification_deliveries: {
+    schema: 'commercial',
+    table: 'notification_deliveries',
+    columns: [
+      'event_id', 'channel', 'destination', 'status', 'skip_reason',
+      'provider', 'provider_message_id', 'error_code', 'error_message',
+      'attempts', 'attempted_at', 'succeeded_at', 'failed_at', 'metadata',
+    ],
+  },
+  notification_preferences: {
+    schema: 'commercial',
+    table: 'notification_preferences',
+    columns: [
+      'tenant_id', 'event_kind', 'channel', 'enabled', 'updated_by', 'metadata',
+    ],
+  },
   // Aliases used by billing/entitlements.js and billing/ledger.js
   subscriptions: {
     schema: 'commercial',

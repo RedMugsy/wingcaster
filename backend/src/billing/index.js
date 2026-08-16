@@ -21,6 +21,7 @@ import {
   getActiveRateCard, listTerritories, listZones, listCities,
 } from './pricing/index.js'
 import { registerProductCatalogRoutes, startRenewalScheduler } from './products/index.js'
+import { registerNotificationRoutes } from './notifications/index.js'
 
 export const MODULE_NAME = 'billing'
 
@@ -65,6 +66,7 @@ export function createModule() {
       registerBillingRoutes(app, { authMiddleware, requirePlatformAdmin })
       registerPricingRoutes(app, { authMiddleware, requirePlatformAdmin })
       registerProductCatalogRoutes(app, { authMiddleware, requirePlatformAdmin })
+      registerNotificationRoutes(app, { authMiddleware, requirePlatformAdmin })
     },
   }
 }
