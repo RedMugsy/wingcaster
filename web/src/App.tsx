@@ -36,6 +36,10 @@ import { HistoricalTransactionsPage } from '@/pages/HistoricalTransactionsPage'
 import { CommandCenterPage } from '@/pages/CommandCenterPage'
 import { RoutingSettingsPage } from '@/pages/RoutingSettingsPage'
 import { MessageTemplatesPage } from '@/pages/MessageTemplatesPage'
+// Platform-notifications admin — separate from the agent-level
+// /message-templates page above. Lives at /admin/message-templates.
+import { MessageTemplatesPage as PlatformMessageTemplatesPage } from '@/pages/admin/platform-templates/MessageTemplatesPage'
+import { TemplateEditPage as PlatformTemplateEditPage } from '@/pages/admin/platform-templates/TemplateEditPage'
 import { AdminWhatsAppListingsPage } from '@/pages/admin/whatsapp-listings/AdminWhatsAppListingsPage'
 import { AgencyWhatsAppListingsPage } from '@/pages/agency/whatsapp-listings/AgencyWhatsAppListingsPage'
 import { AgentWhatsAppListingsPage } from '@/pages/agent/whatsapp-listings/AgentWhatsAppListingsPage'
@@ -109,6 +113,9 @@ function AppShell() {
           <Route path="/command-center" element={<CommandCenterPage />} />
           <Route path="/operations" element={<CommandCenterPage />} />
           <Route path="/admin/whatsapp-listings" element={<AdminWhatsAppListingsPage />} />
+          <Route path="/admin/message-templates" element={<PlatformMessageTemplatesPage />} />
+          <Route path="/admin/message-templates/new" element={<PlatformTemplateEditPage />} />
+          <Route path="/admin/message-templates/:id" element={<PlatformTemplateEditPage />} />
           <Route path="/admin/areas" element={<AdminAreasPage />} />
           <Route path="/admin/scoring" element={<AdminScoringPage />} />
           <Route path="/admin/pricing" element={<PricingAdminPage />} />

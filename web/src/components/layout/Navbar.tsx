@@ -3,7 +3,7 @@ import { useState } from 'react'
 import {
   Menu, X, LogIn, UserPlus, LayoutDashboard, LogOut, User, Inbox,
   ListTodo, Users as UsersIcon, Building2, Megaphone, Calendar, Radar,
-  Coins, ChevronDown, CreditCard,
+  Coins, ChevronDown, CreditCard, Shield, MessageSquare,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
@@ -44,6 +44,15 @@ export function Navbar() {
     { path: '/admin/commercial-pricing/reconciliation', label: 'Reconciliation' },
   ]
   const commercialPricingActive = location.pathname.startsWith('/admin/commercial-pricing')
+
+  // Platform-admin surfaces that aren't part of commercial pricing.
+  // Kept as a separate dropdown so the Commercial menu stays scoped.
+  const platformAdminSubItems = [
+    { path: '/admin/message-templates', label: 'Message templates', icon: MessageSquare },
+  ]
+  const platformAdminActive = platformAdminSubItems.some((it) =>
+    location.pathname === it.path || location.pathname.startsWith(`${it.path}/`),
+  )
 
   return (
     <nav className="sticky top-0 z-50 w-full border-b bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/60">
@@ -103,6 +112,40 @@ export function Navbar() {
                       <Link to={sub.path}>{sub.label}</Link>
                     </DropdownMenuItem>
                   ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            ) : null}
+            {isAdmin ? (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    className={`flex items-center gap-1.5 rounded-md px-3 py-2 text-sm font-medium transition-colors ${
+                      platformAdminActive
+                        ? 'text-white'
+                        : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
+                    }`}
+                    style={platformAdminActive ? { backgroundColor: brand.primaryColor } : undefined}
+                    aria-label="Platform admin menu"
+                  >
+                    <Shield className="h-4 w-4" />
+                    Platform
+                    <ChevronDown className="h-3.5 w-3.5" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-56">
+                  <DropdownMenuLabel>Platform admin</DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  {platformAdminSubItems.map((sub) => {
+                    const Icon = sub.icon
+                    return (
+                      <DropdownMenuItem key={sub.path} asChild>
+                        <Link to={sub.path} className="flex items-center gap-2">
+                          <Icon className="h-4 w-4" />
+                          {sub.label}
+                        </Link>
+                      </DropdownMenuItem>
+                    )
+                  })}
                 </DropdownMenuContent>
               </DropdownMenu>
             ) : null}
@@ -207,6 +250,28 @@ export function Navbar() {
                     {sub.label}
                   </Link>
                 ))}
+              </div>
+            ) : null}
+            {isAdmin ? (
+              <div className="mt-2 border-t pt-3">
+                <div className="mb-1 flex items-center gap-2 px-3 text-xs font-semibold uppercase text-muted-foreground">
+                  <Shield className="h-3.5 w-3.5" />
+                  Platform
+                </div>
+                {platformAdminSubItems.map((sub) => {
+                  const Icon = sub.icon
+                  return (
+                    <Link
+                      key={sub.path}
+                      to={sub.path}
+                      onClick={() => setMobileOpen(false)}
+                      className="flex items-center gap-2 rounded-md px-6 py-2 text-sm font-medium text-muted-foreground hover:bg-accent"
+                    >
+                      <Icon className="h-4 w-4" />
+                      {sub.label}
+                    </Link>
+                  )
+                })}
               </div>
             ) : null}
             <div className="mt-2 flex flex-col gap-2 border-t pt-3">
