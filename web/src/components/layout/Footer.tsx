@@ -15,7 +15,25 @@ export function Footer() {
               <img src={brand.logoUrl} alt={brand.name} className="h-8 w-auto" />
               <span className="font-display text-lg tracking-tight">{brand.name.toUpperCase()}</span>
             </div>
-            <p className="text-sm text-muted-foreground">{brand.tagline}</p>
+            {/*
+              Typeset the three tagline lines independently: hero in
+              display-weight foreground, subhead in muted body, signoff
+              in the accent-adjacent gold that echoes the brand token.
+              A single string with newlines would collapse in HTML; this
+              gives each line its own visual weight the way the brief
+              intends.
+            */}
+            <div className="space-y-1">
+              <p className="font-display text-lg font-semibold tracking-tight text-foreground">
+                {brand.taglineHero}
+              </p>
+              <p className="text-sm text-muted-foreground">
+                {brand.taglineSubhead}
+              </p>
+              <p className="font-display text-sm tracking-wide text-[color:var(--reb-gold-700)]">
+                {brand.taglineSignoff}
+              </p>
+            </div>
           </div>
 
           <div>

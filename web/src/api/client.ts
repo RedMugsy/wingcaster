@@ -1704,6 +1704,71 @@ export const api = {
     fetchJson('/admin/billing/subscriptions/bulk-resume', { method: 'POST', body: JSON.stringify(body) }),
   bulkIssueCreditNotes: (body: { entries: Array<{ tenant_id: string; subscription_id?: string; type: CreditNoteType; amount_minor: number; currency: string; reason?: string; expires_at?: string; metadata?: Record<string, unknown> }> }): Promise<BulkOperationResult> =>
     fetchJson('/admin/billing/credit-notes/bulk-issue', { method: 'POST', body: JSON.stringify(body) }),
+
+  // ============================================================
+  // Platform message templates (admin)
+  //
+  // Distinct from the tenant message_templates surface (the agent-owned
+  // outbound copy). These are the platform's transactional messages TO
+  // tenants — signup OTP, welcome, WhatsApp guide. Every WRITE endpoint
+  // is step-up-gated on the backend (requireElevated); the client sends
+  // the elevated token automatically via headers() when it's present in
+  // sessionStorage.
+  // ============================================================
+
+  listPlatformTemplates: (opts: import('@/types/platformTemplates').PlatformTemplateListFilters = {}): Promise<{
+    templates: import('@/types/platformTemplates').PlatformMessageTemplate[]
+  }> => {
+    const parts: string[] = []
+    if (opts.code) parts.push(`code=${encodeURIComponent(opts.code)}`)
+    if (opts.channel) parts.push(`channel=${encodeURIComponent(opts.channel)}`)
+    if (opts.category) parts.push(`category=${encodeURIComponent(opts.category)}`)
+    if (opts.language) parts.push(`language=${encodeURIComponent(opts.language)}`)
+    if (opts.territoryId) parts.push(`territoryId=${encodeURIComponent(opts.territoryId)}`)
+    if (opts.includeInactive) parts.push('includeInactive=1')
+    return fetchJson(`/admin/message-templates${parts.length ? '?' + parts.join('&') : ''}`)
+  },
+
+  getPlatformTemplate: (id: string): Promise<{ template: import('@/types/platformTemplates').PlatformMessageTemplate }> =>
+    fetchJson(`/admin/message-templates/${id}`),
+
+  getPlatformTemplateVersions: (id: string): Promise<{
+    current_version: number
+    versions: import('@/types/platformTemplates').PlatformMessageTemplateVersion[]
+  }> => fetchJson(`/admin/message-templates/${id}/versions`),
+
+  createPlatformTemplate: (input: import('@/types/platformTemplates').CreatePlatformTemplateInput): Promise<{
+    template: import('@/types/platformTemplates').PlatformMessageTemplate
+  }> => fetchJson('/admin/message-templates', { method: 'POST', body: JSON.stringify(input) }),
+
+  updatePlatformTemplate: (id: string, patch: import('@/types/platformTemplates').UpdatePlatformTemplateInput): Promise<{
+    template: import('@/types/platformTemplates').PlatformMessageTemplate
+  }> => fetchJson(`/admin/message-templates/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+
+  revertPlatformTemplate: (id: string, version: number): Promise<{
+    template: import('@/types/platformTemplates').PlatformMessageTemplate
+  }> => fetchJson(`/admin/message-templates/${id}/revert`, { method: 'POST', body: JSON.stringify({ version }) }),
+
+  deletePlatformTemplate: (id: string): Promise<{ deleted: true }> =>
+    fetchJson(`/admin/message-templates/${id}`, { method: 'DELETE' }),
+
+  previewPlatformTemplate: (id: string, variables: Record<string, unknown> = {}): Promise<import('@/types/platformTemplates').PlatformTemplatePreview> =>
+    fetchJson(`/admin/message-templates/${id}/preview`, { method: 'POST', body: JSON.stringify({ variables }) }),
+
+  testSendPlatformTemplate: (id: string, to: string, variables: Record<string, unknown> = {}): Promise<{
+    sent: true
+    provider: string
+    provider_message_id: string | null
+  }> => fetchJson(`/admin/message-templates/${id}/test-send`, { method: 'POST', body: JSON.stringify({ to, variables }) }),
+
+  resolvePlatformTemplate: (opts: { code: string; language?: string; territoryId?: string }): Promise<{
+    template: import('@/types/platformTemplates').PlatformMessageTemplate | null
+  }> => {
+    const parts = [`code=${encodeURIComponent(opts.code)}`]
+    if (opts.language) parts.push(`language=${encodeURIComponent(opts.language)}`)
+    if (opts.territoryId) parts.push(`territoryId=${encodeURIComponent(opts.territoryId)}`)
+    return fetchJson(`/admin/message-templates/resolve?${parts.join('&')}`)
+  },
 }
 
 function buildQuery(opts: ListAdminOpts): string {
