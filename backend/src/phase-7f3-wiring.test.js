@@ -186,6 +186,8 @@ describe('7f/3 — auth surfaces on server.js', () => {
       "app.post('/api/my-connections'",
       "app.put('/api/my-connections/:id'",
       "app.delete('/api/my-connections/:id'",
+      "app.post('/api/admin/users/:id/promote'",
+      "app.post('/api/admin/audit-log/retention'",
     ]
     for (const needle of routes) {
       const line = lines.find((l) => l.includes(needle))

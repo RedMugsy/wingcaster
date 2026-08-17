@@ -3661,7 +3661,7 @@ app.get('/api/admin/audit-log', authMiddleware, requireAdmin, async (req, res) =
   res.json({ items: rows.slice(0, limit), total: rows.length })
 })
 
-app.post('/api/admin/audit-log/retention', authMiddleware, requirePlatformAdmin, async (req, res) => {
+app.post('/api/admin/audit-log/retention', authMiddleware, requirePlatformAdmin, requireElevated(), async (req, res) => {
   const cutoff = new Date(Date.now() - AUDIT_LOG_RETENTION_DAYS * 24 * 60 * 60 * 1000).toISOString()
   const activityCutoff = new Date(Date.now() - ACTIVITY_LOG_RETENTION_DAYS * 24 * 60 * 60 * 1000).toISOString()
   let removed = 0
@@ -3680,7 +3680,7 @@ app.post('/api/admin/audit-log/retention', authMiddleware, requirePlatformAdmin,
   res.json({ removed_audit_log: removed, removed_activity_log: activityRemoved, audit_retention_days: AUDIT_LOG_RETENTION_DAYS, activity_retention_days: ACTIVITY_LOG_RETENTION_DAYS })
 })
 
-app.post('/api/admin/users/:id/promote', authMiddleware, requirePlatformAdmin, async (req, res) => {
+app.post('/api/admin/users/:id/promote', authMiddleware, requirePlatformAdmin, requireElevated(), async (req, res) => {
   const user = await findUserById(req.params.id)
   if (!user) return res.status(404).json({ error: 'User not found' })
   const platformRole = req.body.role === null || req.body.role === 'none'
