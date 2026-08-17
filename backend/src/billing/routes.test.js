@@ -2,6 +2,12 @@ import express from 'express'
 import request from 'supertest'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+// Pin JWT_SECRET before auth.js loads so signElevatedToken and
+// requireElevated agree on the same key across the whole test file.
+vi.hoisted(() => {
+  process.env.JWT_SECRET = 'billing-routes-test-secret'
+})
+
 const dal = vi.hoisted(() => ({
   rows: {},
   inserted: [],
@@ -43,6 +49,19 @@ vi.mock('./ledger.js', async () => {
 
 import { CAST_RATES_V1, CAST_VALUE_MINOR_SEED } from './rate-card.js'
 import { registerBillingRoutes } from './routes.js'
+import { signElevatedToken } from '../auth.js'
+
+/**
+ * Phase 7f/3 wired requireElevated onto POST /api/admin/billing/credit.
+ * Tests that legitimately reach that endpoint carry an elevated token
+ * matching the fake session; non-admin / bad-body tests still assert
+ * their own failure paths (the elevation gate fires AFTER authMiddleware
+ * + requirePlatformAdmin, so a bad body from an unelevated admin returns
+ * 401 step_up_required, not 400 — matches production behaviour).
+ */
+function elevatedFor(userId = 'tenant-1') {
+  return signElevatedToken({ userId, tokenVersion: 0 })
+}
 
 const seedRateCard = {
   id: 'rate-card-1',
@@ -176,20 +195,21 @@ describe('POST /api/admin/billing/credit — platform-wide manual credit grant',
   it('400 when tenant_id is missing', async () => {
     const { tenant_id, ...body } = validBody
     void tenant_id
-    await request(createApp()).post('/api/admin/billing/credit').send(body).expect(400)
+    await request(createApp()).post('/api/admin/billing/credit').set('X-Elevated-Token', elevatedFor()).send(body).expect(400)
     expect(ledger.recordTopup).not.toHaveBeenCalled()
   })
 
   it('400 when quota_key is missing', async () => {
     const { quota_key, ...body } = validBody
     void quota_key
-    await request(createApp()).post('/api/admin/billing/credit').send(body).expect(400)
+    await request(createApp()).post('/api/admin/billing/credit').set('X-Elevated-Token', elevatedFor()).send(body).expect(400)
   })
 
   it('400 when amount is zero, negative, or non-numeric', async () => {
     for (const amount of [0, -5, 'abc', null]) {
       await request(createApp())
         .post('/api/admin/billing/credit')
+        .set('X-Elevated-Token', elevatedFor())
         .send({ ...validBody, amount })
         .expect(400)
     }
@@ -200,6 +220,7 @@ describe('POST /api/admin/billing/credit — platform-wide manual credit grant',
     for (const reason of ['', '   ', undefined]) {
       await request(createApp())
         .post('/api/admin/billing/credit')
+        .set('X-Elevated-Token', elevatedFor())
         .send({ ...validBody, reason })
         .expect(400)
     }
@@ -208,6 +229,7 @@ describe('POST /api/admin/billing/credit — platform-wide manual credit grant',
   it('201 on happy path — writes ledger entry, returns balance, writes audit_log', async () => {
     const response = await request(createApp({ userId: 'admin-1' }))
       .post('/api/admin/billing/credit')
+      .set('X-Elevated-Token', elevatedFor('admin-1'))
       .send(validBody)
       .expect(201)
 
@@ -255,6 +277,7 @@ describe('POST /api/admin/billing/credit — platform-wide manual credit grant',
   it('accepts optional subscription_id and billing_period', async () => {
     await request(createApp())
       .post('/api/admin/billing/credit')
+      .set('X-Elevated-Token', elevatedFor())
       .send({ ...validBody, subscription_id: 'sub-9', billing_period: '2026-02' })
       .expect(201)
 

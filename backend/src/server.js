@@ -13,7 +13,7 @@ import multer from 'multer'
 import { loadDb, getDb, findAll, findOne, insert, remove, update, transaction } from './db.js'
 import { getPool, query } from './persistence/postgres-adapter.js'
 import { seedData } from './seed.js'
-import { signToken, authMiddleware } from './auth.js'
+import { signToken, authMiddleware, requireElevated } from './auth.js'
 import { registerTwoFactorRoutes, startSigninChallengeIfRequired } from './auth-2fa.js'
 import { registerPlatformTemplateAdminRoutes } from './notifications/platform-templates/routes.js'
 import { sendPlatformNotification } from './notifications/platform-templates/index.js'
@@ -1227,7 +1227,11 @@ app.post('/api/auth/password/reset', validate(passwordResetSchema), async (req, 
   res.json({ success: true, message: 'Password updated successfully. Please sign in again.' })
 })
 
-app.post('/api/auth/password/change', authMiddleware, validate(passwordChangeSchema), async (req, res) => {
+// Step-up (Phase 7f/3): password change already asks for current password,
+// but requireElevated is defense-in-depth against a session hijacked long
+// enough for the attacker to also grab the current password from a phishing
+// page. Belt AND braces.
+app.post('/api/auth/password/change', authMiddleware, requireElevated(), validate(passwordChangeSchema), async (req, res) => {
   const { current_password, new_password } = req.validated
   const user = await findUserById(req.user.id)
   if (!user) return res.status(404).json({ error: 'Account not found' })
@@ -5066,7 +5070,11 @@ app.get('/api/my-connections', authMiddleware, async (req, res) => {
   res.json(await findAll('marketplace_connections', c => c.agent_id === req.user.id))
 })
 
-app.post('/api/my-connections', authMiddleware, async (req, res) => {
+// Step-up (Phase 7f/3): marketplace connections store OAuth tokens that,
+// once written, let the platform publish on the tenant's behalf. Every
+// write path (create, update, disconnect) is a credential-rotation
+// surface — must require a live second factor.
+app.post('/api/my-connections', authMiddleware, requireElevated(), async (req, res) => {
   const platform = req.body.platform
   const allowed = ['whatsapp', 'instagram', 'telegram', 'tiktok', 'x', 'facebook', 'linkedin']
   if (!allowed.includes(platform)) {
@@ -5144,7 +5152,7 @@ app.post('/api/my-connections', authMiddleware, async (req, res) => {
   res.json(conn)
 })
 
-app.put('/api/my-connections/:id', authMiddleware, async (req, res) => {
+app.put('/api/my-connections/:id', authMiddleware, requireElevated(), async (req, res) => {
   await update('marketplace_connections', c => c.id === req.params.id && c.agent_id === req.user.id, c => ({
     ...c,
     ...req.body,
@@ -5155,7 +5163,7 @@ app.put('/api/my-connections/:id', authMiddleware, async (req, res) => {
   res.json({ success: true })
 })
 
-app.delete('/api/my-connections/:id', authMiddleware, async (req, res) => {
+app.delete('/api/my-connections/:id', authMiddleware, requireElevated(), async (req, res) => {
   await remove('marketplace_connections', c => c.id === req.params.id && c.agent_id === req.user.id)
   await logActivity({ type: 'connection_disconnected', agent_id: req.user.id, meta: { connection_id: req.params.id } })
   res.json({ success: true })

@@ -15,6 +15,7 @@
  */
 
 import { findAll, findOne, insert } from '../db.js'
+import { requireElevated } from '../auth.js'
 import { CAST_RATES_V1, CAST_VALUE_MINOR_SEED, RATE_CARD_LATEST_VERSION } from './rate-card.js'
 import { periodSummary, quotaBalance, recordTopup, currentBillingPeriod } from './ledger.js'
 import { resolveActiveSubscription } from './entitlements.js'
@@ -28,6 +29,10 @@ import {
 export function registerBillingRoutes(app, { authMiddleware, requirePlatformAdmin }) {
   const auth = authMiddleware || ((_req, _res, next) => next())
   const adminGuard = requirePlatformAdmin || ((_req, _res, next) => next())
+  // Step-up (Phase 7f/3): credit grants mint money and are irrevocable.
+  // A hijacked-but-unelevated admin cookie must not be able to hand out
+  // credits without a second live proof.
+  const elevated = requireElevated()
 
   app.get('/api/billing/rate-card', auth, async (req, res) => {
     const active = await resolveActiveSubscription(req.user.id)
@@ -188,7 +193,7 @@ export function registerBillingRoutes(app, { authMiddleware, requirePlatformAdmi
    * Audit: writes public.audit_log { type: 'billing', action:
    *        'admin_credit_grant', agent_id: <actor>, metadata: {...} }.
    */
-  app.post('/api/admin/billing/credit', auth, adminGuard, async (req, res) => {
+  app.post('/api/admin/billing/credit', auth, adminGuard, elevated, async (req, res) => {
     try {
       const { tenant_id, quota_key, amount, reason, subscription_id, billing_period } = req.body || {}
       if (!tenant_id || typeof tenant_id !== 'string') {

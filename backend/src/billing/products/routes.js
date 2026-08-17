@@ -32,6 +32,7 @@ import {
   getNote, issueNote, listNotes, pendingBalance, voidNote,
 } from './credit-notes.js'
 import { findAll, findOne, query } from '../../db.js'
+import { requireElevated } from '../../auth.js'
 import { resolveMarketContext } from '../pricing/index.js'
 
 function actorFrom(req) {
@@ -40,6 +41,13 @@ function actorFrom(req) {
 
 export function registerProductCatalogRoutes(app, { authMiddleware, requirePlatformAdmin } = {}) {
   const guards = [authMiddleware, requirePlatformAdmin].filter(Boolean)
+  // Step-up gating (Phase 7f/3). Every write in this module mutates
+  // tenant-visible billing state — product lifecycle, tiers, price
+  // overrides, subscription lifecycle, bulk operations, credit notes.
+  // Reads stay on `guards` because a step-up prompt on every list-view
+  // load trains admins to click through it without thinking, which is
+  // the exact failure mode elevation exists to prevent.
+  const writeGuards = [...guards, requireElevated()]
 
   // ---------- Products ----------
   app.get('/api/admin/billing/products', ...guards, async (req, res) => {
@@ -68,7 +76,7 @@ export function registerProductCatalogRoutes(app, { authMiddleware, requirePlatf
     }
   })
 
-  app.post('/api/admin/billing/products', ...guards, async (req, res) => {
+  app.post('/api/admin/billing/products', ...writeGuards, async (req, res) => {
     try {
       const product = await createProduct(req.body || {}, { actorId: actorFrom(req) })
       res.status(201).json({ product })
@@ -77,7 +85,7 @@ export function registerProductCatalogRoutes(app, { authMiddleware, requirePlatf
     }
   })
 
-  app.patch('/api/admin/billing/products/:id', ...guards, async (req, res) => {
+  app.patch('/api/admin/billing/products/:id', ...writeGuards, async (req, res) => {
     try {
       const product = await updateProduct(req.params.id, req.body || {})
       res.json({ product })
@@ -86,7 +94,7 @@ export function registerProductCatalogRoutes(app, { authMiddleware, requirePlatf
     }
   })
 
-  app.post('/api/admin/billing/products/:id/publish', ...guards, async (req, res) => {
+  app.post('/api/admin/billing/products/:id/publish', ...writeGuards, async (req, res) => {
     try {
       const product = await publishProduct(req.params.id)
       res.json({ product })
@@ -95,7 +103,7 @@ export function registerProductCatalogRoutes(app, { authMiddleware, requirePlatf
     }
   })
 
-  app.post('/api/admin/billing/products/:id/deprecate', ...guards, async (req, res) => {
+  app.post('/api/admin/billing/products/:id/deprecate', ...writeGuards, async (req, res) => {
     try {
       const product = await deprecateProduct(req.params.id)
       res.json({ product })
@@ -104,7 +112,7 @@ export function registerProductCatalogRoutes(app, { authMiddleware, requirePlatf
     }
   })
 
-  app.post('/api/admin/billing/products/:id/retire', ...guards, async (req, res) => {
+  app.post('/api/admin/billing/products/:id/retire', ...writeGuards, async (req, res) => {
     try {
       const product = await retireProduct(req.params.id)
       res.json({ product })
@@ -113,7 +121,7 @@ export function registerProductCatalogRoutes(app, { authMiddleware, requirePlatf
     }
   })
 
-  app.post('/api/admin/billing/products/:id/clone-as-new-version', ...guards, async (req, res) => {
+  app.post('/api/admin/billing/products/:id/clone-as-new-version', ...writeGuards, async (req, res) => {
     try {
       const product = await cloneAsNewVersion(req.params.id, { actorId: actorFrom(req) })
       res.status(201).json({ product })
@@ -138,7 +146,7 @@ export function registerProductCatalogRoutes(app, { authMiddleware, requirePlatf
     }
   })
 
-  app.post('/api/admin/billing/products/:productId/tiers', ...guards, async (req, res) => {
+  app.post('/api/admin/billing/products/:productId/tiers', ...writeGuards, async (req, res) => {
     try {
       const product = await getProduct(req.params.productId)
       if (!product) return res.status(404).json({ error: 'Product not found' })
@@ -153,7 +161,7 @@ export function registerProductCatalogRoutes(app, { authMiddleware, requirePlatf
     }
   })
 
-  app.patch('/api/admin/billing/tiers/:id', ...guards, async (req, res) => {
+  app.patch('/api/admin/billing/tiers/:id', ...writeGuards, async (req, res) => {
     try {
       const tier = await updateTier(req.params.id, req.body || {})
       res.json({ tier })
@@ -162,7 +170,7 @@ export function registerProductCatalogRoutes(app, { authMiddleware, requirePlatf
     }
   })
 
-  app.post('/api/admin/billing/tiers/:id/activate', ...guards, async (req, res) => {
+  app.post('/api/admin/billing/tiers/:id/activate', ...writeGuards, async (req, res) => {
     try {
       const tier = await activateTier(req.params.id)
       res.json({ tier })
@@ -171,7 +179,7 @@ export function registerProductCatalogRoutes(app, { authMiddleware, requirePlatf
     }
   })
 
-  app.post('/api/admin/billing/tiers/:id/deprecate', ...guards, async (req, res) => {
+  app.post('/api/admin/billing/tiers/:id/deprecate', ...writeGuards, async (req, res) => {
     try {
       const tier = await deprecateTier(req.params.id)
       res.json({ tier })
@@ -180,7 +188,7 @@ export function registerProductCatalogRoutes(app, { authMiddleware, requirePlatf
     }
   })
 
-  app.post('/api/admin/billing/tiers/:id/retire', ...guards, async (req, res) => {
+  app.post('/api/admin/billing/tiers/:id/retire', ...writeGuards, async (req, res) => {
     try {
       const tier = await retireTier(req.params.id)
       res.json({ tier })
@@ -201,7 +209,7 @@ export function registerProductCatalogRoutes(app, { authMiddleware, requirePlatf
     }
   })
 
-  app.post('/api/admin/billing/products/:productId/pricing-overrides', ...guards, async (req, res) => {
+  app.post('/api/admin/billing/products/:productId/pricing-overrides', ...writeGuards, async (req, res) => {
     try {
       const product = await getProduct(req.params.productId)
       if (!product) return res.status(404).json({ error: 'Product not found' })
@@ -216,7 +224,7 @@ export function registerProductCatalogRoutes(app, { authMiddleware, requirePlatf
     }
   })
 
-  app.patch('/api/admin/billing/pricing-overrides/:id', ...guards, async (req, res) => {
+  app.patch('/api/admin/billing/pricing-overrides/:id', ...writeGuards, async (req, res) => {
     try {
       const override = await updateOverride(req.params.id, req.body || {})
       res.json({ override })
@@ -225,7 +233,7 @@ export function registerProductCatalogRoutes(app, { authMiddleware, requirePlatf
     }
   })
 
-  app.delete('/api/admin/billing/pricing-overrides/:id', ...guards, async (req, res) => {
+  app.delete('/api/admin/billing/pricing-overrides/:id', ...writeGuards, async (req, res) => {
     try {
       const override = await deactivateOverride(req.params.id)
       res.json({ override })
@@ -417,7 +425,7 @@ export function registerProductCatalogRoutes(app, { authMiddleware, requirePlatf
     }
   })
 
-  app.post('/api/admin/billing/subscriptions/:id/cancel', ...guards, async (req, res) => {
+  app.post('/api/admin/billing/subscriptions/:id/cancel', ...writeGuards, async (req, res) => {
     try {
       const updated = await cancelSubscription(req.params.id, {
         reason: req.body?.reason || null,
@@ -431,7 +439,7 @@ export function registerProductCatalogRoutes(app, { authMiddleware, requirePlatf
     }
   })
 
-  app.post('/api/admin/billing/subscriptions/:id/expire', ...guards, async (req, res) => {
+  app.post('/api/admin/billing/subscriptions/:id/expire', ...writeGuards, async (req, res) => {
     try {
       const updated = await expireSubscription(req.params.id, {
         reason: req.body?.reason || null,
@@ -444,7 +452,7 @@ export function registerProductCatalogRoutes(app, { authMiddleware, requirePlatf
     }
   })
 
-  app.post('/api/admin/billing/subscriptions/:id/mark-past-due', ...guards, async (req, res) => {
+  app.post('/api/admin/billing/subscriptions/:id/mark-past-due', ...writeGuards, async (req, res) => {
     try {
       const updated = await markPastDue(req.params.id, {
         reason: req.body?.reason || null,
@@ -457,7 +465,7 @@ export function registerProductCatalogRoutes(app, { authMiddleware, requirePlatf
     }
   })
 
-  app.post('/api/admin/billing/subscriptions/:id/resolve-past-due', ...guards, async (req, res) => {
+  app.post('/api/admin/billing/subscriptions/:id/resolve-past-due', ...writeGuards, async (req, res) => {
     try {
       const updated = await resolvePastDue(req.params.id, {
         reason: req.body?.reason || null,
@@ -472,7 +480,7 @@ export function registerProductCatalogRoutes(app, { authMiddleware, requirePlatf
 
   // Admin subscription migration (upgrade / downgrade / cross-product,
   // including private tiers that tenants can't self-serve into).
-  app.post('/api/admin/billing/subscriptions/:id/migrate', ...guards, async (req, res) => {
+  app.post('/api/admin/billing/subscriptions/:id/migrate', ...writeGuards, async (req, res) => {
     try {
       const { target_product_id, target_tier_id, prorate, reason } = req.body || {}
       const updated = await migrateSubscription(req.params.id, {
@@ -490,7 +498,7 @@ export function registerProductCatalogRoutes(app, { authMiddleware, requirePlatf
   })
 
   // --- Bulk admin operations ---
-  app.post('/api/admin/billing/subscriptions/bulk-cancel', ...guards, async (req, res) => {
+  app.post('/api/admin/billing/subscriptions/bulk-cancel', ...writeGuards, async (req, res) => {
     try {
       const { subscription_ids, reason, immediate } = req.body || {}
       const result = await bulkCancel({
@@ -503,7 +511,7 @@ export function registerProductCatalogRoutes(app, { authMiddleware, requirePlatf
     }
   })
 
-  app.post('/api/admin/billing/subscriptions/bulk-expire', ...guards, async (req, res) => {
+  app.post('/api/admin/billing/subscriptions/bulk-expire', ...writeGuards, async (req, res) => {
     try {
       const { subscription_ids, reason } = req.body || {}
       const result = await bulkExpire({ subscriptionIds: subscription_ids, reason, actorId: actorFrom(req) })
@@ -514,7 +522,7 @@ export function registerProductCatalogRoutes(app, { authMiddleware, requirePlatf
     }
   })
 
-  app.post('/api/admin/billing/subscriptions/bulk-migrate', ...guards, async (req, res) => {
+  app.post('/api/admin/billing/subscriptions/bulk-migrate', ...writeGuards, async (req, res) => {
     try {
       const { subscription_ids, target_tier_id, target_product_id, prorate, reason } = req.body || {}
       const result = await bulkMigrate({
@@ -534,7 +542,7 @@ export function registerProductCatalogRoutes(app, { authMiddleware, requirePlatf
     }
   })
 
-  app.post('/api/admin/billing/subscriptions/bulk-pause', ...guards, async (req, res) => {
+  app.post('/api/admin/billing/subscriptions/bulk-pause', ...writeGuards, async (req, res) => {
     try {
       const { subscription_ids, reason } = req.body || {}
       const result = await bulkPause({ subscriptionIds: subscription_ids, reason, actorId: actorFrom(req) })
@@ -545,7 +553,7 @@ export function registerProductCatalogRoutes(app, { authMiddleware, requirePlatf
     }
   })
 
-  app.post('/api/admin/billing/subscriptions/bulk-resume', ...guards, async (req, res) => {
+  app.post('/api/admin/billing/subscriptions/bulk-resume', ...writeGuards, async (req, res) => {
     try {
       const { subscription_ids } = req.body || {}
       const result = await bulkResume({ subscriptionIds: subscription_ids, actorId: actorFrom(req) })
@@ -556,7 +564,7 @@ export function registerProductCatalogRoutes(app, { authMiddleware, requirePlatf
     }
   })
 
-  app.post('/api/admin/billing/credit-notes/bulk-issue', ...guards, async (req, res) => {
+  app.post('/api/admin/billing/credit-notes/bulk-issue', ...writeGuards, async (req, res) => {
     try {
       const { entries } = req.body || {}
       const result = await bulkIssueCredits({ entries, actorId: actorFrom(req), actorType: 'admin' })
@@ -570,7 +578,7 @@ export function registerProductCatalogRoutes(app, { authMiddleware, requirePlatf
   // Manual scheduler kick — for admins to force a renewal sweep without
   // waiting for the interval tick. Useful during debugging + on cell
   // failover.
-  app.post('/api/admin/billing/subscriptions/tick', ...guards, async (_req, res) => {
+  app.post('/api/admin/billing/subscriptions/tick', ...writeGuards, async (_req, res) => {
     try {
       const summary = await tickRenewals()
       res.json(summary)
@@ -594,7 +602,7 @@ export function registerProductCatalogRoutes(app, { authMiddleware, requirePlatf
     }
   })
 
-  app.post('/api/admin/billing/credit-notes', ...guards, async (req, res) => {
+  app.post('/api/admin/billing/credit-notes', ...writeGuards, async (req, res) => {
     try {
       const { tenant_id, subscription_id, type, amount_minor, currency, reason, expires_at, metadata } = req.body || {}
       const note = await issueNote({
@@ -625,7 +633,7 @@ export function registerProductCatalogRoutes(app, { authMiddleware, requirePlatf
     }
   })
 
-  app.post('/api/admin/billing/credit-notes/:id/void', ...guards, async (req, res) => {
+  app.post('/api/admin/billing/credit-notes/:id/void', ...writeGuards, async (req, res) => {
     try {
       const note = await voidNote(req.params.id, {
         reason: req.body?.reason || null,

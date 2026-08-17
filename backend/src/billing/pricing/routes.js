@@ -20,9 +20,15 @@ import {
   listCities, getCity, createCity, updateCity, deactivateCity, assignCitiesToZone,
 } from './cities.js'
 import { resolveMarketContext, resolveEffectivePrice } from './resolver.js'
+import { requireElevated } from '../../auth.js'
 
 export function registerPricingRoutes(app, { authMiddleware, requirePlatformAdmin } = {}) {
   const guards = [authMiddleware, requirePlatformAdmin].filter(Boolean)
+  // Step-up gating (Phase 7f/3). Rate-card activations, territory / zone /
+  // city mutations, and bulk assignments reshape prices for every tenant.
+  // Reads deliberately stay on `guards` alone — see billing/products/routes.js
+  // for the same rationale.
+  const writeGuards = [...guards, requireElevated()]
 
   // ---------- Core Rate Cards ----------
   app.get('/api/admin/pricing/rate-cards', ...guards, async (_req, res) => {
@@ -35,7 +41,7 @@ export function registerPricingRoutes(app, { authMiddleware, requirePlatformAdmi
     }
   })
 
-  app.post('/api/admin/pricing/rate-cards', ...guards, async (req, res) => {
+  app.post('/api/admin/pricing/rate-cards', ...writeGuards, async (req, res) => {
     try {
       const created = await createRateCard({
         ...req.body,
@@ -47,7 +53,7 @@ export function registerPricingRoutes(app, { authMiddleware, requirePlatformAdmi
     }
   })
 
-  app.patch('/api/admin/pricing/rate-cards/:id', ...guards, async (req, res) => {
+  app.patch('/api/admin/pricing/rate-cards/:id', ...writeGuards, async (req, res) => {
     try {
       const card = await updateRateCard(req.params.id, req.body || {})
       res.json({ card })
@@ -56,7 +62,7 @@ export function registerPricingRoutes(app, { authMiddleware, requirePlatformAdmi
     }
   })
 
-  app.post('/api/admin/pricing/rate-cards/:id/activate', ...guards, async (req, res) => {
+  app.post('/api/admin/pricing/rate-cards/:id/activate', ...writeGuards, async (req, res) => {
     try {
       const active = await activateRateCard(req.params.id)
       res.json({ active })
@@ -87,7 +93,7 @@ export function registerPricingRoutes(app, { authMiddleware, requirePlatformAdmi
     }
   })
 
-  app.post('/api/admin/pricing/territories', ...guards, async (req, res) => {
+  app.post('/api/admin/pricing/territories', ...writeGuards, async (req, res) => {
     try {
       const territory = await createTerritory(req.body || {})
       res.status(201).json({ territory })
@@ -96,7 +102,7 @@ export function registerPricingRoutes(app, { authMiddleware, requirePlatformAdmi
     }
   })
 
-  app.patch('/api/admin/pricing/territories/:id', ...guards, async (req, res) => {
+  app.patch('/api/admin/pricing/territories/:id', ...writeGuards, async (req, res) => {
     try {
       const territory = await updateTerritory(req.params.id, req.body || {})
       res.json({ territory })
@@ -105,7 +111,7 @@ export function registerPricingRoutes(app, { authMiddleware, requirePlatformAdmi
     }
   })
 
-  app.delete('/api/admin/pricing/territories/:id', ...guards, async (req, res) => {
+  app.delete('/api/admin/pricing/territories/:id', ...writeGuards, async (req, res) => {
     try {
       const territory = await deactivateTerritory(req.params.id)
       res.json({ territory })
@@ -127,7 +133,7 @@ export function registerPricingRoutes(app, { authMiddleware, requirePlatformAdmi
     }
   })
 
-  app.post('/api/admin/pricing/zones', ...guards, async (req, res) => {
+  app.post('/api/admin/pricing/zones', ...writeGuards, async (req, res) => {
     try {
       const zone = await createZone(req.body || {})
       res.status(201).json({ zone })
@@ -136,7 +142,7 @@ export function registerPricingRoutes(app, { authMiddleware, requirePlatformAdmi
     }
   })
 
-  app.patch('/api/admin/pricing/zones/:id', ...guards, async (req, res) => {
+  app.patch('/api/admin/pricing/zones/:id', ...writeGuards, async (req, res) => {
     try {
       const zone = await updateZone(req.params.id, req.body || {})
       res.json({ zone })
@@ -145,7 +151,7 @@ export function registerPricingRoutes(app, { authMiddleware, requirePlatformAdmi
     }
   })
 
-  app.delete('/api/admin/pricing/zones/:id', ...guards, async (req, res) => {
+  app.delete('/api/admin/pricing/zones/:id', ...writeGuards, async (req, res) => {
     try {
       const zone = await deactivateZone(req.params.id)
       res.json({ zone })
@@ -168,7 +174,7 @@ export function registerPricingRoutes(app, { authMiddleware, requirePlatformAdmi
     }
   })
 
-  app.post('/api/admin/pricing/cities', ...guards, async (req, res) => {
+  app.post('/api/admin/pricing/cities', ...writeGuards, async (req, res) => {
     try {
       const city = await createCity(req.body || {})
       res.status(201).json({ city })
@@ -177,7 +183,7 @@ export function registerPricingRoutes(app, { authMiddleware, requirePlatformAdmi
     }
   })
 
-  app.patch('/api/admin/pricing/cities/:id', ...guards, async (req, res) => {
+  app.patch('/api/admin/pricing/cities/:id', ...writeGuards, async (req, res) => {
     try {
       const city = await updateCity(req.params.id, req.body || {})
       res.json({ city })
@@ -186,7 +192,7 @@ export function registerPricingRoutes(app, { authMiddleware, requirePlatformAdmi
     }
   })
 
-  app.delete('/api/admin/pricing/cities/:id', ...guards, async (req, res) => {
+  app.delete('/api/admin/pricing/cities/:id', ...writeGuards, async (req, res) => {
     try {
       const city = await deactivateCity(req.params.id)
       res.json({ city })
@@ -195,7 +201,7 @@ export function registerPricingRoutes(app, { authMiddleware, requirePlatformAdmi
     }
   })
 
-  app.post('/api/admin/pricing/cities/bulk-assign-zone', ...guards, async (req, res) => {
+  app.post('/api/admin/pricing/cities/bulk-assign-zone', ...writeGuards, async (req, res) => {
     try {
       const { city_ids, zone_id } = req.body || {}
       const cities = await assignCitiesToZone(city_ids || [], zone_id || null)

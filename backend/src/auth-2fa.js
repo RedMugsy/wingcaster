@@ -36,7 +36,7 @@ import bcrypt from 'bcryptjs'
 
 import { insert, query, transaction } from './db.js'
 import { findUserById } from './identity.js'
-import { signElevatedToken, ELEVATION_TTL_SECONDS } from './auth.js'
+import { requireElevated, signElevatedToken, ELEVATION_TTL_SECONDS } from './auth.js'
 import { encryptSecret, tryDecrypt } from './lib/credentials.js'
 import { sendOtp } from './lib/otp.js'
 import { generateTotpSecret, buildProvisioningUri, verifyTotp, TOTP_ISSUER } from './lib/totp.js'
@@ -407,7 +407,13 @@ export function registerTwoFactorRoutes(app, deps) {
   // session cannot strip the protection it is up against. 7f/3 adds
   // requireElevated on top of this.
   // -------------------------------------------------------------------------
-  app.post('/api/auth/2fa/totp/disable', authMiddleware, validate(totpDisableSchema), async (req, res) => {
+  // Step-up (Phase 7f/3): the handler below also checks a live TOTP or
+  // backup code — that check proves the person hitting the endpoint
+  // controls one of the second factors, but it does NOT prove they have
+  // recently re-authenticated. requireElevated forces the second proof.
+  // Two independent proofs to disable 2FA is what "belt and braces" means
+  // for the surface whose whole point is defence-in-depth.
+  app.post('/api/auth/2fa/totp/disable', authMiddleware, requireElevated(), validate(totpDisableSchema), async (req, res) => {
     const user = await findUserById(req.user.id)
     if (!user) return res.status(401).json({ error: 'Account no longer exists' })
     if (!user.totp_enabled) return res.status(409).json({ error: 'totp_not_enabled' })
