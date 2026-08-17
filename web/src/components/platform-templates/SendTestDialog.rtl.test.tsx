@@ -185,7 +185,9 @@ describe('sending', () => {
 
   it('wraps the API call in runElevated when supplied', async () => {
     const user = userEvent.setup()
-    const runElevated = vi.fn(async (action) => action())
+    // Widen the return type so the mock matches the generic
+    // `<T>(action: () => Promise<T>, ...) => Promise<T | null>` signature.
+    const runElevated = vi.fn(async <T,>(action: () => Promise<T>, _label?: string): Promise<T | null> => action())
     apiMock.testSendPlatformTemplate.mockResolvedValue({
       sent: true, provider: 'graph', provider_message_id: null,
     })
@@ -195,7 +197,7 @@ describe('sending', () => {
         open
         onOpenChange={vi.fn()}
         callerEmail="admin@wingcaster.com"
-        runElevated={runElevated}
+        runElevated={runElevated as never}
       />,
     )
     await user.click(screen.getByRole('button', { name: /send test/i }))
@@ -212,7 +214,7 @@ describe('sending', () => {
         open
         onOpenChange={vi.fn()}
         callerEmail="admin@wingcaster.com"
-        runElevated={runElevated}
+        runElevated={runElevated as never}
       />,
     )
     await user.click(screen.getByRole('button', { name: /send test/i }))
