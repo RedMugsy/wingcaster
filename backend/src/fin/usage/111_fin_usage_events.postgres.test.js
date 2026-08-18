@@ -12,6 +12,7 @@ finPostgresSuite('111_fin_usage_events', {}, ({ pool, world }) => {
          JOIN pg_namespace n ON n.oid = c.relnamespace
         WHERE n.nspname = 'fin'
           AND c.relispartition
+          AND c.relkind = 'r'
           AND c.relname LIKE 'usage_events%'
         ORDER BY c.relname`,
     )
