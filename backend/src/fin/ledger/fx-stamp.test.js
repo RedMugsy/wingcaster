@@ -3,14 +3,14 @@ import { expect, it } from 'vitest'
 import { insertBalancedPostings, insertLedgerTx, NOW } from '../testing/seed.js'
 import { finPostgresSuite } from '../testing/suite.js'
 
-async function insertSnapshot(client) {
+async function insertSnapshot(client, effectiveAt = NOW) {
   const id = randomUUID()
   await client.query(
     `INSERT INTO fin.fx_rate_snapshots (
        id, base_currency, quote_currency, rate_bps_num, rate_bps_den,
        source, effective_at, snapshot_kind
      ) VALUES ($1, 'USD', 'EUR', 920000, 1000000, 'TEST', $2, 'TRANSACTION')`,
-    [id, NOW],
+    [id, effectiveAt],
   )
   return id
 }
@@ -130,14 +130,14 @@ finPostgresSuite('fx-stamp D-T4', {}, ({ pool, world }) => {
     const client = await pool().connect()
     try {
       await client.query('BEGIN')
-      const a = await insertSnapshot(client)
+      const a = await insertSnapshot(client, '2026-08-18T14:00:00.000Z')
       const b = randomUUID()
       await client.query(
         `INSERT INTO fin.fx_rate_snapshots (
            id, base_currency, quote_currency, rate_bps_num, rate_bps_den,
            source, effective_at, snapshot_kind
          ) VALUES ($1, 'USD', 'EUR', 910000, 1000000, 'TEST', $2, 'TRANSACTION')`,
-        [b, '2026-08-18T13:00:00.000Z'],
+        [b, '2026-08-18T15:00:00.000Z'],
       )
       await insertPair(client, {
         bookA: tenantA.bookUsd,

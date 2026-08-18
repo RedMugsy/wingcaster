@@ -13,9 +13,9 @@ finPostgresSuite('hash-chain-trigger H5', {}, ({ pool, world }) => {
          target_type, target_id, reason_code, prev_hash, row_hash, created_at
        ) VALUES (
          $1, 'LIVE', 'SYSTEM', 'ops@example.test', 'GRANT',
-         'TENANT', $3, 'TEST', repeat('a', 64), repeat('b', 64), $4
+         'TENANT', $2, 'TEST', repeat('a', 64), repeat('b', 64), $3
        )`,
-      [firstId, null, world().tenantA.tenantId, NOW],
+      [firstId, world().tenantA.tenantId, NOW],
     )
     await pool().query(
       `INSERT INTO fin.financial_audit_events (

@@ -191,6 +191,7 @@ export async function seedWorld(client) {
   return {
     now: NOW,
     ...platform,
+    platform,
     tenantA: { ...tenantA, bookUsd, bookEur, bookSar, eurBa, sarBa },
     tenantB: { ...tenantB, bookB },
   }
