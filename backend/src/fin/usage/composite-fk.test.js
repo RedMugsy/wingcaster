@@ -73,7 +73,7 @@ finPostgresSuite('usage composite FK (M1 / DL-021)', {}, ({ pool, world }) => {
          1, '{}'::jsonb, $5, $5, 1, $5
        )`,
       [randomUUID(), world().tenantA.tenantId, randomUUID(), original.id, NOW],
-    )).rejects.toMatchObject({ code: '23514' })
+    )).rejects.toMatchObject({ code: '23503' })
 
     await expect(pool().query(
       `INSERT INTO fin.usage_events (

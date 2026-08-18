@@ -94,12 +94,17 @@ BEGIN
   );
   EXECUTE format('REVOKE UPDATE, DELETE, TRUNCATE ON fin.%I FROM fin_app_role', p_table);
 
+  -- Every table (parent + every partition) gets ENABLE + FORCE RLS so direct-to-
+  -- partition access cannot bypass tenant isolation. Policies live only on the
+  -- parent (PostgreSQL routes SELECT/INSERT via parent); partitions with no
+  -- policies deny non-owner direct access by default — that is the desired
+  -- posture. H12 asserts this on every fin.* table.
+  EXECUTE format('ALTER TABLE fin.%I ENABLE ROW LEVEL SECURITY', p_table);
+  EXECUTE format('ALTER TABLE fin.%I FORCE ROW LEVEL SECURITY', p_table);
+
   IF p_table <> 'usage_events' THEN
     RETURN;
   END IF;
-
-  EXECUTE format('ALTER TABLE fin.%I ENABLE ROW LEVEL SECURITY', p_table);
-  EXECUTE format('ALTER TABLE fin.%I FORCE ROW LEVEL SECURITY', p_table);
 
   EXECUTE format('DROP POLICY IF EXISTS fin_migrator_all ON fin.%I', p_table);
   EXECUTE format(

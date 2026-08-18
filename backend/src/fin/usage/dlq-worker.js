@@ -98,10 +98,10 @@ export async function runUsageDlqWorker(pool, {
         const dead = nextAttempts >= MAX_ATTEMPTS
         await lockClient.query(
           `UPDATE fin.usage_events_dlq
-              SET attempts = $2,
+              SET attempts = $2::integer,
                   last_attempt_at = $3::timestamptz,
                   next_retry_at = $3::timestamptz
-                    + (interval '1 second' * (60 * power(2, $2))),
+                    + (interval '1 second' * (60 * power(2, $2::integer))),
                   error_code = COALESCE($4, error_code),
                   dead_lettered_at = CASE WHEN $5 THEN $3::timestamptz ELSE dead_lettered_at END,
                   updated_at = $3::timestamptz
