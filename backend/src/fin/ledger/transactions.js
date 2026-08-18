@@ -517,7 +517,12 @@ async function spend(input, { command, sourceType, debitType, creditType, shape,
   const sourceId = input.ratedUsageId || input.economicSourceId || randomUUID()
   const key = input.idempotencyKey || `SPEND:${sourceId}`
   return withRetry(async (client) => {
-    const claimed = await claim(client, env, key, { cmd: command, sourceId, units })
+    // Same rationale as adjust(): a locally-minted sourceId must not enter
+    // the fingerprint or two replays of the same idempotency key diverge on
+    // sourceId and trip IDEMPOTENCY_FINGERPRINT_CONFLICT. Uniqueness for
+    // DIRECT_SPEND lives in ledger_transactions' partial unique index and
+    // idempotency_keys, not the fingerprint.
+    const claimed = await claim(client, env, key, { cmd: command, units })
     if (claimed.kind === 'replay') return claimed.row.response_body
     const book = await loadBook(client, input.bookId)
     const accounts = await loadAccounts(client, book.id)
@@ -1006,11 +1011,16 @@ export async function migrateLot(input) {
 }
 
 export async function captureFacility(input) {
+  // Hoist reservationId so the key template and economicSourceId share the
+  // same random UUID when the caller omits reservationId — otherwise the two
+  // `||` short-circuits below would each mint a different UUID, guaranteeing
+  // a key ↔ source mismatch within a single call.
+  const reservationId = input.reservationId || randomUUID()
   return spend({
     ...input,
     ratedUsageId: undefined,
-    economicSourceId: input.reservationId || randomUUID(),
-    idempotencyKey: input.idempotencyKey || `CAPFAC:${input.reservationId || randomUUID()}`,
+    economicSourceId: reservationId,
+    idempotencyKey: input.idempotencyKey || `CAPFAC:${reservationId}`,
   }, {
     command: 'CaptureFacility',
     sourceType: 'FACILITY',
@@ -1057,7 +1067,7 @@ export function issueCreditNote(input) {
   return documentOnly(input, 'IssueCreditNote', 'CREDIT_NOTE_ISSUED', 'fin.credit_note.status')
 }
 export function issueDebitNote(input) {
-  return documentOnly(input, 'IssueDebitNote', 'CREDIT_NOTE_ISSUED', 'fin.debit_note.status')
+  return documentOnly(input, 'IssueDebitNote', 'DEBIT_NOTE_ISSUED', 'fin.debit_note.status')
 }
 export function reversePayment(input) {
   return documentOnly(input, 'ReversePayment', 'PURCHASE_REFUNDED', 'fin.payment.status')
