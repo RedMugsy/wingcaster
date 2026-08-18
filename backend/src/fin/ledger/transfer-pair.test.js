@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto'
 import { expect, it } from 'vitest'
-import { insertBalancedPostings, insertLedgerTx } from '../testing/seed.js'
+import { commandEnv, insertBalancedPostings, insertLedgerTx, seedBook, seedExtraBillingAccount } from '../testing/seed.js'
 import { finPostgresSuite } from '../testing/suite.js'
+import { transferCredits } from './transactions.js'
 
 finPostgresSuite('transfer-pair D-T3', {}, ({ pool, world }) => {
   it('D-T3a — pair_id on FUNDING is rejected', async () => {
@@ -152,5 +153,72 @@ finPostgresSuite('transfer-pair D-T3', {}, ({ pool, world }) => {
       [pairId],
     )
     expect(rows.rows[0].n).toBe(2)
+  })
+
+  it('C03 — command replay returns the pair and does not insert a third leg', async () => {
+    const w = world()
+    const env = commandEnv(w)
+    const ba = await seedExtraBillingAccount(pool(), {
+      environment: 'LIVE',
+      tenantId: w.tenantA.tenantId,
+      holderId: w.tenantA.holderId,
+      legalEntityId: w.platform.legalEntityId,
+      currency: 'USD',
+    })
+    const dest = await seedBook(pool(), {
+      environment: 'LIVE',
+      tenantId: w.tenantA.tenantId,
+      billingAccountId: ba,
+      currency: 'USD',
+    })
+    const key = `XFER:${randomUUID()}`
+    const first = await transferCredits({
+      ...env,
+      sourceBookId: w.tenantA.bookUsd.bookId,
+      destBookId: dest.bookId,
+      units: 40,
+      idempotencyKey: key,
+    })
+    expect(first.pairId).toBeTruthy()
+    expect(first.txIds).toHaveLength(2)
+
+    const replay = await transferCredits({
+      ...env,
+      sourceBookId: w.tenantA.bookUsd.bookId,
+      destBookId: dest.bookId,
+      units: 40,
+      idempotencyKey: key,
+    })
+    expect(replay.pairId).toBe(first.pairId)
+    expect(replay.txIds).toEqual(first.txIds)
+
+    const legs = await pool().query(
+      `SELECT count(*)::int AS n FROM fin.ledger_transactions WHERE pair_id = $1`,
+      [first.pairId],
+    )
+    expect(legs.rows[0].n).toBe(2)
+
+    const posted = await pool().query(
+      `SELECT count(*)::int AS n FROM fin.outbox_events
+        WHERE topic = 'fin.transfer.posted' AND dedupe_key = $1`,
+      [`pair:${first.pairId}`],
+    )
+    expect(posted.rows[0].n).toBe(1)
+  })
+
+  it('C03 — same-book transfer has pair_id NULL', async () => {
+    const w = world()
+    const result = await transferCredits({
+      ...commandEnv(w),
+      sourceBookId: w.tenantA.bookUsd.bookId,
+      destBookId: w.tenantA.bookUsd.bookId,
+      units: 9,
+    })
+    expect(result.pairId).toBeNull()
+    const row = await pool().query(
+      `SELECT pair_id FROM fin.ledger_transactions WHERE id = $1`,
+      [result.txIds[0]],
+    )
+    expect(row.rows[0].pair_id).toBeNull()
   })
 })

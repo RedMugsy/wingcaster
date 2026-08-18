@@ -1075,3 +1075,48 @@ QA verified R1 against the files and **APPROVED** Agent A for downstream B–H w
 - `occ-tenants.test.js` `advisory-lock.test.js` `transfer-pair.test.js` `fx-stamp.test.js`
 - H1/H2/H4/H5/H6/H7/H9/H10/H12 under `backend/src/fin/security/`
 
+### Stage 1 / command-service slice — 2026-08-18
+
+**Landed on `feat/stage-1-command-service`:** sole writer `backend/src/fin/ledger/transactions.js` (C §5.0–5.19), reconciliation runner R001–R023 (`pg_try_advisory_lock(1009, 0)`), If-Match middleware + test-only tenant PATCH demonstrator, migration `110_fin_command_service.sql` (account_type_rank, idempotency `EXPIRED` + split UNIQUE, recon run status → DL-032). No silent rewrite of `commercial.*`, current Express, `postgres-adapter.js`, or `009_audit_activity.sql`.
+
+**Addressed in this PR:**
+
+| Item | What landed | Still LIVE / deferred |
+|---|---|---|
+| C sole writer | 19 commands go through one `transaction(fn)`; app code does not insert postings | Product HTTP routes still Stage 4+ |
+| I-01 / I-02 on the writer | C01 / C02 named tests; bonus lots inside FUNDING (DL-034) | — |
+| Transfer pair | C03 command replay returns the pair; `fin.transfer.posted` count = 1; same-book `pair_id` NULL | — |
+| Idempotency E | Claim before locks; COMPLETED replay 0 rows; fingerprint conflict; expired key does not fund (C12) | Webhook path Stage 7 |
+| Outbox same tx | C13: committed txs have `fin.ledger.posted` | Drain worker Stage 2 |
+| Recon F | Exact §6 SQL; COMPLETED requires R001–R023 rows; R022/R023 `ERROR` on `42P01` (DL-052) | R024+ later; control-plane freeze of `account_controls` is resolution rows only in Stage 1 |
+| If-Match D §6 | 428 missing; 412 `*` / weak / stale (not 409); 400 malformed (D-T12) | No `/api/admin/fin/**` (DL-053) |
+
+**Deferred (tables not invented):** `purchase_intents` UPDATE (DL-049), `accounting_periods` HARD_CLOSED (DL-050), invoice/facility/payment cash movement (DL-051), R022/R023 green (Stage 6/8).
+
+**Live P0s not silently patched:** A/B-1, A-2, A-4, C-1, C-2 on the DAL, E-3 on current `audit_log` writers. Historical A-3 / D-1 / D-4 stay on the register (Stage 13).
+
+**CI rule:** if a test file name below does not appear in the **postgres** job summary, it did not run.
+
+- `conservation.test.js` `book-containment.test.js` `transfer-pair.test.js` `fund-purchase.test.js`
+- `idempotency-replay.test.js` `outbox-same-tx.test.js`
+- `runner.test.js` `advisory-lock.test.js` (reconciliation, class 1009)
+- `if-match.test.js`
+
+### Stage 1 / command-service fixup — 2026-08-18
+
+Follow-up on `feat/stage-1-command-service-fixup` after QA on `feat/stage-1-command-service` (lineage 5bcf315 / 3218123 / 565eda0). F2 spend fingerprint, F3 `captureFacility` double-random, and F4 `issueDebitNote` audit label already landed at 565eda0. This appendix is F1 + F5–F9. No `commercial.*` / DAL / `009_audit_activity.sql` edits.
+
+| Finding | Disposition |
+|---|---|
+| F1 P0 R006 | Option A (DL-054): lots insert at `remaining=granted`; no issue allocation; ISSUANCE postings never get `lot_id`; R009 source excludes ISSUANCE + FUNDING/GRANT so reporting `lot_id` on issue AVAILABLE does not false-DRIFT. R006 test now plants a draw allocation with the apply trigger disabled instead of a `-1` UPDATE on an already-drifted lot. |
+| F2 | Already at 565eda0. Guard test: `spend()` replay with only `idempotencyKey` (no `ratedUsageId`). |
+| F3 | Already at 565eda0 (`reservationId` hoisted). |
+| F4 | Already at 565eda0 (`DEBIT_NOTE_ISSUED`). |
+| F5 | `releaseHold` fingerprint uses `input.commandName` (CaptureHold / VoidHold / ExpireHold). |
+| F6 | Missing/not-APPROVED approval → `APPROVAL_NOT_APPROVED` (DL-055). `APPROVAL_FOUR_EYES_REQUIRED` untouched. |
+| F7 | `HOLD_NOT_OPEN` / `HOLD_ALREADY_TERMINAL` / `HOLD_EXPIRED` / `HOLD_DOUBLE_CAPTURE` split. `HOLD_EXPIRED` is capture/void on an OPEN hold past `expires_at`; ExpireHold is the legal TTL path. |
+| F8 | CaptureHold + VoidHold write `authorization_attempts` AUTHORIZED. ExpireHold skipped (DL-056). |
+| F9 | `issueCreditNote` (units+bookId) passes `audit: 'CREDIT_NOTE_ISSUED'` through `refundPurchase`. |
+
+**CI rule:** `conservation.test.js` `book-containment.test.js` `transfer-pair.test.js` `fund-purchase.test.js` `idempotency-replay.test.js` `outbox-same-tx.test.js` `runner.test.js` `advisory-lock.test.js` `if-match.test.js` must appear in the postgres job summary.
+

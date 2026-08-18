@@ -241,6 +241,55 @@ export async function insertLedgerTx(client, fields) {
   return id
 }
 
+export function commandEnv(world, extra = {}) {
+  return {
+    environment: 'LIVE',
+    tenantId: world.tenantA.tenantId,
+    holderId: world.tenantA.holderId,
+    bookId: world.tenantA.bookUsd.bookId,
+    reasonCode: extra.reasonCode || 'TEST',
+    actorType: extra.actorType || 'SYSTEM',
+    now: world.now,
+    ...extra,
+  }
+}
+
+export async function insertApproval(client, {
+  tenantId,
+  actionKind = 'LARGE_GRANT',
+  status = 'APPROVED',
+  environment = 'LIVE',
+  now = NOW,
+}) {
+  const id = randomUUID()
+  await client.query(
+    `INSERT INTO fin.approval_requests (
+       id, environment, tenant_id, action_kind, status, payload_hash,
+       created_at, updated_at
+     ) VALUES ($1, $2, $3, $4, $5, 'test', $6, $6)`,
+    [id, environment, tenantId, actionKind, status, now],
+  )
+  return id
+}
+
+export async function insertFxSnapshot(client, {
+  base = 'USD',
+  quote = 'EUR',
+  num = 920000,
+  den = 1000000,
+  now = NOW,
+} = {}) {
+  const id = randomUUID()
+  await client.query(
+    `INSERT INTO fin.fx_rate_snapshots (
+       id, base_currency, quote_currency, rate_bps_num, rate_bps_den,
+       source, effective_at, snapshot_kind
+     ) VALUES ($1, $2, $3, $4, $5, 'TEST', $6, 'TRANSACTION')`,
+    [id, base, quote, num, den, now],
+  )
+  return id
+}
+
 export async function asRole(client, role, gucs, fn) {
   await client.query('BEGIN')
   try {
