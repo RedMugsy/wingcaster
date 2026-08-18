@@ -967,3 +967,42 @@ QA verified R1 against the files and **APPROVED** Agent A for downstream B–H w
 
 **Stage 0 is not signed off** until the user reviews all eight deliverables.
 
+### Stage 0 / Agent C (concurrency + idempotency) — 2026-08-18
+
+**Delivered:** `docs/design/fin/D_CONCURRENCY.md`, `docs/design/fin/E_IDEMPOTENCY.md`. Decision log append-only: **DL-037** (R2-1 deferred pair cardinality), **DL-038** (R2-2 FX-stamp trigger), **DL-039** (`EXPIRED` + NULL-tenant unique on `idempotency_keys`), **DL-040** (`+occ` drift / `invoice_sequences` exception). Signed Agent C. Did **not** rewrite DL-025…DL-028 (Agent A reservations).
+
+**A-Q2:** closed. Total lock order is `ledger_book_id ASC → account_type_rank → account_id ASC`, then facilities, lots (`holder_id`, `draw_priority ASC`), holds, `facility_reservations`, `dunning_cases`. Paired TRANSFER locks both books in `book_id ASC`. Hold expiry uses `SELECT … FOR UPDATE SKIP LOCKED` plus book `NOWAIT` so it cannot invert the order against CAPTURE.
+
+**A-Q3 side:** closed without a new uniqueness column (DL-014 stands). FUNDING-class shapes are once-per-source; REFUND / ADJUSTMENT replay only via `idempotency_keys`.
+
+**Addressed in design (not in code):**
+
+| Finding | How D/E scope it | Implementation stage |
+|---|---|---|
+| C-2 lost-write (`postgres-adapter.js:219` before `BEGIN`) | Every MUTABLE/INTENT `fin.*` table: `version` + BEFORE UPDATE trigger; PATCH `If-Match: "<version>"` → **412** + current representation. `fin.*` writers `SELECT … FOR UPDATE` **inside** `transaction(fn)` | Stage 1 foundation on `fin.*` writers — **not** a silent adapter rewrite in this PR |
+| B-8 fire-and-forget notify / no outbox | `fin.outbox_events` at-least-once, `UNIQUE(topic, dedupe_key)`, consumer-side unique on the business id | Stage 1 |
+| B §4 RYOW / ALS gaps | `transaction(fn)` one client; D §8 + D-T11 asserts `findOne` RYOW and nested reuse | Stage 1 |
+| A §2 P1 `ON CONFLICT DO UPDATE` on facts | Unchanged: usage unique is `DO NOTHING` (DL-009). Ledger once-per-source is a different unique | Stage 2 / Stage 1 |
+| D-1 / E-10 silent-200 inbound | Provider unique `(provider, provider_event_id)` never expires. Duplicate **terminal** → silent 200. Mid-flight → 409 + `Retry-After`. Signature fail → 401, never 200 | Stage 7 (money); do not patch `server.js` now |
+| R2-1 3-leg TRANSFER | DL-025 CHECK + UNIQUE + DL-037 deferred `count(*) = 2` | Stage 1 (`103_fin_ledger_transactions_postings.sql`) |
+| R2-2 FX stamp as prose | DL-038 deferred trigger joining counterpart book currency | Stage 1 (same migration) |
+
+**Deferred (still LIVE — do not silently patch):**
+
+| Finding | Why deferred |
+|---|---|
+| C-2 on the existing DAL | Adapter-wide read-before-BEGIN remains. Stage 1 replaces the *writer path for `fin.*`*, not `commercial.*` `update()` in this PR (DL-011) |
+| C-1 pricing PATCH throws | Stage 4 `fin.prices` admin; success-path real-Postgres test required then |
+| A/B-1, A-2, A-4 | `fin.usage_events` + lots; not `events.js` / `ai_credit_*` |
+| E-3 on `public.audit_log` | `fin.financial_audit_events` + Agent D REVOKE |
+| D-1 WhatsApp `claimProcessedMessage` | Historical + live module coupling (D-2) — not a Stage 0 code change |
+| E-10 webhook silent-200 | New `fin` handlers follow E §5; legacy `server.js` stays until that surface is replaced |
+
+**`B_STATE_MACHINES.md` / `C_TRANSACTION_MATRIX.md`:** not landed at write time. D §4 command ids follow A §4.3 shapes + the Stage 0 plan list. When B/C land, bind names; do not invent a parallel vocabulary (`D-OPEN-1`).
+
+**Not in Agent C scope:** A/B/F/G/H body text, any `backend/src/**` file, any migration, `commercial.*` changes.
+
+**Test discipline:** D §12 and E §7 name the gated files. If a name does not appear in the CI **postgres** job summary, it did not run. Named brief tests: `occ-tenants.test.js`, `advisory-lock.test.js`, `transfer-pair.test.js` (3-leg), `fx-stamp.test.js`, `fingerprint.test.js`.
+
+**Stage 0 is not signed off** until the user reviews all eight deliverables. No `fin.*` implementation until then.
+
