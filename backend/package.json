@@ -2,6 +2,9 @@
   "name": "wingcaster-backend",
   "version": "1.0.0",
   "type": "module",
+  "engines": {
+    "node": ">=22 <23"
+  },
   "scripts": {
     "dev": "node src/server.js",
     "start": "node scripts/start.js",
