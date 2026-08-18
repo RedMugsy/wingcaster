@@ -82,7 +82,7 @@ export const CHECKS = [
     expected_delta_units: 0,
     drift_action: 'BLOCK_AFFECTED_BOOK',
     entity_type: 'ledger_postings',
-    source_query: 'SELECT p.id AS entity_id, p.amount_units AS qty FROM fin.ledger_postings p WHERE p.lot_id IS NOT NULL',
+    source_query: "SELECT p.id AS entity_id, p.amount_units AS qty FROM fin.ledger_postings p JOIN fin.ledger_accounts a ON a.id = p.account_id JOIN fin.ledger_transactions t ON t.id = p.transaction_id WHERE p.lot_id IS NOT NULL AND a.account_type <> 'ISSUANCE' AND t.shape NOT IN ('FUNDING', 'GRANT')",
     comparison_query: 'SELECT a.posting_id AS entity_id, a.units AS qty FROM fin.lot_allocations a',
   },
   {

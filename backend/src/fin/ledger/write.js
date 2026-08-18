@@ -46,6 +46,10 @@ export async function insertPostingPair(client, {
 }) {
   const debitId = randomUUID()
   const creditId = randomUUID()
+  // DL-054: ISSUANCE postings never carry lot_id. Issue attribution lives
+  // on the opposite-side posting (AVAILABLE / HELD / CONSUMED / EXPIRED).
+  if (debitType === 'ISSUANCE') debitLotId = null
+  if (creditType === 'ISSUANCE') creditLotId = null
   await client.query(
     `INSERT INTO fin.ledger_postings (
        id, environment, transaction_id, book_id, account_id, amount_units,

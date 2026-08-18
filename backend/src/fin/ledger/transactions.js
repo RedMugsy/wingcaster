@@ -167,7 +167,7 @@ export async function fundPurchase(input) {
       holderId: input.holderId,
       sourceKind: 'PURCHASE',
       grantedUnits: paidUnits,
-      remainingUnits: 0,
+      remainingUnits: paidUnits,
       considerationMinor: input.considerationMinor || 0,
       currency: book.currency,
       purchaseIntentId,
@@ -176,12 +176,8 @@ export async function fundPurchase(input) {
     const ctx = {
       environment: env.environment, txId, bookId: book.id, accounts, now: env.now,
     }
-    const paidPost = await postPair(client, ctx, {
+    await postPair(client, ctx, {
       debitType: 'ISSUANCE', creditType: 'AVAILABLE', units: paidUnits, creditLotId: paidLotId,
-    })
-    await insertAllocation(client, {
-      environment: env.environment, lotId: paidLotId, postingId: paidPost.creditId,
-      units: paidUnits, now: env.now,
     })
 
     let bonusLotId = null
@@ -194,18 +190,14 @@ export async function fundPurchase(input) {
         holderId: input.holderId,
         sourceKind: 'PROMOTIONAL_GRANT',
         grantedUnits: bonusUnits,
-        remainingUnits: 0,
+        remainingUnits: bonusUnits,
         considerationMinor: 0,
         currency: book.currency,
         purchaseIntentId,
         now: env.now,
       })
-      const bonusPost = await postPair(client, ctx, {
+      await postPair(client, ctx, {
         debitType: 'ISSUANCE', creditType: 'AVAILABLE', units: bonusUnits, creditLotId: bonusLotId,
-      })
-      await insertAllocation(client, {
-        environment: env.environment, lotId: bonusLotId, postingId: bonusPost.creditId,
-        units: bonusUnits, now: env.now,
       })
     }
 
@@ -380,12 +372,24 @@ async function releaseHold(input, { status, reasonCode, idempotencyKey, outboxTo
   const holdId = input.holdId
   const key = input.idempotencyKey || idempotencyKey
   return withRetry(async (client) => {
-    const claimed = await claim(client, env, key, { cmd: 'releaseHold', holdId, status })
+    const claimed = await claim(client, env, key, { cmd: input.commandName, holdId, status })
     if (claimed.kind === 'replay') return claimed.row.response_body
     await lockHolds(client, [holdId])
     const hold = (await client.query(`SELECT * FROM fin.holds WHERE id = $1`, [holdId])).rows[0]
-    if (!hold || hold.status !== 'OPEN') {
+    if (!hold) {
       throw finError('HOLD_NOT_OPEN', { category: CATEGORY.PRECONDITION, httpStatus: 409 })
+    }
+    if (status === 'CAPTURED' && hold.status === 'CAPTURED') {
+      throw finError('HOLD_DOUBLE_CAPTURE', { category: CATEGORY.PRECONDITION, httpStatus: 409 })
+    }
+    if (['CAPTURED', 'VOIDED', 'EXPIRED'].includes(hold.status)) {
+      throw finError('HOLD_ALREADY_TERMINAL', { category: CATEGORY.PRECONDITION, httpStatus: 409 })
+    }
+    if (hold.status !== 'OPEN') {
+      throw finError('HOLD_NOT_OPEN', { category: CATEGORY.PRECONDITION, httpStatus: 409 })
+    }
+    if (status !== 'EXPIRED' && new Date(hold.expires_at) <= new Date(env.now)) {
+      throw finError('HOLD_EXPIRED', { category: CATEGORY.PRECONDITION, httpStatus: 409 })
     }
     const book = await loadBook(client, hold.book_id)
     const accounts = await loadAccounts(client, book.id)
@@ -441,6 +445,15 @@ async function releaseHold(input, { status, reasonCode, idempotencyKey, outboxTo
           WHERE id = $1 AND version = $5`,
         [holdId, status, txId, env.now, hold.version],
       )
+    }
+    if (status !== 'EXPIRED') {
+      await insertAuthAttempt(client, {
+        environment: env.environment,
+        holderId: hold.holder_id,
+        result: 'AUTHORIZED',
+        holdId,
+        now: env.now,
+      })
     }
     await insertAudit(client, {
       environment: env.environment,
@@ -695,7 +708,7 @@ export async function grantCredits(input) {
       [approvalId],
     )).rows[0]
     if (!approval || !['APPROVED', 'EXECUTED'].includes(approval.status)) {
-      throw finError('APPROVAL_FOUR_EYES_REQUIRED', { category: CATEGORY.APPROVAL, httpStatus: 409 })
+      throw finError('APPROVAL_NOT_APPROVED', { category: CATEGORY.APPROVAL, httpStatus: 409 })
     }
     const book = await loadBook(client, input.bookId)
     const accounts = await loadAccounts(client, book.id)
@@ -711,16 +724,13 @@ export async function grantCredits(input) {
       environment: env.environment, tenantId: book.tenant_id, bookId: book.id,
       billingAccountId: book.billing_account_id, holderId: input.holderId,
       sourceKind: input.sourceKind || 'PROMOTIONAL_GRANT',
-      grantedUnits: units, remainingUnits: 0, considerationMinor: 0,
+      grantedUnits: units, remainingUnits: units, considerationMinor: 0,
       currency: book.currency, now: env.now,
     })
-    const posts = await insertPostingPair(client, {
+    await insertPostingPair(client, {
       environment: env.environment, transactionId: txId, bookId: book.id,
       accounts, debitType: 'ISSUANCE', creditType: 'AVAILABLE', units,
       creditLotId: lotId, now: env.now,
-    })
-    await insertAllocation(client, {
-      environment: env.environment, lotId, postingId: posts.creditId, units, now: env.now,
     })
     if (approval.status === 'APPROVED') {
       await client.query(
@@ -921,7 +931,7 @@ export function refundPurchase(input) {
     command: 'RefundPurchase',
     sourceType: 'REFUND',
     sourceId: input.refundId || randomUUID(),
-    audit: 'PURCHASE_REFUNDED',
+    audit: input.audit || 'PURCHASE_REFUNDED',
     shape: 'REFUND',
   })
 }
@@ -968,7 +978,7 @@ export async function migrateLot(input) {
     const destLotId = await insertLot(client, {
       environment: env.environment, tenantId: lot.tenant_id, bookId: lot.book_id,
       billingAccountId: lot.billing_account_id, holderId: lot.holder_id,
-      sourceKind: 'MIGRATION', grantedUnits: units, remainingUnits: 0,
+      sourceKind: 'MIGRATION', grantedUnits: units, remainingUnits: units,
       considerationMinor: 0, currency: lot.currency, now: env.now,
     })
     const txId = await insertLedgerTx(client, {
@@ -980,13 +990,10 @@ export async function migrateLot(input) {
     const out = await insertPostingPair(client, {
       environment: env.environment, transactionId: txId, bookId: book.id,
       accounts, debitType: 'AVAILABLE', creditType: 'AVAILABLE', units,
-      debitLotId: lotId, creditLotId: destLotId, now: env.now,
+      debitLotId: lotId, now: env.now,
     })
     await insertAllocation(client, {
       environment: env.environment, lotId, postingId: out.debitId, units: -units, now: env.now,
-    })
-    await insertAllocation(client, {
-      environment: env.environment, lotId: destLotId, postingId: out.creditId, units, now: env.now,
     })
     const lotAfter = (await client.query(
       `SELECT version FROM fin.lots WHERE id = $1`,
@@ -1062,6 +1069,7 @@ export function issueCreditNote(input) {
       ...input,
       purchaseIntentId: input.creditNoteId || input.subjectId,
       idempotencyKey: input.idempotencyKey || `CN:${input.creditNoteId || input.subjectId}`,
+      audit: 'CREDIT_NOTE_ISSUED',
     })
   }
   return documentOnly(input, 'IssueCreditNote', 'CREDIT_NOTE_ISSUED', 'fin.credit_note.status')

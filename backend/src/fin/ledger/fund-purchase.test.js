@@ -26,7 +26,7 @@ finPostgresSuite('fund-purchase C05', {}, ({ pool, world }) => {
     expect(txs.rowCount).toBe(1)
 
     const lots = await pool().query(
-      `SELECT source_kind, consideration_minor, granted_units
+      `SELECT source_kind, consideration_minor, granted_units, remaining_units
          FROM fin.lots WHERE id = ANY($1::uuid[]) ORDER BY source_kind`,
       [first.lotIds],
     )
@@ -35,8 +35,16 @@ finPostgresSuite('fund-purchase C05', {}, ({ pool, world }) => {
     const bonus = lots.rows.find((r) => r.source_kind === 'PROMOTIONAL_GRANT')
     expect(Number(paid.consideration_minor)).toBe(1200)
     expect(Number(paid.granted_units)).toBe(400)
+    expect(Number(paid.remaining_units)).toBe(400)
     expect(Number(bonus.consideration_minor)).toBe(0)
     expect(Number(bonus.granted_units)).toBe(50)
+    expect(Number(bonus.remaining_units)).toBe(50)
+
+    const issueAllocs = await pool().query(
+      `SELECT count(*)::int AS n FROM fin.lot_allocations WHERE lot_id = ANY($1::uuid[])`,
+      [first.lotIds],
+    )
+    expect(issueAllocs.rows[0].n).toBe(0)
 
     const postings = await pool().query(
       `SELECT count(*)::int AS n FROM fin.ledger_postings WHERE transaction_id = $1`,

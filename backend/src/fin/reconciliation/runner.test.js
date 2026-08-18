@@ -13,6 +13,9 @@ finPostgresSuite('reconciliation runner', {}, ({ pool, world }) => {
     expect(run.results).toHaveLength(23)
     expect(CHECKS.map((c) => c.check_code)).toEqual(run.results.map((r) => r.check_code))
     const byCode = Object.fromEntries(run.results.map((r) => [r.check_code, r]))
+    for (const check of CHECKS.filter((c) => !['R022', 'R023'].includes(c.check_code))) {
+      expect(byCode[check.check_code].result, check.check_code).toBe('GREEN')
+    }
     expect(byCode.R022.result).toBe('ERROR')
     expect(byCode.R023.result).toBe('ERROR')
     const stored = await pool().query(
@@ -74,7 +77,19 @@ finPostgresSuite('reconciliation runner', {}, ({ pool, world }) => {
     expect(run.results.find((r) => r.check_code === 'R004').result).toBe('DRIFT')
   })
 
-  it('R006 DRIFT when remaining_units disagrees with allocations', async () => {
+  it('R006 is GREEN after fundPurchase (remaining = granted, no issue allocation)', async () => {
+    await fundPurchase({
+      ...commandEnv(world()),
+      purchaseIntentId: randomUUID(),
+      paidUnits: 15,
+      bonusUnits: 0,
+      considerationMinor: 1,
+    })
+    const run = await runReconciliation(pool(), { now: NOW })
+    expect(run.results.find((r) => r.check_code === 'R006').result).toBe('GREEN')
+  })
+
+  it('R006 DRIFT when a draw allocation is applied without updating remaining', async () => {
     const funded = await fundPurchase({
       ...commandEnv(world()),
       purchaseIntentId: randomUUID(),
@@ -82,10 +97,21 @@ finPostgresSuite('reconciliation runner', {}, ({ pool, world }) => {
       bonusUnits: 0,
       considerationMinor: 1,
     })
-    await pool().query(
-      `UPDATE fin.lots SET remaining_units = remaining_units - 1 WHERE id = $1`,
+    const posting = await pool().query(
+      `SELECT p.id
+         FROM fin.ledger_postings p
+         JOIN fin.ledger_accounts a ON a.id = p.account_id
+        WHERE p.lot_id = $1 AND a.account_type = 'AVAILABLE'`,
       [funded.lotIds[0]],
     )
+    await pool().query('ALTER TABLE fin.lot_allocations DISABLE TRIGGER trg_lot_allocations_apply')
+    await pool().query(
+      `INSERT INTO fin.lot_allocations (
+         id, environment, lot_id, posting_id, units, created_at
+       ) VALUES ($1, 'LIVE', $2, $3, -5, $4)`,
+      [randomUUID(), funded.lotIds[0], posting.rows[0].id, NOW],
+    )
+    await pool().query('ALTER TABLE fin.lot_allocations ENABLE TRIGGER trg_lot_allocations_apply')
     const run = await runReconciliation(pool(), { now: NOW })
     expect(run.results.find((r) => r.check_code === 'R006').result).toBe('DRIFT')
   })

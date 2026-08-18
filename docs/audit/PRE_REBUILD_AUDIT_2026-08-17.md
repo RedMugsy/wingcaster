@@ -1102,3 +1102,21 @@ QA verified R1 against the files and **APPROVED** Agent A for downstream B–H w
 - `runner.test.js` `advisory-lock.test.js` (reconciliation, class 1009)
 - `if-match.test.js`
 
+### Stage 1 / command-service fixup — 2026-08-18
+
+Follow-up on `feat/stage-1-command-service-fixup` after QA on `feat/stage-1-command-service` (lineage 5bcf315 / 3218123 / 565eda0). F2 spend fingerprint, F3 `captureFacility` double-random, and F4 `issueDebitNote` audit label already landed at 565eda0. This appendix is F1 + F5–F9. No `commercial.*` / DAL / `009_audit_activity.sql` edits.
+
+| Finding | Disposition |
+|---|---|
+| F1 P0 R006 | Option A (DL-054): lots insert at `remaining=granted`; no issue allocation; ISSUANCE postings never get `lot_id`; R009 source excludes ISSUANCE + FUNDING/GRANT so reporting `lot_id` on issue AVAILABLE does not false-DRIFT. R006 test now plants a draw allocation with the apply trigger disabled instead of a `-1` UPDATE on an already-drifted lot. |
+| F2 | Already at 565eda0. Guard test: `spend()` replay with only `idempotencyKey` (no `ratedUsageId`). |
+| F3 | Already at 565eda0 (`reservationId` hoisted). |
+| F4 | Already at 565eda0 (`DEBIT_NOTE_ISSUED`). |
+| F5 | `releaseHold` fingerprint uses `input.commandName` (CaptureHold / VoidHold / ExpireHold). |
+| F6 | Missing/not-APPROVED approval → `APPROVAL_NOT_APPROVED` (DL-055). `APPROVAL_FOUR_EYES_REQUIRED` untouched. |
+| F7 | `HOLD_NOT_OPEN` / `HOLD_ALREADY_TERMINAL` / `HOLD_EXPIRED` / `HOLD_DOUBLE_CAPTURE` split. `HOLD_EXPIRED` is capture/void on an OPEN hold past `expires_at`; ExpireHold is the legal TTL path. |
+| F8 | CaptureHold + VoidHold write `authorization_attempts` AUTHORIZED. ExpireHold skipped (DL-056). |
+| F9 | `issueCreditNote` (units+bookId) passes `audit: 'CREDIT_NOTE_ISSUED'` through `refundPurchase`. |
+
+**CI rule:** `conservation.test.js` `book-containment.test.js` `transfer-pair.test.js` `fund-purchase.test.js` `idempotency-replay.test.js` `outbox-same-tx.test.js` `runner.test.js` `advisory-lock.test.js` `if-match.test.js` must appear in the postgres job summary.
+
