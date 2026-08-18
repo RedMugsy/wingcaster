@@ -1,5 +1,6 @@
 import pg from 'pg'
 import { afterAll, beforeAll } from 'vitest'
+import { configure, closeDb } from '../../db.js'
 import { createTestDatabase, skipIfNoPostgres } from '../../testing/postgres.js'
 import { seedWorld } from './seed.js'
 
@@ -14,6 +15,7 @@ export function finPostgresSuite(name, { seed = true } = {}, define) {
 
     beforeAll(async () => {
       database = await createTestDatabase()
+      configure({ databaseUrl: database.url, force: true })
       pool = new pg.Pool({ connectionString: database.url })
       pool.on('error', () => {})
       if (seed) {
@@ -27,6 +29,7 @@ export function finPostgresSuite(name, { seed = true } = {}, define) {
     }, 180_000)
 
     afterAll(async () => {
+      await closeDb().catch(() => {})
       if (pool) await pool.end().catch(() => {})
       if (database) await database.teardown()
     })
@@ -34,6 +37,7 @@ export function finPostgresSuite(name, { seed = true } = {}, define) {
     define({
       pool: () => pool,
       world: () => world,
+      url: () => database.url,
     })
   })
 }
