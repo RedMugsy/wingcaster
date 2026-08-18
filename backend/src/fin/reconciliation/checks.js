@@ -191,7 +191,7 @@ export const CHECKS = [
     drift_action: 'BLOCK_AFFECTED_HOLDER',
     entity_type: 'holds',
     source_query: "SELECT h.id AS entity_id, h.units AS qty FROM fin.holds h WHERE h.status = 'CAPTURED'",
-    comparison_query: "SELECT h.id AS entity_id, ABS(SUM(p.amount_units)) FILTER (WHERE a.account_type = 'CONSUMED')::bigint AS qty FROM fin.holds h JOIN fin.ledger_postings p ON p.transaction_id = h.capture_tx_id JOIN fin.ledger_accounts a ON a.id = p.account_id WHERE h.status = 'CAPTURED' GROUP BY h.id",
+    comparison_query: "SELECT h.id AS entity_id, ABS(SUM(p.amount_units) FILTER (WHERE a.account_type = 'CONSUMED'))::bigint AS qty FROM fin.holds h JOIN fin.ledger_postings p ON p.transaction_id = h.capture_tx_id JOIN fin.ledger_accounts a ON a.id = p.account_id WHERE h.status = 'CAPTURED' GROUP BY h.id",
   },
   {
     check_code: 'R022',

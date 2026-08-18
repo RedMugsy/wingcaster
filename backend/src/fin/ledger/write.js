@@ -124,7 +124,7 @@ export async function insertOutbox(client, {
     `INSERT INTO fin.outbox_events (
        id, environment, topic, dedupe_key, payload, status, attempts,
        created_at, updated_at
-     ) VALUES ($1,$2,$3,$4,$5::jsonb,'PENDING',0,$6,$6)`
+     ) VALUES ($1,$2,$3,$4,$5::jsonb,'PENDING',0,$6,$6)`,
     [randomUUID(), environment, topic, dedupeKey, JSON.stringify(payload), now],
   )
 }
