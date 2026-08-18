@@ -10,6 +10,11 @@ function qtyMap(rows) {
   return map
 }
 
+function bindNow(sql, now) {
+  if (!sql.includes(':now')) return { text: sql, values: [] }
+  return { text: sql.replaceAll(':now', '$1::timestamptz'), values: [now] }
+}
+
 function compare(check, sourceRows, comparisonRows) {
   const source = qtyMap(sourceRows)
   const comparison = qtyMap(comparisonRows)
@@ -137,8 +142,10 @@ export async function runReconciliation(pool, {
         let sourceRows
         let comparisonRows
         try {
-          sourceRows = (await lockClient.query(check.source_query)).rows
-          comparisonRows = (await lockClient.query(check.comparison_query)).rows
+          const sourceSql = bindNow(check.source_query, now)
+          const comparisonSql = bindNow(check.comparison_query, now)
+          sourceRows = (await lockClient.query(sourceSql.text, sourceSql.values)).rows
+          comparisonRows = (await lockClient.query(comparisonSql.text, comparisonSql.values)).rows
         } catch (error) {
           if (error.code === '42P01') {
             const checkId = await insertCheck(lockClient, {

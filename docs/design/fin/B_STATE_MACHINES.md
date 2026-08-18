@@ -101,6 +101,7 @@ A named three topics (`notification.lifecycle`, `webhook.stripe`, `usage.dlq_rep
 | `fin.reconciliation.resolution` | resolution APPLIED | `account_controls`, close gates | `res:{id}:{action}` |
 | `fin.dispute.status` | dispute transitions | payments, AR | `disp:{id}:{to}` |
 | `fin.vendor.statement.finalized` | `FinalizeVendorStatement` | vendor recon (F) | `vstmt:{id}` |
+| `fin.usage.received` | Stage 2 `ingestUsageEvent` successful INSERT (not dedup) | metering pipeline (Stage 3) | `usage:{residency_key}:{id}` |
 | `notification.lifecycle` | any **tenant-visible** transition (see per-row) | dispatcher (replaces `fireAndForgetNotify`, audit B-8) | `{topic_suffix}:{id}` |
 | `webhook.stripe` | PSP confirm, refund, dispute inbound **ack path** | Stripe adapter outbound | `stripe:{provider_event_id}` |
 | `usage.dlq_replay` | Stage 2 DLQ worker (not a money command) | usage ingest | `dlq:{id}:{attempt}` |
@@ -612,6 +613,7 @@ Envelope is spec §109 (`code`, `category`, `retryable`, `customer_actionable`, 
 | `LOT_NOT_DRAWABLE` / `LOT_REMAINING_MUTATION` | PRECONDITION | lots |
 | `PURCHASE_PROVIDER_EVENT_REUSED` | CONFLICT | purchase_intents |
 | `DUNNING_STEP_SKIP` | VALIDATION | dunning |
+| `EVENT_KIND_MISMATCH` | VALIDATION | usage ingest (DL-060) |
 
 Agent C may add lock-timeout / serialization codes; they must not reuse these strings for other meanings.
 

@@ -7,10 +7,10 @@ import { CHECKS } from './checks.js'
 import { runReconciliation } from './runner.js'
 
 finPostgresSuite('reconciliation runner', {}, ({ pool, world }) => {
-  it('inserts R001–R023 and marks R022/R023 ERROR when tables are missing', async () => {
+  it('inserts R001–R023 and R030–R039; R022/R023 ERROR when tables are missing', async () => {
     const run = await runReconciliation(pool(), { now: NOW })
     expect(run.skipped).toBe(false)
-    expect(run.results).toHaveLength(23)
+    expect(run.results).toHaveLength(CHECKS.length)
     expect(CHECKS.map((c) => c.check_code)).toEqual(run.results.map((r) => r.check_code))
     const byCode = Object.fromEntries(run.results.map((r) => [r.check_code, r]))
     for (const check of CHECKS.filter((c) => !['R022', 'R023'].includes(c.check_code))) {
