@@ -614,6 +614,7 @@ Envelope is spec §109 (`code`, `category`, `retryable`, `customer_actionable`, 
 | `PURCHASE_PROVIDER_EVENT_REUSED` | CONFLICT | purchase_intents |
 | `DUNNING_STEP_SKIP` | VALIDATION | dunning |
 | `EVENT_KIND_MISMATCH` | VALIDATION | usage ingest (DL-060) |
+| `PARTITION_DDL_IN_PROGRESS` | CONFLICT | usage partition ensure (DL-062) |
 
 Agent C may add lock-timeout / serialization codes; they must not reuse these strings for other meanings.
 
