@@ -853,3 +853,68 @@ This document is a starting point, not an ending point. If any of the findings b
 
 Cursor agents: read your assigned Stage 0 deliverables first, then this audit, then start building. Do not skip either.
 
+---
+
+## Stage 0 resolution
+
+Original findings above are unchanged. This section is the audit trail of what Stage 0 did with them — not a rewrite.
+
+### Stage 0 / Agent A (entity model) — 2026-08-18
+
+**Delivered:** `docs/design/fin/A_ENTITY_MODEL.md`, `docs/design/fin/DECISION_LOG.md` (scaffold), `docs/design/fin/STAGE_0_AGENT_SPLIT.md`. User confirmed this agent owns A; B–D own B+C, D+E, F+G+H.
+
+**Addressed in design (not in code):**
+
+| Finding | How the entity model scopes it | Implementation stage |
+|---|---|---|
+| A/B-1 usage INSERT split from `recordConsumption` | `fin.usage_events` is facts-only; value movement is `ledger_transactions` + postings + lots in one DB transaction | Stage 2 + Stage 6 |
+| A-2 swallow / no metric / no DLQ | `fin.usage_events_dlq` + `fin.authorization_attempts` + named metric | Stage 2 |
+| A-4 second ledger (`ai_credit_*`) | Single-ledger doctrine: lots + postings only; wa_listings consume becomes usage + authorize | Stage 6/7 + Stage 13 |
+| C-2 lost updates | `+occ` / `version` on every MUTABLE table; APPEND_ONLY has no UPDATE | Stage 1 |
+| E-3 `audit_log` mutable, SET NULL attribution | `fin.financial_audit_events` INSERT/SELECT, hash-chain, `actor_email_snapshot` | Stage 1 + Agent D `H_SECURITY` |
+
+**Deferred (still LIVE in `commercial.*` / current app code — do not silently patch):**
+
+| Finding | Why deferred |
+|---|---|
+| A/B-1, A-2 | Replacing `emitUsageEvent` now would write more `commercial.*` rows against a frozen schema. The rebuild path is `fin.usage_events`. |
+| A-4 | Retiring `ai_credit_*` before lots exist would drop the only working WA-listings credit UX. |
+| C-1 (9 pricing PATCH endpoints throw) | Owned by Stage 4 (`fin.prices` admin). A success-path real-Postgres test is mandatory when that surface is born. A drive-by DAL-signature fix on `commercial.*` is out of Stage 0 scope. |
+| C-2 on the existing DAL | Adapter-wide `FOR UPDATE` / If-Match is Stage 1 foundation work on `fin.*` writers, not a silent `postgres-adapter.js` rewrite in this PR. |
+| E-3 on `public.audit_log` | New money paths use `fin.financial_audit_events`. REVOKE on the legacy table is Agent D / Stage 1, not this deliverable. |
+| A-3, D-1, D-4 (historical) | Reconstruction runbooks stay in Audit D. Execution is Stage 13 backfill (`source_system='backfill_v1'`) plus ops. Zero live tenants (handover §2.4) — no customer credit-note pass until there is a customer. |
+| E1, E2 | Already remediated in `16beece`. New admin surfaces must copy the 7f/3 guard array; that is a Stage 12 (and any earlier admin) constraint, not a Stage 0 code change. |
+
+**Not in Agent A scope:** B–H documents, any `backend/src/**` change, any migration.
+
+**Stage 0 is not signed off** until the user reviews all eight deliverables. No `fin.*` implementation until then.
+
+### Stage 0 / Agent A revision R1 — 2026-08-18
+
+Review "approve with revisions" applied in-place to `A_ENTITY_MODEL.md` + `DECISION_LOG.md` DL-012…DL-024. Still **no code**.
+
+| Review item | Disposition |
+|---|---|
+| M1 composite FK on `usage_events` children | Fixed in §6.1 / §6.6 / §11.4. DL-021 |
+| M8 cross-book rule | Strict same-book; paired txs; CLEARING is an account_type. DL-012 |
+| A-Q3 uniqueness matrix | Closed. Partial unique + TRANSFER-per-book. DL-014 |
+| A-Q7 residency_key | Closed. `= platform_legal_entities.residency_key`. DL-013 |
+| M2 accounting_periods | Added §9.0. DL-016 |
+| M3 FX snapshots + rounding | Added §9.0b; residual → ADJUSTMENT/FX_ROUNDING. DL-015 |
+| M4 tax_treatment | Added on `tax_snapshots`. DL-017 |
+| M5 ZATCA/Peppol invoice columns | Added on `invoices`. DL-018 |
+| M6 payment_methods + disputes | Added §10.9b/c. DL-019 |
+| M7 price_tiers + price_dimensions | JSONB rating surfaces removed. DL-020 |
+| T1–T9 | T6/T8/T9 in schema now; T1–T5/T7 reserved §16b. DL-022…024 |
+
+### Stage 0 / Agent A — R1 QA sign-off + R2 nits — 2026-08-18
+
+QA verified R1 against the files and **APPROVED** Agent A for downstream B–H work. Four residual nits do not change declared tables; captured as DL-025…DL-028:
+
+| Nit | DL | Owner |
+|---|---|---|
+| R2-1 TRANSFER pair integrity (`CHECK` + unique pair/book; exactly-two deferred) | DL-025 | Agent C transaction matrix |
+| R2-2 FX stamp mechanism (trigger, not prose) | DL-026 | Agent C |
+| R2-3 GDPR erasure vs FINANCIAL_7Y | DL-027 / A-Q9 | Agent D / H |
+| R2-4 SEPA/BACS mandate metadata on vault | DL-028 | Stage 8 (columns reserved now) |
+
