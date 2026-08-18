@@ -1,0 +1,33 @@
+/**
+ * Advisory-lock class registry (D_CONCURRENCY §7.1).
+ * Two-int form: pg_try_advisory_lock(class, key2).
+ * Do not reuse 8734281374 (legacy commercial renewal scanner).
+ */
+
+export const FIN_CONTRACT_RENEWAL = 1001
+export const FIN_HOLD_EXPIRY = 1002
+export const FIN_LOT_EXPIRY = 1003
+export const FIN_OUTBOX_PUBLISH = 1004
+export const FIN_USAGE_DLQ = 1005
+export const FIN_DUNNING = 1006
+export const FIN_BILLING_CLOSE = 1007
+export const FIN_ACCOUNTING_CLOSE = 1008
+export const FIN_RECONCILIATION = 1009
+export const FIN_AUTO_TOPUP = 1010
+export const FIN_PARTITION_DDL = 1011
+export const FIN_IDEMPOTENCY_SWEEP = 1012
+
+export const LOCK_CLASSES = {
+  FIN_CONTRACT_RENEWAL,
+  FIN_HOLD_EXPIRY,
+  FIN_LOT_EXPIRY,
+  FIN_OUTBOX_PUBLISH,
+  FIN_USAGE_DLQ,
+  FIN_DUNNING,
+  FIN_BILLING_CLOSE,
+  FIN_ACCOUNTING_CLOSE,
+  FIN_RECONCILIATION,
+  FIN_AUTO_TOPUP,
+  FIN_PARTITION_DDL,
+  FIN_IDEMPOTENCY_SWEEP,
+}

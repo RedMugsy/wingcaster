@@ -1051,3 +1051,27 @@ QA verified R1 against the files and **APPROVED** Agent A for downstream B–H w
 
 **Stage 0 is not signed off** until the user reviews all eight deliverables. No `fin.*` implementation until then.
 
+### Stage 1 / foundation migrations — 2026-08-18
+
+**Landed on `feat/stage-1-fin-foundation`:** `100_fin_schema.sql` … `109_fin_rls.sql` plus named real-Postgres tests under `backend/src/fin/**`. No silent rewrite of `commercial.*`, `postgres-adapter.js`, or `009_audit_activity.sql`.
+
+**Addressed in schema (this PR):**
+
+| Finding | What landed | Still LIVE on current app paths? |
+|---|---|---|
+| C-2 lost-write | `version` + `fin.trg_bump_version` on every MUTABLE/INTENT `fin.*` table. D-T1 `occ-tenants.test.js` | Yes — `postgres-adapter.js` `update()` is unchanged (DL-011) |
+| E-3 mutable audit | `fin.financial_audit_events` INSERT-only hash-chain (H §3 JCS + SHA-256). `109` REVOKE UPDATE/DELETE on the new table **and** detective REVOKE on `public.audit_log` for `fin_app_role` | Yes — existing Express writers still hit `public.audit_log` until money paths move |
+| I-01 / I-02 / R2-1 / R2-2 | Deferred conservation; book-containment; pair cardinality = 2; FX stamp on cross-currency pair-legs | N/A (`fin.*` only) |
+| B-8 no outbox | `fin.outbox_events` + unique `(topic, dedupe_key)` | Yes — legacy notify still fire-and-forget |
+| A-Q6 / A-Q8 | FORCE RLS + `fin.platform_admin_bypass()` (admin ∧ elevated). Genesis 64-zero per environment | N/A |
+
+**A §18 tests deferred** (tables not created in Stage 1, per A §18 body): #1 / #6 / #8 `usage_events` + meters (Stage 2); #9 `accounting_events` HARD_CLOSED (Stage 9). #2–#5, #7, #10 ship in this PR.
+
+**Live P0s not silently patched:** A/B-1, A-2, A-4, C-1, C-2 on the DAL, E-3 on current writers, A-3 / D-1 / D-4 backfill.
+
+**CI rule:** if a test file name below does not appear in the **postgres** job summary, it did not run.
+
+- `100_fin_schema.postgres.test.js` … `109_fin_rls.postgres.test.js`
+- `occ-tenants.test.js` `advisory-lock.test.js` `transfer-pair.test.js` `fx-stamp.test.js`
+- H1/H2/H4/H5/H6/H7/H9/H10/H12 under `backend/src/fin/security/`
+
