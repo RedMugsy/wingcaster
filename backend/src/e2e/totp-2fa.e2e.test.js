@@ -448,9 +448,23 @@ skipIfNoPostgres()('E2E: TOTP + step-up authentication', () => {
       const { token } = await createVerifiedUser(app, email)
       const { secret } = await enrolTotp(app, token)
 
+      // 7f/3: /api/auth/2fa/totp/disable is requireElevated-gated. Step-up
+      // first, then attach the elevated token to every disable attempt so we
+      // measure the TOTP-code branch, not the missing-header branch.
+      const stepUp = await request(app)
+        .post('/api/auth/step-up')
+        .set('Authorization', `Bearer ${token}`)
+        .send({})
+      const verified = await request(app)
+        .post('/api/auth/step-up/verify')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ challenge_id: stepUp.body.challenge_id, code: await totpToken(secret) })
+      const elevatedToken = verified.body.elevated_token
+
       const wrongCode = await request(app)
         .post('/api/auth/2fa/totp/disable')
         .set('Authorization', `Bearer ${token}`)
+        .set('X-Elevated-Token', elevatedToken)
         .send({ code: '000000' })
       expect(wrongCode.status).toBe(401)
 
@@ -460,6 +474,7 @@ skipIfNoPostgres()('E2E: TOTP + step-up authentication', () => {
       const disabled = await request(app)
         .post('/api/auth/2fa/totp/disable')
         .set('Authorization', `Bearer ${token}`)
+        .set('X-Elevated-Token', elevatedToken)
         .send({ code: await totpToken(secret) })
 
       expect(disabled.status).toBe(200)
