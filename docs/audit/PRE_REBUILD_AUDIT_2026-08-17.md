@@ -918,3 +918,52 @@ QA verified R1 against the files and **APPROVED** Agent A for downstream B–H w
 | R2-3 GDPR erasure vs FINANCIAL_7Y | DL-027 / A-Q9 | Agent D / H |
 | R2-4 SEPA/BACS mandate metadata on vault | DL-028 | Stage 8 (columns reserved now) |
 
+### Stage 0 / Agent B (state machines + transaction matrix) — 2026-08-18
+
+**Delivered:** `docs/design/fin/B_STATE_MACHINES.md`, `docs/design/fin/C_TRANSACTION_MATRIX.md`. Decision Log DL-029…DL-036 appended (not rewritten). Split file and A–H bodies other than the log + this subsection were not edited. **No `backend/src/**` and no migrations.**
+
+**Addressed in design (not in code):**
+
+| Finding | How B/C scope it | Implementation stage |
+|---|---|---|
+| A/B-1 usage INSERT split from `recordConsumption` | `AuthorizeHold` / `DirectSpend` write hold/lots/postings in one DB transaction with Stage 2 usage ingest. Denied auth still inserts `authorization_attempts` | Stage 2 + 6 |
+| A-2 swallow / no metric / no DLQ | Ingest fail → `usage_events_dlq` (A). Outbox `FAILED`→`DEAD` is audited and alarmed. No command returns null on DB error | Stage 1 (outbox) + 2 + 6 |
+| A-4 second ledger (`ai_credit_*`) | Consume becomes usage + `AuthorizeHold` against `fin.lots`. Single-ledger doctrine (DL-006) restated; `ai_credit_*` not patched | Stage 6/7 + 13 |
+| C-2 lost updates | Every INTENT/MUTABLE machine is `UPDATE … WHERE version = $n`; mismatch → `OCC_VERSION_MISMATCH` / 412 | Stage 1 |
+| E-3 `audit_log` mutable | Every `audit=Y` transition inserts `fin.financial_audit_events` in the money tx. Legacy `public.audit_log` untouched | Stage 1 + H |
+| B-8 lost `fireAndForgetNotify` | B §1 topic catalogue; every money command writes `outbox_events` in the same tx. `notification.lifecycle` / `webhook.stripe` / `usage.dlq_replay` names frozen from A | Stage 1 |
+| R2-1 TRANSFER pair integrity | C §1.1: command inserts 0 or 2 legs; `TRANSFER_PAIR_COMPLETE` on a third; no “add the missing leg” repair. Agent C still owns CHECK / UNIQUE(pair,book) / deferred exactly-two (DL-025) | Stage 1 (`ledger/transactions.js`) + C |
+| R2-2 FX stamp | C §2: snapshot on both pair legs + all postings; residual is ADJUSTMENT **account** posting `FX_ROUNDING` on the dest tx, not a third leg. Trigger remains Agent C (DL-026) | Stage 1 + C |
+
+**A-Q1:** closed. B §24 locks every INTENT (and the listed MUTABLE/VERSIONED) status alphabet. C §5 locks every command that mints `ledger_transactions` (shape, source, lots, hold, idempotency subject, outbox, audit, approval). C §6 lists commands that must **not** mint a tx (`IssueInvoice`, `ApplyPayment`, …).
+
+**Columns A omitted — Decision Log, not silent tables:**
+
+| DL | Column / rule | Why |
+|---|---|---|
+| DL-029 | `contract_versions.status` | DRAFT/ACTIVE/SUPERSEDED cannot be derived safely |
+| DL-030 | `dunning_cases.status` enum | A left it to B |
+| DL-031 | credit/debit note status enum | A listed `status` without values |
+| DL-032 | `reconciliation_runs.status` enum | same |
+| DL-033 | `reconciliation_resolution.status` | A omitted; `resolved_at` is not a machine |
+| DL-034 | GRANT source = `APPROVAL_REQUEST` only; bonus inside FUNDING | no `fin.grants` table |
+| DL-035 | vendor_statements UNIQUE(vendor, period, env); no reopen | A omitted |
+| DL-036 | `dunning_cases.controls_snapshot` | CURED must not clobber a human freeze |
+
+**Deferred (still LIVE — do not silently patch):**
+
+| Finding | Why deferred |
+|---|---|
+| A/B-1, A-2, A-4 | Replacement writers are Stage 2/6/7. Patching `events.js` / `credits.js` now would write more `commercial.*` |
+| C-1 pricing PATCH throws | Not a state machine. Stage 4 `fin.prices` admin + success-path real-Postgres test |
+| C-2 on `postgres-adapter.js` | OCC is specified for `fin.*` writers in Stage 1, not a silent DAL rewrite |
+| E-3 REVOKE on `public.audit_log` | Agent D / H |
+| A-3, D-1, D-4 (historical) | Stage 13 backfill. Zero live tenants — no customer credit-note pass |
+| E1, E2 | Already remediated in `16beece`. New admin surfaces copy the 7f/3 guard array |
+
+**Test discipline (handover §3.1 / A §18):** B §27 and C §10 name the `backend/src/fin/**/*.test.js` files that must appear in the CI **postgres** job summary. Counts are not evidence. No mocked-DB conservation or transition tests.
+
+**Not in Agent B scope:** A body, D–H, any `backend/src/**` change, any migration, remediating the seven live P0s.
+
+**Stage 0 is not signed off** until the user reviews all eight deliverables.
+
