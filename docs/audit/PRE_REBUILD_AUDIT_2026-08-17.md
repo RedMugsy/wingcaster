@@ -1006,3 +1006,48 @@ QA verified R1 against the files and **APPROVED** Agent A for downstream B–H w
 
 **Stage 0 is not signed off** until the user reviews all eight deliverables. No `fin.*` implementation until then.
 
+### Stage 0 / Agent D (reconciliation + accounting boundary + security) — 2026-08-18
+
+**Delivered:** `docs/design/fin/F_RECONCILIATION.md`, `docs/design/fin/G_ACCOUNTING_BOUNDARY.md`, `docs/design/fin/H_SECURITY.md`. Decision Log appends DL-041…DL-048. No `backend/src/**` and no edits to A/B/C/E body text. B/C had not landed at write time.
+
+**Closes:** A-Q4 (F), A-Q5 (G), A-Q6 / A-Q8 / A-Q9 (H + DL-041). R2-3 is no longer an open nit.
+
+**Addressed in design (not in code):**
+
+| Finding | How F/G/H scopes it | Implementation stage |
+|---|---|---|
+| A-3 / D-3 historical empty `usage_events` | F §15 BF-A3: Audit D Runbook B as a one-time `ON_DEMAND` run, `source_system='backfill_v1'`, facts only, no ledger consume | Stage 13 |
+| D-1 WhatsApp inbound dropped | F §15 BF-D1: Runbook A anti-join vs `fin.usage_events` backfill; no double-charge; notify via outbox | Stage 13 |
+| D-4 Google budget NULL | F §15 BF-D4: Runbook C as a SELECT recompute vs `vendor_cost_estimates`; no `UPDATE google_api_usage_log` from this design | Stage 11 pattern + Stage 13 one-shot |
+| E-3 `audit_log` mutable / no hash-chain / SET NULL | H §2–§3: `financial_audit_events` INSERT/SELECT, REVOKE UPDATE/DELETE, RFC 8785 JCS chain (A §12.5 field list), genesis 64-zero per env, no legacy backfill | Stage 1 (`107_fin_audit.sql` + `109_fin_rls.sql`) |
+| E1 / E2 (remediated `16beece`) | H §0 / §5: every new admin surface copies `writeGuards` and adds itself to `phase-7f3-wiring.test.js` | Stage 12 and any earlier admin |
+| E4 two-admin recovery | H §4 + DL-048: `PLATFORM_ADMIN_RECOVERY` / platform `LARGE_REFUND` / `AUDIT_RETENTION` need two distinct elevated approvers; no self-approval | Stage 12 + Agent B machine |
+| E5 / E6 password + bcrypt | H §7: min 12, HIBP, reuse-5, bcrypt 12 + rehash. Identity tables, not `fin.*` (DL-047 OPEN) | Auth hardening (before Stage 12) |
+| E7 CSP `'unsafe-inline'` | H §6: nonce-based `script-src`; remove `'unsafe-inline'` | 7f/2 or Stage 12 web |
+| E8 7-day JWT | H §8: 15m access + rotating refresh + `session_id` revoke | Auth hardening |
+| E9 TOTP enable does not bump `token_version` | H §8: bump inside the enrolment transaction | Auth hardening (same file as enable) |
+| E11 / E12 rate limits | H §5: per-account auth limiter; `adminMutationLimiter` 10/5m on credit, bulk-ops, template test-send, pricing PATCH, all `/api/admin/fin/*` | Stage 12 + Stage 4 (pricing) |
+| R2-3 GDPR vs 7Y | H §9 + DL-041…031: pseudonymise-in-place; legal-hold blocks; tax_id/jurisdiction stay; `actor_email_snapshot` stays; invoices/payments/rated_usage keep `tenant_id` | Stage 13 retention/erasure worker |
+| I-01 / I-02 / balance / lots / tax freeze / payment cap / period equivalence | F R001–R007, R060, R071–R073 as concrete SQL pairs + ladder | Stage 1 (R001–R023) then owning stages |
+| HARD_CLOSED accounting | G §4 trigger `ACCOUNTING_PERIOD_HARD_CLOSED`; override = `RECONCILIATION_OVERRIDE` + reopen SOFT first | Stage 1 table / Stage 9 engine |
+| FX MONTH_AVG | G §6: read-only presentation; never rewrites books (DL-015) | Stage 9/12 |
+
+**Deferred (still LIVE in `commercial.*` / current app code — do not silently patch):**
+
+| Finding | Why deferred |
+|---|---|
+| A/B-1, A-2 | F/G detect the class after cutover. Replacing `emitUsageEvent` now writes more `commercial.*`. Stage 2 + 6. |
+| A-4 second ledger | R092 detective after cutover. Retire `ai_credit_*` in Stage 6/7 + 13. |
+| C-1 pricing PATCH throws | Stage 4 `fin.prices` admin. H only constrains guards + limiter + success-path postgres test. |
+| C-2 lost updates on current DAL | Stage 1 `+occ` on `fin.*`, not a `postgres-adapter.js` rewrite here. |
+| E-3 on `public.audit_log` | New money paths use `fin.financial_audit_events`. REVOKE on the legacy table is Stage 1, named in H §2.1, not done in this PR. |
+| E5–E9, E11–E14, E16 | Auth/CSP/JWT/logger/IR primitives. H is the binding posture. No `server.js` / `auth-2fa.js` / `validation.js` edit in Stage 0. |
+| D2 WhatsApp `handled: true` coupling | Not F/G/H. Product webhook stage. |
+| D5 / D8 Phase 1–6 test debt | Cross-cut test discipline restated in F/H §Acceptance; not remediated. |
+| D12 `cost_estimate_usd` NULL constraint | Stage 11 vendor estimates-before-call + optional legacy CHECK. BF-D4 does not UPDATE the live column. |
+| A-3 / D-1 / D-4 **execution** | Runbooks stay in Audit D. One-shot recon is specified; Stage 13 runs it. Zero live tenants — no credit-note pass. |
+
+**Not in Agent D scope:** A–E body text, any `backend/src/**` change, any migration.
+
+**Stage 0 is not signed off** until the user reviews all eight deliverables. No `fin.*` implementation until then.
+
