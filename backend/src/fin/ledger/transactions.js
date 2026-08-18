@@ -857,7 +857,12 @@ async function adjust(input, {
   const direction = input.direction || 'increase'
   const key = input.idempotencyKey || `ADJ:${input.requestKey || randomUUID()}`
   return withRetry(async (client) => {
-    const claimed = await claim(client, env, key, { cmd: command, sourceId, units, direction })
+    // sourceId is minted from randomUUID() when the caller does not supply
+    // one, so it MUST NOT be in the fingerprint — two replays with identical
+    // inputs would otherwise diverge on sourceId and trip
+    // IDEMPOTENCY_FINGERPRINT_CONFLICT. Per DL-014, ADJUSTMENT / REFUND
+    // uniqueness lives in idempotency_keys, not the economic-source column.
+    const claimed = await claim(client, env, key, { cmd: command, units, direction })
     if (claimed.kind === 'replay') return claimed.row.response_body
     const book = await loadBook(client, input.bookId)
     const accounts = await loadAccounts(client, book.id)
