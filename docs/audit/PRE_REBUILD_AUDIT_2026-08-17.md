@@ -1120,3 +1120,37 @@ Follow-up on `feat/stage-1-command-service-fixup` after QA on `feat/stage-1-comm
 
 **CI rule:** `conservation.test.js` `book-containment.test.js` `transfer-pair.test.js` `fund-purchase.test.js` `idempotency-replay.test.js` `outbox-same-tx.test.js` `runner.test.js` `advisory-lock.test.js` `if-match.test.js` must appear in the postgres job summary.
 
+### Stage 2 / usage ingest — 2026-08-19
+
+**Landed on `feat/stage-2-usage-ingest`:** migrations `111_fin_usage_events.sql` / `112_fin_meters.sql` / `113_fin_metered_usage.sql`, writer `backend/src/fin/usage/ingest.js`, DLQ worker `backend/src/fin/usage/dlq-worker.js`, recon R030–R039. Parallel `fin.*` path only. `backend/src/billing/events.js` untouched. No `commercial.*` writes. Metering pipeline (`fin.metered_usage` writes) and rating (`fin.rated_usage`) are not stubbed — Stages 3 and 5. Product/webhook wiring is Stage 13.
+
+**Addressed in this PR (replacement writers, not patches of live P0s):**
+
+| Finding | What landed | Still LIVE / deferred |
+|---|---|---|
+| A/B-1 usage INSERT split from `recordConsumption` | `ingestUsageEvent` writes facts-only `fin.usage_events` inside `transaction(fn)`. No `recordConsumption`. Value movement stays Stage 6 commands | `events.js` still splits INSERT + consume on `commercial.*` until Stage 13 cutover |
+| A-2 swallow / no DLQ | Missing partition / DB error → `fin.usage_events_dlq` with `error_code` (`PARTITION_MISSING` / `DB_ERROR` / `SCHEMA_INVALID` / `ENV_MISMATCH`), `attempts=1`, `next_retry_at=+60s`. Return `{ ok:false, dlq_id, error_code }`. Never null, never throw on DB failure. Worker class 1005 retries; dead-letter at 5. `USAGE_DLQ` audit row on every landing | `events.js:153-156` still swallows. Metric `wingcaster_usage_event_emit_total` not wired to Prometheus (Stage 12/ops) |
+| DL-007 facts-only | Schema probe + F R032: no `price_minor` / `casts_charged` / `rate_card_version` on `fin.usage_events` | — |
+| DL-009 permanent dedup | `UNIQUE (environment, source_system, source_event_id, residency_key)` + `ON CONFLICT DO NOTHING`. F R030 | — |
+| DL-021 / M1 composite FK | `corrects_event_id+corrects_residency_key` and `metered_usage_sources (usage_event_id, residency_key)` | `vendor_usage_events` is Stage 11 |
+| DL-013 residency_key | LIST partitions per `platform_legal_entities.residency_key` + `__platform__` default cell. Legal-entity INSERT creates the partition. Unknown key → PARTITION_MISSING, not a catch-all DEFAULT | — |
+
+**Deferred (do not silently patch):**
+
+| Item | Why |
+|---|---|
+| Cutover of `emitUsageEvent` / product / webhook callers | Stage 13. This PR must not write `commercial.*` or wire ingest into existing HTTP paths |
+| Metering writes to `fin.metered_usage` | Stage 3. Tables exist; ingest does not populate them |
+| Rating `fin.rated_usage` | Stage 5 |
+| A-4 `ai_credit_*` second ledger | Stage 6/7 + 13 |
+| C-1 pricing PATCH throws | Stage 4 |
+| Historical A-3 / D-1 / D-4 backfill | Stage 13 `source_system='backfill_v1'` |
+
+**CI rule:** if a test file name below does not appear in the **postgres** job summary, it did not run.
+
+- `ingest.test.js` `facts-only.test.js` `no-double-charge.test.js` `partition-missing.test.js`
+- `dlq-retry.test.js` `composite-fk.test.js` `source-dedup.test.js`
+- `111_fin_usage_events.postgres.test.js` `112_fin_meters.postgres.test.js` `113_fin_metered_usage.postgres.test.js`
+- `partition-ddl-lock.test.js` `rls-usage-pre-attribution.postgres.test.js`
+- `r030-r039.test.js` `runner.test.js`
+
