@@ -107,6 +107,7 @@ A named three topics (`notification.lifecycle`, `webhook.stripe`, `usage.dlq_rep
 | `fin.price.version` | Stage 4 draft / activate / deprecate | rating pin (Stage 5) | `pv:{id}:{to}` |
 | `fin.rating.completed` | Stage 5 `rateMeteredUsage` INSERT of a new `rated_usage` (not hash-equal dedup) | authorize (Stage 6) | `rating:{meteredUsageId}:{ratingHash}` |
 | `fin.spend.completed` | Stage 6 `spendCredits` (any strategy, success or denial after rating) | metrics, product | `spend:{idempotencyKey}:{strategy}` |
+| `fin.product.created` | Stage 7 `createCreditProduct` | catalog UI (Stage 12) | `product:{id}` |
 | `notification.lifecycle` | any **tenant-visible** transition (see per-row) | dispatcher (replaces `fireAndForgetNotify`, audit B-8) | `{topic_suffix}:{id}` |
 | `webhook.stripe` | PSP confirm, refund, dispute inbound **ack path** | Stripe adapter outbound | `stripe:{provider_event_id}` |
 | `usage.dlq_replay` | Stage 2 DLQ worker (not a money command) | usage ingest | `dlq:{id}:{attempt}` |
@@ -636,6 +637,15 @@ Envelope is spec §109 (`code`, `category`, `retryable`, `customer_actionable`, 
 | `FIN_NO_ACTIVE_CONTRACT` | PRECONDITION | rating: no ACTIVE `contract_version` for the holder at `metered_at` (DL-083) |
 | `FIN_NO_ACTIVE_PRICE` | PRECONDITION | rating: no `METER_PRICE`/`OVERAGE_PRICE` component for the meter, or no ACTIVE `price_version` (DL-083) |
 | `RATING_LOCK_HELD` | CONFLICT | rating tick / `rateMeteredUsage` (DL-083); retryable — caller skips |
+| `PURCHASE_ALREADY_PAID` | CONFLICT | purchase_intents submit/confirm against PAID |
+| `PURCHASE_NOT_PENDING` | PRECONDITION | fundPurchaseFromIntent when intent is not PAID; confirm/fail from the wrong status uses `PURCHASE_ILLEGAL_TRANSITION` |
+| `PURCHASE_ILLEGAL_TRANSITION` | PRECONDITION | any B §4 illegal from→to (envelope `{from,to,trigger}`) |
+| `PURCHASE_INTENT_NOT_FOUND` | PRECONDITION | missing purchase_intents row |
+| `FIN_PRODUCT_NOT_FOUND` | PRECONDITION | missing / inactive / out-of-window `credit_products` |
+| `QUOTE_INVALID` | VALIDATION | quote units/minor ≤ 0, currency mismatch, missing `provider_event_id` on Stripe confirm |
+| `UNKNOWN_PROVIDER` | VALIDATION | provider not in {STRIPE, MANUAL, INVOICE}; submit requires STRIPE |
+| `NOT_IMPLEMENTED` | PRECONDITION | `refundPurchase` reserved for Stage 10 (DL-095) |
+| `AUTO_TOPUP_LOCK_HELD` | CONFLICT | auto-topup tick did not acquire class 1010; retryable — caller skips |
 
 Agent C may add lock-timeout / serialization codes; they must not reuse these strings for other meanings.
 

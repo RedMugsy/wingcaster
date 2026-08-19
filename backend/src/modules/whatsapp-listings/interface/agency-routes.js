@@ -114,14 +114,16 @@ export function registerAgencyRoutes(app, { entitlements, credits, pipeline, con
     }
   })
 
-  app.post('/api/agency/credits/top-up', authMiddleware, requireAgencyAdmin, async (_req, res) => {
-    // See agent-routes.js — tenant-facing top-up is disabled until Phase 7e
-    // ships a real payment gateway. Platform-admin manual credit is the ONLY
-    // path that mints tenant credits today.
-    res.status(501).json({
-      error: 'topup_unavailable',
-      reason: 'payment_gateway_not_configured',
-    })
+  app.post('/api/agency/credits/top-up', authMiddleware, requireAgencyAdmin, async (req, res, next) => {
+    try {
+      const { handleCreditsTopUp } = await import('../../../fin/funding/http.js')
+      return await handleCreditsTopUp(req, res, {
+        publicTenantId: req.agencyId,
+        reasonCode: 'USER_TOPUP',
+      })
+    } catch (err) {
+      next(err)
+    }
   })
 
   app.post('/api/agency/credits/allocate', authMiddleware, requireAgencyAdmin, async (req, res) => {
