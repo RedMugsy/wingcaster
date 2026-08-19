@@ -568,7 +568,9 @@ Any overdue open DLQ row is drift (source 1 vs comparison 0). Alarm companion: `
 | expected_delta_units | `0` |
 | drift_action | `BLOCK_NEW_ISSUANCE` |
 | source_query | `SELECT m.id AS entity_id, m.quantity_units AS qty FROM fin.metered_usage m WHERE m.status = 'ACTIVE'` |
-| comparison_query | `SELECT s.metered_usage_id AS entity_id, SUM(s.contribution_units)::bigint AS qty FROM fin.metered_usage_sources s GROUP BY s.metered_usage_id` |
+| comparison_query | `SELECT s.metered_usage_id AS entity_id, SUM(s.contribution_units)::bigint AS qty FROM fin.metered_usage_sources s JOIN fin.metered_usage m ON m.id = s.metered_usage_id WHERE m.status = 'ACTIVE' GROUP BY s.metered_usage_id` |
+
+ACTIVE-only join is required so SUPERSEDED provenance does not false-DRIFT (DL-067). R036 covers the chain.
 
 ### R036 — SUPERSEDED metered row has `supersedes` chain and a successor
 

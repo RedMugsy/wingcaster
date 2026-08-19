@@ -1154,3 +1154,32 @@ Follow-up on `feat/stage-1-command-service-fixup` after QA on `feat/stage-1-comm
 - `partition-ddl-lock.test.js` `rls-usage-pre-attribution.postgres.test.js`
 - `r030-r039.test.js` `runner.test.js`
 
+### Stage 3 / metering — 2026-08-19
+
+**Landed on `feat/stage-3-metering`:** aggregator `backend/src/fin/metering/{filter,pipeline,worker}.js`, migration `114_fin_metering.sql` (SUPERSEDED-only UPDATE grant + one-ACTIVE unique), advisory class `FIN_METERING = 1013`. Parallel `fin.*` path only. Does not write `fin.rated_usage` (Stage 5) or consume lots (Stage 6). `backend/src/billing/events.js` untouched. `fin.usage_events` / `ingest.js` untouched.
+
+**Addressed in this PR (aggregator downstream of Stage 2's fact writer — advances A/B-1, does not close it):**
+
+| Finding | What landed | Still LIVE / deferred |
+|---|---|---|
+| A/B-1 usage INSERT split from `recordConsumption` | `meterPeriod` aggregates facts-only `fin.usage_events` into `fin.metered_usage` inside `transaction(fn)`. No `recordConsumption`. Value movement stays Stage 6 | `events.js` still splits INSERT + consume on `commercial.*` until Stage 13. End-to-end close is Stage 5 rating + Stage 6 authorize |
+| I-09 / I-10 metering provenance | Sources use composite FK `(usage_event_id, residency_key)` (DL-021). R035 SUM(contributions) ≡ ACTIVE quantity. R036 SUPERSEDED has a successor | Rating `fin.rated_usage` is Stage 5 |
+| DL-007 facts-only | Metering reads quantity/dimensions/event_type only; never price columns | — |
+
+**Deferred (do not silently patch):**
+
+| Item | Why |
+|---|---|
+| Cutover of `emitUsageEvent` / product / webhook callers | Stage 13 |
+| Rating `fin.rated_usage` | Stage 5. `TIME_WEIGHTED` fractional-second grain is a Stage 5 nit (DL-066) |
+| Authorize / `recordConsumption` replacement | Stage 6 — this is what closes A/B-1 end-to-end |
+| A-4 `ai_credit_*` second ledger | Stage 6/7 + 13 |
+| C-1 pricing PATCH throws | Stage 4 |
+| Historical A-3 / D-1 / D-4 backfill | Stage 13 |
+| Scheduler / cron / k8s wiring of `runMeteringTick` | Ops; this PR ships the runnable function |
+
+**CI rule:** if a test file name below does not appear in the **postgres** job summary, it did not run.
+
+- `pipeline.test.js` `filter.test.js` `advisory-lock.test.js` `correction-handling.test.js`
+- `r035-r039.test.js` `runner.test.js` `runner-metered-green.test.js`
+
