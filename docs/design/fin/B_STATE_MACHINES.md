@@ -106,6 +106,7 @@ A named three topics (`notification.lifecycle`, `webhook.stripe`, `usage.dlq_rep
 | `fin.price.created` | Stage 4 `createPrice` | catalog UI | `price:{id}` |
 | `fin.price.version` | Stage 4 draft / activate / deprecate | rating pin (Stage 5) | `pv:{id}:{to}` |
 | `fin.rating.completed` | Stage 5 `rateMeteredUsage` INSERT of a new `rated_usage` (not hash-equal dedup) | authorize (Stage 6) | `rating:{meteredUsageId}:{ratingHash}` |
+| `fin.spend.completed` | Stage 6 `spendCredits` (any strategy, success or denial after rating) | metrics, product | `spend:{idempotencyKey}:{strategy}` |
 | `notification.lifecycle` | any **tenant-visible** transition (see per-row) | dispatcher (replaces `fireAndForgetNotify`, audit B-8) | `{topic_suffix}:{id}` |
 | `webhook.stripe` | PSP confirm, refund, dispute inbound **ack path** | Stripe adapter outbound | `stripe:{provider_event_id}` |
 | `usage.dlq_replay` | Stage 2 DLQ worker (not a money command) | usage ingest | `dlq:{id}:{attempt}` |
@@ -611,6 +612,7 @@ Envelope is spec §109 (`code`, `category`, `retryable`, `customer_actionable`, 
 | `TRANSFER_CROSS_POSTING` | CONSERVATION | posting.book_id ≠ tx.book_id (DL-012) |
 | `FX_SNAPSHOT_REQUIRED` | VALIDATION | cross-currency pair (DL-015/026) |
 | `IDEMPOTENCY_KEY_EXPIRED` / `IDEMPOTENCY_KEY_IN_FLIGHT` / `IDEMPOTENCY_FINGERPRINT_CONFLICT` | IDEMPOTENCY | keys |
+| `IDEMPOTENCY_KEY_REQUIRED` | VALIDATION | authorizeUsage missing {idempotencyKey, subjectId, ratedUsageId} (DL-089) |
 | `APPROVAL_PAYLOAD_MISMATCH` / `APPROVAL_FOUR_EYES_REQUIRED` / `APPROVAL_NOT_APPROVED` | APPROVAL | approvals |
 | `INVOICE_SEQUENCE_REUSE` / `INVOICE_VOID_WITH_CASH` / `INVOICE_ZATCA_FIELDS_MISSING` | PRECONDITION | invoices |
 | `CONTRACT_NO_ACTIVE_VERSION` / `CONTRACT_VERSION_OVERLAP` | PRECONDITION | contracts |
