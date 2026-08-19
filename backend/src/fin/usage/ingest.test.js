@@ -47,7 +47,9 @@ finPostgresSuite('usage ingest', {}, ({ pool, world }) => {
       sourceEventId,
       quantityUnits: 9,
     }))
-    expect(second).toEqual({ ok: true, id: first.id, deduped: true })
+    expect(second).toEqual({
+      ok: true, id: first.id, deduped: true, residencyKey: 'ksa',
+    })
     const count = await pool().query(
       `SELECT count(*)::int AS n FROM fin.usage_events
         WHERE source_system = 'orchestrator' AND source_event_id = $1`,

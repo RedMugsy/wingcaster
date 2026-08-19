@@ -1248,6 +1248,8 @@ Follow-up on `feat/stage-1-command-service-fixup` after QA on `feat/stage-1-comm
 
 **Landed on `feat/stage-6-authorize`:** auth engine `backend/src/fin/auth/{lot-resolver,authorize,spend,capture,void,expiry-worker}.js`, migration `119_fin_hold_allocation_fk.sql` (DL-085 deferred `lot_allocations.hold_id`), `ingestUsageEventWithClient` (DL-084), `meterPeriod({ sourceEventId })` (DL-086). Parallel `fin.*` path only. `backend/src/billing/events.js` and `backend/src/fin/ledger/transactions.js` untouched. No `/api/admin/fin/**` (Stage 12). No `commercial.*` writes.
 
+**Follow-up (2026-08-20):** ingest.test.js dedup `toEqual` includes `residencyKey` (DL-084 return shape). `authorizeUsage` throws `IDEMPOTENCY_KEY_REQUIRED` when no idempotency anchor is supplied (DL-089) and fingerprints `actionKey`/`category`/`vendorId` (DL-090).
+
 **A/B-1 is CLOSED for the `fin.*` path.** `spendCredits` is the one function product code will call: ingest + meter + rate + authorize + capture share one `transaction(fn)` end-to-end. The live `emitUsageEvent` split (`events.js:135` then `:142`) remains until Stage 13 cutover.
 
 **Addressed in this PR:**

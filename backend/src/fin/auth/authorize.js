@@ -285,7 +285,14 @@ export async function authorizeUsage(input) {
   const environment = input.environment || 'LIVE'
   const unitsRequested = asUnits(input.unitsRequested)
   const actor = actorOf(input)
-  const key = input.idempotencyKey || `AUTH:HOLD:${input.subjectId || input.ratedUsageId || randomUUID()}`
+  if (!input.idempotencyKey && !input.subjectId && !input.ratedUsageId) {
+    throw finError('IDEMPOTENCY_KEY_REQUIRED', {
+      category: CATEGORY.VALIDATION,
+      details: { reason: 'authorize_missing_idempotency_anchor' },
+    })
+  }
+  const key = input.idempotencyKey
+    || `AUTH:HOLD:${input.subjectId || input.ratedUsageId}`
 
   return transaction(async (client) => {
     if (!input.reasonCode) {
@@ -300,6 +307,9 @@ export async function authorizeUsage(input) {
         holderId: input.holderId,
         bookId: input.bookId,
         meterId: input.meterId || null,
+        actionKey: input.actionKey || null,
+        category: input.category || null,
+        vendorId: input.vendorId || null,
         unitsRequested: unitsRequested.toString(),
         ratedUsageId: input.ratedUsageId || null,
       }),

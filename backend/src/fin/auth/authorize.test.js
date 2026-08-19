@@ -1,10 +1,20 @@
 import { randomUUID } from 'node:crypto'
-import { expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { finPostgresSuite } from '../testing/suite.js'
 import { authorizeUsage } from './authorize.js'
 import {
   authInput, insertApplicabilityRule, insertLimit, postingSum, seedAuthHolder,
 } from './test-support.js'
+
+describe('authorizeUsage validation', () => {
+  it('throws IDEMPOTENCY_KEY_REQUIRED when no idempotency anchor is supplied', async () => {
+    await expect(authorizeUsage({
+      environment: 'LIVE',
+      unitsRequested: 1,
+      reasonCode: 'TEST',
+    })).rejects.toMatchObject({ code: 'IDEMPOTENCY_KEY_REQUIRED' })
+  })
+})
 
 finPostgresSuite('authorizeUsage', {}, ({ pool, world }) => {
   it('happy path: 30 of 100 units held with allocation -30', async () => {
@@ -138,5 +148,20 @@ finPostgresSuite('authorizeUsage', {}, ({ pool, world }) => {
       [seeded.holderId],
     )
     expect(holds.rows[0].n).toBe(1)
+  })
+
+  it('fingerprint conflict when actionKey differs on the same idempotency key', async () => {
+    const seeded = await seedAuthHolder(pool(), world(), { label: 'auth-fp', units: 100 })
+    const key = `AUTH:${randomUUID()}`
+    await authorizeUsage(authInput(world(), seeded, {
+      unitsRequested: 10,
+      idempotencyKey: key,
+      actionKey: 'send',
+    }))
+    await expect(authorizeUsage(authInput(world(), seeded, {
+      unitsRequested: 10,
+      idempotencyKey: key,
+      actionKey: 'read',
+    }))).rejects.toMatchObject({ code: 'IDEMPOTENCY_FINGERPRINT_CONFLICT' })
   })
 })
