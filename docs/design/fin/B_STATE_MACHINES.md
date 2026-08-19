@@ -105,6 +105,7 @@ A named three topics (`notification.lifecycle`, `webhook.stripe`, `usage.dlq_rep
 | `fin.metering.completed` | Stage 3 `meterPeriod` INSERT of a new ACTIVE `metered_usage` (not hash-equal dedup) | rating pipeline (Stage 5) | `metering:{meterVersionId}:{holderId}:{periodKey}:{computationHash}` |
 | `fin.price.created` | Stage 4 `createPrice` | catalog UI | `price:{id}` |
 | `fin.price.version` | Stage 4 draft / activate / deprecate | rating pin (Stage 5) | `pv:{id}:{to}` |
+| `fin.rating.completed` | Stage 5 `rateMeteredUsage` INSERT of a new `rated_usage` (not hash-equal dedup) | authorize (Stage 6) | `rating:{meteredUsageId}:{ratingHash}` |
 | `notification.lifecycle` | any **tenant-visible** transition (see per-row) | dispatcher (replaces `fireAndForgetNotify`, audit B-8) | `{topic_suffix}:{id}` |
 | `webhook.stripe` | PSP confirm, refund, dispute inbound **ack path** | Stripe adapter outbound | `stripe:{provider_event_id}` |
 | `usage.dlq_replay` | Stage 2 DLQ worker (not a money command) | usage ingest | `dlq:{id}:{attempt}` |
@@ -629,6 +630,10 @@ Envelope is spec §109 (`code`, `category`, `retryable`, `customer_actionable`, 
 | `FIN_PRICE_VERSION_NOT_DRAFT` / `CONTRACT_VERSION_NOT_DRAFT` | PRECONDITION | activate requires DRAFT |
 | `FIN_PRICE_VERSION_NOT_ACTIVE` | PRECONDITION | deprecate requires ACTIVE (DL-077) |
 | `CONTRACT_ALREADY_TERMINAL` | PRECONDITION | draft/activate/suspend against TERMINATED/EXPIRED (or illegal from-status) |
+| `FIN_METERED_USAGE_NOT_FOUND` / `FIN_METERED_USAGE_NOT_ACTIVE` | PRECONDITION | rating: missing row, or `status <> 'ACTIVE'` (DL-083) |
+| `FIN_NO_ACTIVE_CONTRACT` | PRECONDITION | rating: no ACTIVE `contract_version` for the holder at `metered_at` (DL-083) |
+| `FIN_NO_ACTIVE_PRICE` | PRECONDITION | rating: no `METER_PRICE`/`OVERAGE_PRICE` component for the meter, or no ACTIVE `price_version` (DL-083) |
+| `RATING_LOCK_HELD` | CONFLICT | rating tick / `rateMeteredUsage` (DL-083); retryable — caller skips |
 
 Agent C may add lock-timeout / serialization codes; they must not reuse these strings for other meanings.
 

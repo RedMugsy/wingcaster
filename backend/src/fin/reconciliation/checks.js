@@ -308,7 +308,7 @@ export const CHECKS = [
     drift_action: 'BLOCK_BILLING_CLOSE',
     entity_type: 'rated_usage',
     source_query: 'SELECT r.id AS entity_id, r.amount_minor AS qty FROM fin.rated_usage r',
-    comparison_query: "SELECT r.id AS entity_id, r.amount_minor AS qty FROM fin.rated_usage r WHERE r.rating_hash = encode(sha256(convert_to(r.explanation::text || r.price_version_id::text || r.measured_units::text || r.included_units::text || r.billable_units::text || r.amount_minor::text, 'UTF8')), 'hex')",
+    comparison_query: "SELECT r.id AS entity_id, (r.explanation->>'amount_minor')::bigint AS qty FROM fin.rated_usage r WHERE r.rating_hash = encode(sha256(convert_to(fin.canonical_json(r.explanation), 'UTF8')), 'hex')",
   },
   {
     check_code: 'R041',

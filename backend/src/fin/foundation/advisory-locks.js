@@ -17,6 +17,7 @@ export const FIN_AUTO_TOPUP = 1010
 export const FIN_PARTITION_DDL = 1011
 export const FIN_IDEMPOTENCY_SWEEP = 1012
 export const FIN_METERING = 1013
+export const FIN_RATING = 1014
 
 export const LOCK_CLASSES = {
   FIN_CONTRACT_RENEWAL,
@@ -32,4 +33,5 @@ export const LOCK_CLASSES = {
   FIN_PARTITION_DDL,
   FIN_IDEMPOTENCY_SWEEP,
   FIN_METERING,
+  FIN_RATING,
 }

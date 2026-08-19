@@ -1215,4 +1215,31 @@ Follow-up on `feat/stage-1-command-service-fixup` after QA on `feat/stage-1-comm
 - `r040-r049.test.js` `runner.test.js` `runner-priced-green.test.js`
 - `phase-7f3-wiring.test.js` (fast suite; also lists the 11 new routes)
 
+### Stage 5 / rating — 2026-08-19
 
+**Landed on `feat/stage-5-rating`:** migration `118_fin_rated_usage.sql`, engine `backend/src/fin/rating/{engine,worker}.js`, advisory class `FIN_RATING = 1014`. Parallel `fin.*` path only. Does not write `ledger_transactions` / postings (C §6). `backend/src/billing/events.js` untouched. Metering / ingest / pricing writers untouched.
+
+**Addressed in this PR (aggregator downstream of Stage 3's metered_usage — advances A/B-1, does not close it):**
+
+| Finding | What landed | Still LIVE / deferred |
+|---|---|---|
+| A/B-1 usage INSERT split from `recordConsumption` | `rateMeteredUsage` converts ACTIVE `fin.metered_usage` into APPEND_ONLY `fin.rated_usage` inside `transaction(fn)`. No `recordConsumption`. Value movement stays Stage 6 | `events.js` still splits INSERT + consume on `commercial.*` until Stage 13. End-to-end close is Stage 6 authorize |
+| F R040–R046 | Table exists. R040 hasher closed (DL-082). R041 re-rate-is-new-row. R045 billable_units CHECK + writer. R046 contract currency. R042/R043/R044/R049 stay ERROR on missing Stage 9/10 tables (DL-080 / DL-052) | Authorize / invoice lines / period gates |
+| DL-007 facts-only | Rating writes `rated_usage` only; no price columns on usage_events | — |
+
+**Deferred (do not silently patch):**
+
+| Item | Why |
+|---|---|
+| Cutover of `emitUsageEvent` / product / webhook callers | Stage 13. This PR must not write `commercial.*` or touch `billing/events.js` |
+| Authorize / `recordConsumption` replacement | Stage 6 — this is what closes A/B-1 end-to-end |
+| `late_class` other than `OPEN_PERIOD`; `billing_period_id` / `accounting_period_id` FKs | Stage 9 / 10 (DL-080) |
+| Rating DLQ for `FIN_NO_ACTIVE_CONTRACT` / `FIN_NO_ACTIVE_PRICE` | Not invented (DL-081) |
+| A-4 `ai_credit_*` second ledger | Stage 6/7 + 13 |
+| Historical A-3 / D-1 / D-4 backfill | Stage 13 |
+| Scheduler / cron / k8s wiring of `runRatingTick` | Ops; this PR ships the runnable function |
+
+**CI rule:** if a test file name below does not appear in the **postgres** job summary, it did not run.
+
+- `engine.test.js` `append-only.test.js` `worker.test.js` (under `backend/src/fin/rating/`)
+- `r040-r046.test.js` `runner-rated-green.test.js` `runner.test.js`
