@@ -7,17 +7,20 @@ import { CHECKS } from './checks.js'
 import { runReconciliation } from './runner.js'
 
 finPostgresSuite('reconciliation runner', {}, ({ pool, world }) => {
-  it('inserts R001–R023 and R030–R039; R022/R023 ERROR when tables are missing', async () => {
+  it('inserts R001–R023, R030–R039, R040–R049; R023 and rated_usage checks ERROR', async () => {
     const run = await runReconciliation(pool(), { now: NOW })
     expect(run.skipped).toBe(false)
     expect(run.results).toHaveLength(CHECKS.length)
     expect(CHECKS.map((c) => c.check_code)).toEqual(run.results.map((r) => r.check_code))
     const byCode = Object.fromEntries(run.results.map((r) => [r.check_code, r]))
-    for (const check of CHECKS.filter((c) => !['R022', 'R023'].includes(c.check_code))) {
+    const errorCodes = new Set(['R023', 'R040', 'R041', 'R042', 'R043', 'R044', 'R045', 'R046', 'R049'])
+    for (const check of CHECKS.filter((c) => !errorCodes.has(c.check_code))) {
       expect(byCode[check.check_code].result, check.check_code).toBe('GREEN')
     }
-    expect(byCode.R022.result).toBe('ERROR')
-    expect(byCode.R023.result).toBe('ERROR')
+    expect(byCode.R022.result).toBe('GREEN')
+    for (const code of errorCodes) {
+      expect(byCode[code].result, code).toBe('ERROR')
+    }
     const stored = await pool().query(
       `SELECT check_code FROM fin.reconciliation_checks WHERE run_id = $1 ORDER BY check_code`,
       [run.runId],

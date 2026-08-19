@@ -204,3 +204,58 @@ describe('7f/3 — auth surfaces on server.js', () => {
     expect(line).toMatch(/requireElevated\(\)/)
   })
 })
+
+describe('7f/3 — fin/admin/pricing/routes', () => {
+  const sensitive = [
+    ['post', '/api/admin/fin/prices'],
+    ['post', '/api/admin/fin/prices/p-1/versions'],
+    ['post', '/api/admin/fin/prices/p-1/versions/v-1/activate'],
+    ['post', '/api/admin/fin/prices/p-1/versions/v-1/deprecate'],
+    ['post', '/api/admin/fin/contracts'],
+    ['post', '/api/admin/fin/contracts/c-1/versions'],
+    ['post', '/api/admin/fin/contracts/c-1/versions/v-1/activate'],
+    ['post', '/api/admin/fin/contracts/c-1/suspend'],
+    ['post', '/api/admin/fin/contracts/c-1/terminate'],
+  ]
+
+  let app
+  beforeEach(async () => {
+    await withPatchedEnv(async () => {
+      const { registerFinPricingAdminRoutes } = await import('./fin/admin/pricing/routes.js')
+      app = express()
+      app.use(express.json())
+      registerFinPricingAdminRoutes(app, {
+        authMiddleware: (req, _res, next) => {
+          req.user = { id: 'admin-1', token_version: 0, platform_role: 'platform_admin' }
+          next()
+        },
+        requirePlatformAdmin: fakePlatformAdmin,
+      })
+    })
+  })
+
+  it.each(sensitive)('%s %s refuses without X-Elevated-Token', async (method, route) => {
+    const res = await request(app)[method](route).send({})
+    expectStepUpRequired(res)
+  })
+
+  it('declares all 11 /api/admin/fin/prices and /contracts routes', async () => {
+    const fs = await import('node:fs/promises')
+    const src = await fs.readFile('src/fin/admin/pricing/routes.js', 'utf8')
+    expect(src).toContain("app.get('/api/admin/fin/prices'")
+    expect(src).toContain("app.get('/api/admin/fin/prices/:id'")
+    expect(src).toContain("app.post('/api/admin/fin/prices'")
+    expect(src).toContain("app.post('/api/admin/fin/prices/:id/versions'")
+    expect(src).toContain("app.post('/api/admin/fin/prices/:id/versions/:vid/activate'")
+    expect(src).toContain("app.post('/api/admin/fin/prices/:id/versions/:vid/deprecate'")
+    expect(src).toContain("app.post('/api/admin/fin/contracts'")
+    expect(src).toContain("app.post('/api/admin/fin/contracts/:id/versions'")
+    expect(src).toContain("app.post('/api/admin/fin/contracts/:id/versions/:vid/activate'")
+    expect(src).toContain("app.post('/api/admin/fin/contracts/:id/suspend'")
+    expect(src).toContain("app.post('/api/admin/fin/contracts/:id/terminate'")
+    expect(src).toContain('writeGuards')
+    expect(src).toContain('requireElevated()')
+    expect(src).toContain('adminMutationLimiter')
+    expect(src).toContain('requireIfMatch')
+  })
+})
