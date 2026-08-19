@@ -418,6 +418,7 @@ Prefer the two-int form so classes cannot collide: `pg_try_advisory_lock(class i
 | `1010` | `FIN_AUTO_TOPUP` | `0` or shard | Auto top-up (Stage 7) | Sharded like 1002 |
 | `1011` | `FIN_PARTITION_DDL` | `hash(residency_key)` | Legal-entity create / partition ensure | **No** per `residency_key` — see §7.4 |
 | `1012` | `FIN_IDEMPOTENCY_SWEEP` | `0` | Expires `idempotency_keys` (E) | **No** |
+| `1013` | `FIN_METERING` | `0` (tick) or `hashtext(meterVersionId:holderId:periodKey)` (`meterPeriod`) | Metering aggregator (Stage 3) | **No** per key. Tick is singleton (`key2=0`). Per-tuple keys may run in parallel across different (meter, holder, period) |
 
 `hash(uuid)` for `key2` is `('x' || right(replace(uuid::text, '-', ''), 8))::bit(32)::int` — stable, not `hashtext` of a locale-sensitive collation.
 

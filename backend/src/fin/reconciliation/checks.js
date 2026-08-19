@@ -263,7 +263,7 @@ export const CHECKS = [
     drift_action: 'BLOCK_NEW_ISSUANCE',
     entity_type: 'metered_usage',
     source_query: "SELECT m.id AS entity_id, m.quantity_units AS qty FROM fin.metered_usage m WHERE m.status = 'ACTIVE'",
-    comparison_query: 'SELECT s.metered_usage_id AS entity_id, SUM(s.contribution_units)::bigint AS qty FROM fin.metered_usage_sources s GROUP BY s.metered_usage_id',
+    comparison_query: "SELECT s.metered_usage_id AS entity_id, SUM(s.contribution_units)::bigint AS qty FROM fin.metered_usage_sources s JOIN fin.metered_usage m ON m.id = s.metered_usage_id WHERE m.status = 'ACTIVE' GROUP BY s.metered_usage_id",
   },
   {
     check_code: 'R036',
