@@ -1,25 +1,27 @@
-import { randomUUID } from 'node:crypto'
 import { expect, it } from 'vitest'
 import { ingestUsageEvent } from '../usage/ingest.js'
 import { finPostgresSuite } from '../testing/suite.js'
 import { meterPeriod } from './pipeline.js'
-import { meterInput, seedMeter, usagePayload } from './test-support.js'
+import { countUsageByEventType, meterInput, seedIsolatedMeter, usagePayload } from './test-support.js'
 
 finPostgresSuite('metering correction-handling', {}, ({ pool, world }) => {
   it('CANCELLATION removes the original from the aggregate on re-meter', async () => {
-    const { meterVersionId } = await seedMeter(pool(), { code: `cancel.${randomUUID()}` })
-    const keep = await ingestUsageEvent(usagePayload(world(), { quantityUnits: 1_000_000 }))
-    const drop = await ingestUsageEvent(usagePayload(world(), { quantityUnits: 2_000_000 }))
+    const { meterVersionId, eventType } = await seedIsolatedMeter(pool(), { label: 'cancel' })
+    const keep = await ingestUsageEvent(usagePayload(world(), { eventType, quantityUnits: 1_000_000 }))
+    const drop = await ingestUsageEvent(usagePayload(world(), { eventType, quantityUnits: 2_000_000 }))
+    expect(await countUsageByEventType(pool(), eventType)).toBe(2)
     const first = await meterPeriod(meterInput(world(), { meterVersionId }))
     expect(first.quantityUnits).toBe(3_000_000)
 
     await ingestUsageEvent(usagePayload(world(), {
+      eventType,
       eventKind: 'CANCELLATION',
       correctsEventId: drop.id,
       correctsResidencyKey: 'ksa',
       quantityUnits: 2_000_000,
       occurredAt: '2026-08-20T00:00:00.000Z',
     }))
+    expect(await countUsageByEventType(pool(), eventType)).toBe(3)
     const second = await meterPeriod(meterInput(world(), { meterVersionId }))
     expect(second.ok).toBe(true)
     expect(second.superseded).toBe(first.meteredUsageId)
@@ -34,18 +36,21 @@ finPostgresSuite('metering correction-handling', {}, ({ pool, world }) => {
   })
 
   it('REPLACEMENT swaps the original quantity in-place on re-meter', async () => {
-    const { meterVersionId } = await seedMeter(pool(), { code: `repl.${randomUUID()}` })
-    const original = await ingestUsageEvent(usagePayload(world(), { quantityUnits: 1_000_000 }))
+    const { meterVersionId, eventType } = await seedIsolatedMeter(pool(), { label: 'repl' })
+    const original = await ingestUsageEvent(usagePayload(world(), { eventType, quantityUnits: 1_000_000 }))
+    expect(await countUsageByEventType(pool(), eventType)).toBe(1)
     const first = await meterPeriod(meterInput(world(), { meterVersionId }))
     expect(first.quantityUnits).toBe(1_000_000)
 
     await ingestUsageEvent(usagePayload(world(), {
+      eventType,
       eventKind: 'REPLACEMENT',
       correctsEventId: original.id,
       correctsResidencyKey: 'ksa',
       quantityUnits: 4_000_000,
       occurredAt: '2026-08-21T00:00:00.000Z',
     }))
+    expect(await countUsageByEventType(pool(), eventType)).toBe(2)
     const second = await meterPeriod(meterInput(world(), { meterVersionId }))
     expect(second.quantityUnits).toBe(4_000_000)
     expect(second.superseded).toBe(first.meteredUsageId)

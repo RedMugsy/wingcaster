@@ -4,14 +4,15 @@ import { FinError } from '../errors.js'
 import { finPostgresSuite } from '../testing/suite.js'
 import { ingestUsageEvent } from '../usage/ingest.js'
 import { meterPeriod } from './pipeline.js'
-import { meterInput, seedMeter, usagePayload } from './test-support.js'
+import { countUsageByEventType, meterInput, seedIsolatedMeter, usagePayload } from './test-support.js'
 
 finPostgresSuite('metering pipeline', {}, ({ pool, world }) => {
   it('SUM over 5 usage events → one metered_usage row and 5 sources', async () => {
-    const { meterVersionId } = await seedMeter(pool(), { code: `sum.${randomUUID()}` })
+    const { meterVersionId, eventType } = await seedIsolatedMeter(pool(), { label: 'sum' })
     for (let i = 0; i < 5; i += 1) {
-      await ingestUsageEvent(usagePayload(world()))
+      await ingestUsageEvent(usagePayload(world(), { eventType }))
     }
+    expect(await countUsageByEventType(pool(), eventType)).toBe(5)
     const result = await meterPeriod(meterInput(world(), { meterVersionId }))
     expect(result).toMatchObject({ ok: true, quantityUnits: 5_000_000, sourceCount: 5 })
     expect(result.deduped).toBeUndefined()
@@ -50,13 +51,14 @@ finPostgresSuite('metering pipeline', {}, ({ pool, world }) => {
   })
 
   it('COUNT aggregation', async () => {
-    const { meterVersionId } = await seedMeter(pool(), {
-      code: `count.${randomUUID()}`,
+    const { meterVersionId, eventType } = await seedIsolatedMeter(pool(), {
+      label: 'count',
       aggregationType: 'COUNT',
     })
     for (let i = 0; i < 5; i += 1) {
-      await ingestUsageEvent(usagePayload(world(), { quantityUnits: 9 }))
+      await ingestUsageEvent(usagePayload(world(), { eventType, quantityUnits: 9 }))
     }
+    expect(await countUsageByEventType(pool(), eventType)).toBe(5)
     const result = await meterPeriod(meterInput(world(), { meterVersionId }))
     expect(result.quantityUnits).toBe(5)
     const sources = await pool().query(
@@ -68,22 +70,26 @@ finPostgresSuite('metering pipeline', {}, ({ pool, world }) => {
   })
 
   it('LATEST aggregation', async () => {
-    const { meterVersionId } = await seedMeter(pool(), {
-      code: `latest.${randomUUID()}`,
+    const { meterVersionId, eventType } = await seedIsolatedMeter(pool(), {
+      label: 'latest',
       aggregationType: 'LATEST',
     })
     await ingestUsageEvent(usagePayload(world(), {
+      eventType,
       quantityUnits: 1,
       occurredAt: '2026-08-10T00:00:00.000Z',
     }))
     await ingestUsageEvent(usagePayload(world(), {
+      eventType,
       quantityUnits: 42,
       occurredAt: '2026-08-18T12:00:00.000Z',
     }))
     await ingestUsageEvent(usagePayload(world(), {
+      eventType,
       quantityUnits: 7,
       occurredAt: '2026-08-12T00:00:00.000Z',
     }))
+    expect(await countUsageByEventType(pool(), eventType)).toBe(3)
     const result = await meterPeriod(meterInput(world(), { meterVersionId }))
     expect(result.quantityUnits).toBe(42)
     const sources = await pool().query(
@@ -95,13 +101,14 @@ finPostgresSuite('metering pipeline', {}, ({ pool, world }) => {
   })
 
   it('UNIQUE_COUNT — 3 events with 2 distinct subject_ids → qty=2', async () => {
-    const { meterVersionId } = await seedMeter(pool(), {
-      code: `unique.${randomUUID()}`,
+    const { meterVersionId, eventType } = await seedIsolatedMeter(pool(), {
+      label: 'unique',
       aggregationType: 'UNIQUE_COUNT',
     })
-    await ingestUsageEvent(usagePayload(world(), { subjectId: 's-a' }))
-    await ingestUsageEvent(usagePayload(world(), { subjectId: 's-a' }))
-    await ingestUsageEvent(usagePayload(world(), { subjectId: 's-b' }))
+    await ingestUsageEvent(usagePayload(world(), { eventType, subjectId: 's-a' }))
+    await ingestUsageEvent(usagePayload(world(), { eventType, subjectId: 's-a' }))
+    await ingestUsageEvent(usagePayload(world(), { eventType, subjectId: 's-b' }))
+    expect(await countUsageByEventType(pool(), eventType)).toBe(3)
     const result = await meterPeriod(meterInput(world(), { meterVersionId }))
     expect(result.quantityUnits).toBe(2)
     expect(result.sourceCount).toBe(3)
@@ -114,8 +121,9 @@ finPostgresSuite('metering pipeline', {}, ({ pool, world }) => {
   })
 
   it('determinism: second meterPeriod with no new events is deduped and writes no row', async () => {
-    const { meterVersionId } = await seedMeter(pool(), { code: `dedupe.${randomUUID()}` })
-    await ingestUsageEvent(usagePayload(world()))
+    const { meterVersionId, eventType } = await seedIsolatedMeter(pool(), { label: 'dedupe' })
+    await ingestUsageEvent(usagePayload(world(), { eventType }))
+    expect(await countUsageByEventType(pool(), eventType)).toBe(1)
     const first = await meterPeriod(meterInput(world(), { meterVersionId }))
     const second = await meterPeriod(meterInput(world(), { meterVersionId }))
     expect(second).toMatchObject({
@@ -132,18 +140,21 @@ finPostgresSuite('metering pipeline', {}, ({ pool, world }) => {
   })
 
   it('supersession: correction after first metering inserts a successor and flips SUPERSEDED', async () => {
-    const { meterVersionId } = await seedMeter(pool(), { code: `super.${randomUUID()}` })
-    const original = await ingestUsageEvent(usagePayload(world(), { quantityUnits: 1_000_000 }))
+    const { meterVersionId, eventType } = await seedIsolatedMeter(pool(), { label: 'super' })
+    const original = await ingestUsageEvent(usagePayload(world(), { eventType, quantityUnits: 1_000_000 }))
+    expect(await countUsageByEventType(pool(), eventType)).toBe(1)
     const first = await meterPeriod(meterInput(world(), { meterVersionId }))
     expect(first.quantityUnits).toBe(1_000_000)
 
     await ingestUsageEvent(usagePayload(world(), {
+      eventType,
       eventKind: 'CORRECTION',
       correctsEventId: original.id,
       correctsResidencyKey: 'ksa',
       quantityUnits: 3_000_000,
       occurredAt: '2026-08-19T00:00:00.000Z',
     }))
+    expect(await countUsageByEventType(pool(), eventType)).toBe(2)
     const second = await meterPeriod(meterInput(world(), { meterVersionId }))
     expect(second.ok).toBe(true)
     expect(second.deduped).toBeUndefined()

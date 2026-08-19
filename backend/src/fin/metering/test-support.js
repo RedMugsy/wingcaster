@@ -31,6 +31,28 @@ export async function seedMeter(client, {
   return { meterId, meterVersionId }
 }
 
+/**
+ * Unique event_type + filter so APPEND_ONLY usage_events from other tests
+ * in the same file cannot leak into this meter's aggregation.
+ */
+export async function seedIsolatedMeter(client, { label, ...rest } = {}) {
+  const eventType = `metering.${label}.${randomUUID()}`
+  const seeded = await seedMeter(client, {
+    code: eventType,
+    ...rest,
+    filterDefinition: { ...(rest.filterDefinition || {}), event_types: [eventType] },
+  })
+  return { ...seeded, eventType }
+}
+
+export async function countUsageByEventType(client, eventType) {
+  const { rows } = await client.query(
+    `SELECT count(*)::int AS n FROM fin.usage_events WHERE event_type = $1`,
+    [eventType],
+  )
+  return rows[0].n
+}
+
 export function meterInput(world, { meterVersionId, extra = {} } = {}) {
   return {
     environment: 'LIVE',

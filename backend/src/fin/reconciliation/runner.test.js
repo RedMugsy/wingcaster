@@ -3,9 +3,6 @@ import { expect, it } from 'vitest'
 import { commandEnv, insertLedgerTx, NOW } from '../testing/seed.js'
 import { finPostgresSuite } from '../testing/suite.js'
 import { fundPurchase } from '../ledger/transactions.js'
-import { ingestUsageEvent } from '../usage/ingest.js'
-import { meterPeriod } from '../metering/pipeline.js'
-import { meterInput, seedMeter, usagePayload } from '../metering/test-support.js'
 import { CHECKS } from './checks.js'
 import { runReconciliation } from './runner.js'
 
@@ -117,21 +114,5 @@ finPostgresSuite('reconciliation runner', {}, ({ pool, world }) => {
     await pool().query('ALTER TABLE fin.lot_allocations ENABLE TRIGGER trg_lot_allocations_apply')
     const run = await runReconciliation(pool(), { now: NOW })
     expect(run.results.find((r) => r.check_code === 'R006').result).toBe('DRIFT')
-  })
-
-  it('R001–R039 stay GREEN after a metered seed world (R022/R023 still ERROR)', async () => {
-    const { meterVersionId } = await seedMeter(pool(), { code: `runner.${randomUUID()}` })
-    await ingestUsageEvent(usagePayload(world(), { quantityUnits: 1_000_000 }))
-    await ingestUsageEvent(usagePayload(world(), { quantityUnits: 2_000_000 }))
-    const metered = await meterPeriod(meterInput(world(), { meterVersionId }))
-    expect(metered.ok).toBe(true)
-
-    const run = await runReconciliation(pool(), { now: NOW })
-    const byCode = Object.fromEntries(run.results.map((r) => [r.check_code, r]))
-    for (const check of CHECKS.filter((c) => !['R022', 'R023'].includes(c.check_code))) {
-      expect(byCode[check.check_code].result, check.check_code).toBe('GREEN')
-    }
-    expect(byCode.R022.result).toBe('ERROR')
-    expect(byCode.R023.result).toBe('ERROR')
   })
 })

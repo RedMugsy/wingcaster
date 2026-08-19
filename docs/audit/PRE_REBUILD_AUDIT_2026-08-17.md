@@ -1181,5 +1181,5 @@ Follow-up on `feat/stage-1-command-service-fixup` after QA on `feat/stage-1-comm
 **CI rule:** if a test file name below does not appear in the **postgres** job summary, it did not run.
 
 - `pipeline.test.js` `filter.test.js` `advisory-lock.test.js` `correction-handling.test.js`
-- `r035-r039.test.js` `runner.test.js`
+- `r035-r039.test.js` `runner.test.js` `runner-metered-green.test.js`
 
