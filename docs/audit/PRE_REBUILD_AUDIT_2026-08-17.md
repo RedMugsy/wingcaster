@@ -1183,3 +1183,36 @@ Follow-up on `feat/stage-1-command-service-fixup` after QA on `feat/stage-1-comm
 - `pipeline.test.js` `filter.test.js` `advisory-lock.test.js` `correction-handling.test.js`
 - `r035-r039.test.js` `runner.test.js` `runner-metered-green.test.js`
 
+### Stage 4 / pricing admin — 2026-08-19
+
+**Landed on `feat/stage-4-pricing`:** migrations `115_fin_prices.sql` / `116_fin_contracts.sql` / `117_fin_pricing_hooks.sql`, command service `backend/src/fin/pricing/{prices,contracts}.js`, first real `/api/admin/fin/**` surface (`backend/src/fin/admin/pricing/routes.js`) with the 7f/3 writeGuards array plus `adminMutationLimiter` (H §5) and Stage 1 `requireIfMatch`. Parallel `fin.*` path only. `backend/src/billing/pricing/**` is **not** patched.
+
+**C-1 is REPLACED by this surface, not fixed in place.** Every PATCH under `/api/admin/pricing/*` still throws at the nine `update(coll, {id}, changes)` call sites. Those commercial paths remain broken until Stage 13 cutover — that is the audit register's point. A drive-by DAL-signature fix on `commercial.*` is out of Stage 4 scope (DL-011).
+
+**Addressed in this PR (replacement writers + success-path tests):**
+
+| Finding | What landed | Still LIVE / deferred |
+|---|---|---|
+| C-1 pricing PATCH throws | `fin.prices` / `fin.price_versions` / `fin.price_tiers` / `fin.price_dimensions` + `fin.contracts` / versions / components. Named commands inside `transaction(fn)`. Success-path real-Postgres tests in `prices.test.js`, `contracts.test.js`, `routes.test.js` | Live `/api/admin/pricing/*` still throws. Stage 13 cutover |
+| C-2 lost updates | Header `+occ` + If-Match on every admin POST. 428 missing / 412 stale / 200 matching | `postgres-adapter.js` `update()` unchanged |
+| E12 admin limiter | `backend/src/lib/admin-limiter.js` 10/5m on every Stage 4 mutation | Other admin mutations still Stage 12 |
+| E1/E2 step-up | All 9 POST routes in `phase-7f3-wiring.test.js` plus a 11-route inventory (2 GETs are readGuards only) | — |
+
+**Deferred (do not silently patch):**
+
+| Item | Why |
+|---|---|
+| Cutover of `registerPricingRoutes` / `billing/pricing/{cities,zones,territories,core-rate-cards}.js` | Stage 13. This PR must not write `commercial.*` |
+| Rating `fin.rated_usage` (R040–R046, R049) | Stage 5. Checks are wired and stay ERROR on `42P01` |
+| `fin.credit_facilities` FK on `contract_components.facility_id` | Stage 8 (DL-071) |
+| ResumeContract / ExpireContract / Resume workers | Not in the Stage 4 command list |
+| Historical A-3 / D-1 / D-4 backfill | Stage 13 |
+
+**CI rule:** if a test file name below does not appear in the **postgres** job summary, it did not run.
+
+- `prices.test.js` `contracts.test.js` `append-only.test.js`
+- `routes.test.js` (under `backend/src/fin/admin/pricing/`)
+- `r040-r049.test.js` `runner.test.js` `runner-priced-green.test.js`
+- `phase-7f3-wiring.test.js` (fast suite; also lists the 11 new routes)
+
+

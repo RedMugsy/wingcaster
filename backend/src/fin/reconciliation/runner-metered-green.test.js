@@ -11,7 +11,7 @@ import { runReconciliation } from './runner.js'
 // unable to go GREEN in that same file afterwards.
 
 finPostgresSuite('reconciliation runner after metering', {}, ({ pool, world }) => {
-  it('R001–R039 stay GREEN after a metered seed world (R022/R023 still ERROR)', async () => {
+  it('R001–R039 stay GREEN after a metered seed world (R023 still ERROR; R040–R046 ERROR)', async () => {
     const { meterVersionId, eventType } = await seedIsolatedMeter(pool(), { label: 'runner' })
     await ingestUsageEvent(usagePayload(world(), { eventType, quantityUnits: 1_000_000 }))
     await ingestUsageEvent(usagePayload(world(), { eventType, quantityUnits: 2_000_000 }))
@@ -21,10 +21,13 @@ finPostgresSuite('reconciliation runner after metering', {}, ({ pool, world }) =
 
     const run = await runReconciliation(pool(), { now: NOW })
     const byCode = Object.fromEntries(run.results.map((r) => [r.check_code, r]))
-    for (const check of CHECKS.filter((c) => !['R022', 'R023'].includes(c.check_code))) {
+    const errorCodes = new Set(['R023', 'R040', 'R041', 'R042', 'R043', 'R044', 'R045', 'R046', 'R049'])
+    for (const check of CHECKS.filter((c) => !errorCodes.has(c.check_code))) {
       expect(byCode[check.check_code].result, check.check_code).toBe('GREEN')
     }
-    expect(byCode.R022.result).toBe('ERROR')
+    expect(byCode.R022.result).toBe('GREEN')
     expect(byCode.R023.result).toBe('ERROR')
+    expect(byCode.R047.result).toBe('GREEN')
+    expect(byCode.R048.result).toBe('GREEN')
   })
 })

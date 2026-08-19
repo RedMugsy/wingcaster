@@ -103,6 +103,8 @@ A named three topics (`notification.lifecycle`, `webhook.stripe`, `usage.dlq_rep
 | `fin.vendor.statement.finalized` | `FinalizeVendorStatement` | vendor recon (F) | `vstmt:{id}` |
 | `fin.usage.received` | Stage 2 `ingestUsageEvent` successful INSERT (not dedup) | metering pipeline (Stage 3) | `usage:{residency_key}:{id}` |
 | `fin.metering.completed` | Stage 3 `meterPeriod` INSERT of a new ACTIVE `metered_usage` (not hash-equal dedup) | rating pipeline (Stage 5) | `metering:{meterVersionId}:{holderId}:{periodKey}:{computationHash}` |
+| `fin.price.created` | Stage 4 `createPrice` | catalog UI | `price:{id}` |
+| `fin.price.version` | Stage 4 draft / activate / deprecate | rating pin (Stage 5) | `pv:{id}:{to}` |
 | `notification.lifecycle` | any **tenant-visible** transition (see per-row) | dispatcher (replaces `fireAndForgetNotify`, audit B-8) | `{topic_suffix}:{id}` |
 | `webhook.stripe` | PSP confirm, refund, dispute inbound **ack path** | Stripe adapter outbound | `stripe:{provider_event_id}` |
 | `usage.dlq_replay` | Stage 2 DLQ worker (not a money command) | usage ingest | `dlq:{id}:{attempt}` |
@@ -121,7 +123,7 @@ A `approval_requests.action_kind` is the **capability bucket**. Thresholds (what
 | `LARGE_REFUND` | `RefundPurchase` / `IssueCreditNote` when cash returns to the payer |
 | `NEGATIVE_ADJUSTMENT` | `ManualAdjust` with a net decrease of AVAILABLE |
 | `FACILITY_OPS` | facility PENDING→ACTIVE, ACTIVE→CLOSED, limit change, PAUSED/SUSPENDED by a USER |
-| `BACKDATED_AMENDMENT` | `ActivateContractVersion` when `effective_from < BusinessClock.now()` |
+| `BACKDATED_AMENDMENT` | `ActivateContractVersion` / `ActivatePriceVersion` when `effective_from < BusinessClock.now()` |
 | `INVOICE_VOID` | ISSUED/PART_PAID → VOID |
 | `WRITE_OFF` | → UNCOLLECTIBLE; dunning WRITE_OFF_REVIEW → WRITTEN_OFF |
 | `RECONCILIATION_OVERRIDE` | HARD_CLOSED → SOFT_CLOSED; any `BLOCK_*` resolution; recon ADJUSTMENT |
@@ -619,6 +621,10 @@ Envelope is spec §109 (`code`, `category`, `retryable`, `customer_actionable`, 
 | `FIN_FILTER_INVALID` | VALIDATION | meter filter DSL (DL-064) |
 | `FIN_METER_VERSION_NOT_FOUND` | PRECONDITION | metering pipeline (DL-064) |
 | `METERING_LOCK_HELD` | CONFLICT | metering tick / `meterPeriod` (DL-064); retryable — caller skips |
+| `BACKDATED_AMENDMENT_REQUIRED` | APPROVAL | activate price/contract version when `effective_from < now` (DL-072) |
+| `FIN_PRICE_MODEL_INVALID` | VALIDATION | draft price version model vs children (DL-072) |
+| `FIN_PRICE_VERSION_OVERLAP` / `FIN_CONTRACT_VERSION_OVERLAP` | CONFLICT | gist 23P01 / one-ACTIVE unique on activate (DL-070) |
+| `FIN_CONTRACT_NO_ACTIVE_VERSION` | PRECONDITION | contract header ACTIVE requires exactly one ACTIVE version (DL-072) |
 
 Agent C may add lock-timeout / serialization codes; they must not reuse these strings for other meanings.
 
@@ -648,6 +654,7 @@ A §17 A-Q1 asked for “exact permitted transition tables for each INTENT statu
 | `payments` | INTENT | RECEIVED / ALLOCATED / REVERSED |
 | `contracts` | MUTABLE | DRAFT / ACTIVE / SUSPENDED / TERMINATED / EXPIRED |
 | `contract_versions` | VERSIONED | DL-029 DRAFT / ACTIVE / SUPERSEDED |
+| `price_versions` | VERSIONED | DL-069 DRAFT / ACTIVE / SUPERSEDED |
 | `credit_facilities` | MUTABLE | PENDING / ACTIVE / PAUSED / SUSPENDED / CLOSED |
 | `lots` | MUTABLE | ACTIVE / EXHAUSTED / EXPIRED / FROZEN |
 

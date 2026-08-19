@@ -16,6 +16,7 @@ import { seedData } from './seed.js'
 import { signToken, authMiddleware, requireElevated } from './auth.js'
 import { registerTwoFactorRoutes, startSigninChallengeIfRequired } from './auth-2fa.js'
 import { registerPlatformTemplateAdminRoutes } from './notifications/platform-templates/routes.js'
+import { registerFinPricingAdminRoutes } from './fin/admin/pricing/routes.js'
 import { sendPlatformNotification } from './notifications/platform-templates/index.js'
 import {
   createAgentAccount,
@@ -593,6 +594,11 @@ registerPlatformTemplateAdminRoutes(app, {
   authMiddleware,
   requirePlatformAdmin,
   logActivity,
+})
+
+registerFinPricingAdminRoutes(app, {
+  authMiddleware,
+  requirePlatformAdmin,
 })
 
 setCommentRouterHook(async (message) => {

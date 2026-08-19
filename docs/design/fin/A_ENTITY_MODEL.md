@@ -679,6 +679,7 @@ Replaces `commercial.billing_subscriptions` as the system of record. Subscriptio
 | effective_from / effective_to | TIMESTAMPTZ | |
 | amendment_reason | TEXT | |
 | approved_by_approval_id | UUID → approval_requests | |
+| status | TEXT NOT NULL | `DRAFT` / `ACTIVE` / `SUPERSEDED` (DL-029) |
 | UNIQUE(contract_id, version_n) | | |
 | EXCLUDE USING gist (contract_id WITH =, tstzrange(effective_from, COALESCE(effective_to, 'infinity'::timestamptz)) WITH &&) | | T9 — named shape, not "gist exclude" |
 
@@ -722,6 +723,7 @@ Replaces `commercial.billing_subscriptions` as the system of record. Subscriptio
 | effective_from / effective_to | TIMESTAMPTZ | |
 | UNIQUE(price_id, version_n) | | |
 | EXCLUDE USING gist (price_id WITH =, tstzrange(effective_from, COALESCE(effective_to, 'infinity'::timestamptz)) WITH &&) | | T9 |
+| status | TEXT NOT NULL | `DRAFT` / `ACTIVE` / `SUPERSEDED` (DL-069; A originally omitted — same hole as contract_versions / DL-029) |
 | **absent** | | no `tiers` JSONB, no `dimensional_selector` JSONB (M7 / §1) |
 
 ### 7.6 `fin.price_tiers` — VERSIONED / APPEND_ONLY rows (M7)
