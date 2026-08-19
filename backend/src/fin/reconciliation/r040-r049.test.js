@@ -10,8 +10,6 @@ import {
 import { CHECKS } from './checks.js'
 import { runReconciliation } from './runner.js'
 
-const RATED_USAGE_ERROR = ['R040', 'R041', 'R042', 'R043', 'R044', 'R045', 'R046', 'R049']
-
 function priceEnv(world, extra = {}) {
   return {
     environment: 'LIVE',
@@ -23,7 +21,7 @@ function priceEnv(world, extra = {}) {
 }
 
 finPostgresSuite('reconciliation R040–R049 after pricing', {}, ({ pool, world }) => {
-  it('R047 and R048 are GREEN after real activations; R040–R046 stay ERROR', async () => {
+  it('R047 and R048 are GREEN after real activations; R042–R044/R049 stay ERROR; empty R040/R041/R045/R046 GREEN', async () => {
     const price = await createPrice(priceEnv(world(), { code: 'r047.p', currency: 'USD' }))
     const pv = await draftPriceVersion(priceEnv(world(), {
       priceId: price.id,
@@ -63,7 +61,10 @@ finPostgresSuite('reconciliation R040–R049 after pricing', {}, ({ pool, world 
     expect(CHECKS.some((c) => c.check_code === 'R047')).toBe(true)
     expect(byCode.R047.result).toBe('GREEN')
     expect(byCode.R048.result).toBe('GREEN')
-    for (const code of RATED_USAGE_ERROR) {
+    for (const code of ['R040', 'R041', 'R045', 'R046']) {
+      expect(byCode[code].result, code).toBe('GREEN')
+    }
+    for (const code of ['R042', 'R043', 'R044', 'R049']) {
       expect(byCode[code].result, code).toBe('ERROR')
     }
   })
