@@ -334,7 +334,7 @@ export async function deprecatePriceVersion(input) {
       [priceVersionId, priceId],
     )).rows[0]
     if (!version || version.status !== 'ACTIVE') {
-      throw finError('FIN_PRICE_VERSION_NOT_DRAFT', { category: CATEGORY.PRECONDITION, httpStatus: 409 })
+      throw finError('FIN_PRICE_VERSION_NOT_ACTIVE', { category: CATEGORY.PRECONDITION, httpStatus: 409 })
     }
     await client.query(
       `UPDATE fin.price_versions

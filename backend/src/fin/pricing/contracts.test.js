@@ -93,7 +93,7 @@ finPostgresSuite('fin.pricing contracts commands', {}, ({ pool, world }) => {
     const created = await createContract(newContractInput(world(), { contractNumber: 'CV-SUP' }))
     const v1 = await draftContractVersion(contractEnv(world(), {
       contractId: created.id,
-      effective_from: '2026-01-01T00:00:00.000Z',
+      effective_from: NOW,
     }))
     await activateContractVersion(contractEnv(world(), {
       contractId: created.id,
@@ -101,7 +101,7 @@ finPostgresSuite('fin.pricing contracts commands', {}, ({ pool, world }) => {
     }))
     const v2 = await draftContractVersion(contractEnv(world(), {
       contractId: created.id,
-      effective_from: NOW,
+      effective_from: '2026-12-01T00:00:00.000Z',
     }))
     await activateContractVersion(contractEnv(world(), {
       contractId: created.id,

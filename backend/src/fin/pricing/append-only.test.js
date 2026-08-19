@@ -35,15 +35,15 @@ finPostgresSuite('fin.pricing append-only grants', {}, ({ pool, world }) => {
         [drafted.id],
       ))).rejects.toThrow(/permission denied|insufficient privilege/i)
 
-      await asRole(client, 'fin_app_role', gucs, (c) => c.query(
-        `UPDATE fin.price_versions SET status = 'SUPERSEDED' WHERE id = $1`,
-        [drafted.id],
-      ))
-
       await expect(asRole(client, 'fin_app_role', gucs, (c) => c.query(
         `UPDATE fin.price_versions SET status = 'DRAFT' WHERE id = $1`,
         [drafted.id],
       ))).rejects.toThrow(/illegal price_version status transition|append-only/i)
+
+      await asRole(client, 'fin_app_role', gucs, (c) => c.query(
+        `UPDATE fin.price_versions SET status = 'SUPERSEDED' WHERE id = $1`,
+        [drafted.id],
+      ))
 
       const v2 = await draftPriceVersion(env(world(), {
         priceId: created.id,

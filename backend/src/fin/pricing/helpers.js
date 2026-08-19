@@ -4,6 +4,7 @@
  */
 import { randomUUID } from 'node:crypto'
 import { transaction } from '../../db.js'
+import { BusinessClock } from '../clock.js'
 import { CATEGORY, finError } from '../errors.js'
 import { requestFingerprint } from '../idempotency/fingerprint.js'
 import { claimIdempotency, completeIdempotency } from '../idempotency/claim.js'
@@ -16,7 +17,7 @@ export function iso(value) {
 
 export function envelope(input) {
   return {
-    now: iso(input.now),
+    now: iso(input.now || BusinessClock.now()),
     environment: input.environment || 'LIVE',
     actorType: input.actorType || 'SYSTEM',
     actorId: input.actorId || null,
@@ -84,9 +85,16 @@ export function mapExclusion(error, code) {
   throw error
 }
 
+const HEADER_TABLES = {
+  prices: 'prices',
+  contracts: 'contracts',
+}
+
 export async function lockHeader(client, table, id) {
+  const ident = HEADER_TABLES[table]
+  if (!ident) throw new Error(`lockHeader: unknown table ${table}`)
   const { rows } = await client.query(
-    `SELECT * FROM fin.${table} WHERE id = $1 FOR UPDATE`,
+    `SELECT * FROM fin.${ident} WHERE id = $1 FOR UPDATE`,
     [id],
   )
   return rows[0] || null
@@ -108,8 +116,10 @@ export function assertIfMatch(header, expectedVersion) {
 export async function bumpHeader(client, {
   table, id, expectedVersion, now, actorType, actorId,
 }) {
+  const ident = HEADER_TABLES[table]
+  if (!ident) throw new Error(`bumpHeader: unknown table ${table}`)
   const result = await client.query(
-    `UPDATE fin.${table}
+    `UPDATE fin.${ident}
         SET updated_at = $2,
             updated_by_actor_type = $3,
             updated_by_actor_id = $4
@@ -119,7 +129,7 @@ export async function bumpHeader(client, {
   )
   if (result.rowCount === 0) {
     const current = await client.query(
-      `SELECT * FROM fin.${table} WHERE id = $1`,
+      `SELECT * FROM fin.${ident} WHERE id = $1`,
       [id],
     )
     throw finError('PRECONDITION_FAILED', {

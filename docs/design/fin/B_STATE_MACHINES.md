@@ -625,6 +625,10 @@ Envelope is spec §109 (`code`, `category`, `retryable`, `customer_actionable`, 
 | `FIN_PRICE_MODEL_INVALID` | VALIDATION | draft price version model vs children (DL-072) |
 | `FIN_PRICE_VERSION_OVERLAP` / `FIN_CONTRACT_VERSION_OVERLAP` | CONFLICT | gist 23P01 / one-ACTIVE unique on activate (DL-070) |
 | `FIN_CONTRACT_NO_ACTIVE_VERSION` | PRECONDITION | contract header ACTIVE requires exactly one ACTIVE version (DL-072) |
+| `FIN_PRICE_NOT_FOUND` / `FIN_PRICE_VERSION_NOT_FOUND` / `FIN_CONTRACT_NOT_FOUND` | PRECONDITION | missing header or version row |
+| `FIN_PRICE_VERSION_NOT_DRAFT` / `CONTRACT_VERSION_NOT_DRAFT` | PRECONDITION | activate requires DRAFT |
+| `FIN_PRICE_VERSION_NOT_ACTIVE` | PRECONDITION | deprecate requires ACTIVE (DL-077) |
+| `CONTRACT_ALREADY_TERMINAL` | PRECONDITION | draft/activate/suspend against TERMINATED/EXPIRED (or illegal from-status) |
 
 Agent C may add lock-timeout / serialization codes; they must not reuse these strings for other meanings.
 

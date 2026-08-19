@@ -138,7 +138,7 @@ finPostgresSuite('fin.pricing prices commands', {}, ({ pool, world }) => {
       priceId: created.id,
       model: 'PER_UNIT',
       unit_rate_minor: 10,
-      effective_from: '2026-01-01T00:00:00.000Z',
+      effective_from: NOW,
     }))
     const first = await activatePriceVersion(priceEnv(world(), {
       priceId: created.id,
@@ -149,7 +149,7 @@ finPostgresSuite('fin.pricing prices commands', {}, ({ pool, world }) => {
       priceId: created.id,
       model: 'PER_UNIT',
       unit_rate_minor: 12,
-      effective_from: NOW,
+      effective_from: '2026-12-01T00:00:00.000Z',
     }))
     const second = await activatePriceVersion(priceEnv(world(), {
       priceId: created.id,
