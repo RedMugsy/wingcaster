@@ -137,7 +137,11 @@ async function landDlq(client, {
   return { ok: false, dlq_id: id, error_code: code }
 }
 
-export async function ingestUsageEvent(input) {
+/**
+ * Facts-only insert that participates in the caller's transaction.
+ * DL-084: Stage 6 spendCredits shares one transaction(fn) with ingest.
+ */
+export async function ingestUsageEventWithClient(client, input) {
   const environment = input.environment
   const eventKind = input.eventKind || 'ORIGINAL'
   const actorType = input.actorType || 'SYSTEM'
@@ -160,9 +164,7 @@ export async function ingestUsageEvent(input) {
     ingestionVersion,
   }
 
-  try {
-    return await transaction(async (client) => {
-      validateEventKind(eventKind, input.correctsEventId, input.correctsResidencyKey)
+  validateEventKind(eventKind, input.correctsEventId, input.correctsResidencyKey)
 
       const tenant = await loadTenant(client, input.tenantId)
       const residencyKey = await resolveResidencyKey(client, {
@@ -249,7 +251,7 @@ export async function ingestUsageEvent(input) {
         }
 
         await client.query('RELEASE SAVEPOINT usage_ingest')
-        return { ok: true, id: eventId, deduped }
+        return { ok: true, id: eventId, deduped, residencyKey }
       } catch (error) {
         await client.query('ROLLBACK TO SAVEPOINT usage_ingest').catch(() => {})
         const errorCode = classifyUsageError(error)
@@ -267,7 +269,25 @@ export async function ingestUsageEvent(input) {
           actorEmail,
         })
       }
-    })
+}
+
+export async function ingestUsageEvent(input) {
+  const actorType = input.actorType || 'SYSTEM'
+  const actorId = input.actorId || null
+  const actorEmail = input.actorEmail || 'system@fin.local'
+  const now = iso(input.receivedAt || input.now)
+  const bound = {
+    ...input,
+    environment: input.environment,
+    eventKind: input.eventKind || 'ORIGINAL',
+    occurredAt: iso(input.occurredAt || now),
+    receivedAt: iso(input.receivedAt || now),
+    dimensions: input.dimensions || {},
+    ingestionVersion: input.ingestionVersion ?? 1,
+  }
+
+  try {
+    return await transaction(async (client) => ingestUsageEventWithClient(client, input))
   } catch (error) {
     if (error?.name === 'FinError' || error?.code === 'EVENT_KIND_MISMATCH') throw error
     try {

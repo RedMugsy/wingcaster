@@ -106,6 +106,7 @@ A named three topics (`notification.lifecycle`, `webhook.stripe`, `usage.dlq_rep
 | `fin.price.created` | Stage 4 `createPrice` | catalog UI | `price:{id}` |
 | `fin.price.version` | Stage 4 draft / activate / deprecate | rating pin (Stage 5) | `pv:{id}:{to}` |
 | `fin.rating.completed` | Stage 5 `rateMeteredUsage` INSERT of a new `rated_usage` (not hash-equal dedup) | authorize (Stage 6) | `rating:{meteredUsageId}:{ratingHash}` |
+| `fin.spend.completed` | Stage 6 `spendCredits` (any strategy, success or denial after rating) | metrics, product | `spend:{idempotencyKey}:{strategy}` |
 | `notification.lifecycle` | any **tenant-visible** transition (see per-row) | dispatcher (replaces `fireAndForgetNotify`, audit B-8) | `{topic_suffix}:{id}` |
 | `webhook.stripe` | PSP confirm, refund, dispute inbound **ack path** | Stripe adapter outbound | `stripe:{provider_event_id}` |
 | `usage.dlq_replay` | Stage 2 DLQ worker (not a money command) | usage ingest | `dlq:{id}:{attempt}` |

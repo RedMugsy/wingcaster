@@ -164,6 +164,7 @@ async function loadHolder(client, holderId) {
 
 async function loadMatchingEvents(client, {
   environment, holderId, tenantId, windowStart, windowEnd, filterSql, filterParams,
+  sourceEventId = null,
 }) {
   const { rows } = await client.query(
     `WITH RECURSIVE matching AS (
@@ -176,6 +177,7 @@ async function loadMatchingEvents(client, {
           AND e.tenant_id = $3
           AND e.occurred_at >= $4::timestamptz
           AND e.occurred_at < $5::timestamptz
+          AND ($6::text IS NULL OR e.source_event_id = $6)
           AND (${filterSql})
        UNION
        SELECT c.id, c.residency_key, c.environment, c.tenant_id, c.holder_id,
@@ -195,7 +197,7 @@ async function loadMatchingEvents(client, {
            AND x.corrects_residency_key = m.residency_key
       )
       ORDER BY m.id, m.residency_key`,
-    [environment, holderId, tenantId, windowStart, windowEnd, ...filterParams],
+    [environment, holderId, tenantId, windowStart, windowEnd, sourceEventId || null, ...filterParams],
   )
   return rows
 }
@@ -252,6 +254,7 @@ export async function meterPeriod(input) {
   const actorType = input.actorType || 'WORKER'
   const actorId = input.actorId || null
   const actorEmail = input.actorEmail || 'system@fin.local'
+  const sourceEventId = input.sourceEventId || null
   const key = lockKey(meterVersionId, holderId, periodKey)
 
   return transaction(async (client) => {
@@ -281,7 +284,7 @@ export async function meterPeriod(input) {
       }
       const tenantId = holder.tenant_id
       const filterDefinition = validateFilter(version.filter_definition || {})
-      const { where, params: filterParams } = filterToSql(filterDefinition, 'e', 6)
+      const { where, params: filterParams } = filterToSql(filterDefinition, 'e', 7)
 
       const events = await loadMatchingEvents(client, {
         environment,
@@ -291,6 +294,7 @@ export async function meterPeriod(input) {
         windowEnd,
         filterSql: where,
         filterParams,
+        sourceEventId,
       })
 
       const { quantityUnits, sources } = aggregateEvents(events, version.aggregation_type, {

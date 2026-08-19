@@ -1243,3 +1243,33 @@ Follow-up on `feat/stage-1-command-service-fixup` after QA on `feat/stage-1-comm
 
 - `engine.test.js` `append-only.test.js` `worker.test.js` (under `backend/src/fin/rating/`)
 - `r040-r046.test.js` `runner-rated-green.test.js` `runner.test.js`
+
+### Stage 6 / authorize + capture — 2026-08-20
+
+**Landed on `feat/stage-6-authorize`:** auth engine `backend/src/fin/auth/{lot-resolver,authorize,spend,capture,void,expiry-worker}.js`, migration `119_fin_hold_allocation_fk.sql` (DL-085 deferred `lot_allocations.hold_id`), `ingestUsageEventWithClient` (DL-084), `meterPeriod({ sourceEventId })` (DL-086). Parallel `fin.*` path only. `backend/src/billing/events.js` and `backend/src/fin/ledger/transactions.js` untouched. No `/api/admin/fin/**` (Stage 12). No `commercial.*` writes.
+
+**A/B-1 is CLOSED for the `fin.*` path.** `spendCredits` is the one function product code will call: ingest + meter + rate + authorize + capture share one `transaction(fn)` end-to-end. The live `emitUsageEvent` split (`events.js:135` then `:142`) remains until Stage 13 cutover.
+
+**Addressed in this PR:**
+
+| Finding | What landed | Still LIVE / deferred |
+|---|---|---|
+| A/B-1 usage INSERT split from `recordConsumption` | `spendCredits` ingest + `meterPeriod` + `rateMeteredUsage` + `authorizeUsage` / `directSpend` + optional `captureHold` inside one `transaction(fn)`. Rating failure rolls the whole tx back (asserted). | `events.js` still splits INSERT + consume on `commercial.*` until Stage 13 |
+| B §3.1 denied attempts | `authorization_attempts` DENIED with `INSUFFICIENT_ELIGIBLE_CREDITS` / `LIMIT_BLOCKED`. No hold row on denial | Facility shortfall (Stage 8) |
+| D §5 expiry | `runHoldExpiryTick` advisory 1002, book `FOR UPDATE NOWAIT`, 55P03 skip | Scheduler wiring is ops |
+| F R020 / R021 | Real authorize + capture makes them GREEN with data. R022 GREEN on empty/matching counters. R023 stays ERROR (`facility_reservations` missing, DL-052) | Stage 8 facility cover |
+
+**Deferred (do not silently patch):**
+
+| Item | Why |
+|---|---|
+| Cutover of `emitUsageEvent` / product / webhook callers | Stage 13. This PR must not write `commercial.*` or touch `billing/events.js` |
+| `DirectSpendPostpaid` / facility fallback | Stage 8. Uncovered prepaid → `INSUFFICIENT_ELIGIBLE_CREDITS` |
+| A-4 `ai_credit_*` second ledger | Stage 6/7 + 13 — consume path exists; wa_listings is not wired |
+| Historical A-3 / D-1 / D-4 backfill | Stage 13 |
+| Scheduler / cron / k8s wiring of `runHoldExpiryTick` | Ops; this PR ships the runnable function |
+
+**CI rule:** if a test file name below does not appear in the **postgres** job summary, it did not run.
+
+- `lot-resolver.test.js` `authorize.test.js` `spend.test.js` `capture-void.test.js` `expiry-worker.test.js` (under `backend/src/fin/auth/`)
+- `r020-r021.test.js` `runner-rated-green.test.js` `runner.test.js`
