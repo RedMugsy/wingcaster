@@ -1275,3 +1275,39 @@ Follow-up on `feat/stage-1-command-service-fixup` after QA on `feat/stage-1-comm
 
 - `lot-resolver.test.js` `authorize.test.js` `spend.test.js` `capture-void.test.js` `expiry-worker.test.js` (under `backend/src/fin/auth/`)
 - `r020-r021.test.js` `runner-rated-green.test.js` `runner.test.js`
+
+### Stage 7 / funding — 2026-08-20
+
+**Landed on `feat/stage-7-funding`:** migrations `170_fin_purchase_intents.sql` / `171_fin_grants_transfers.sql` (`credit_products` + `auto_topup_policies`; no `fin.grants` / `fin.transfers` — DL-096), command service `backend/src/fin/funding/{products,quotes,purchase-intents,paid-lots,auto-topup-worker,http}.js` + `psp/{index,stripe}.js`, advisory class `FIN_PURCHASE_INTENT = 1015` (DL-091; `FIN_AUTO_TOPUP` remains 1010). Parallel `fin.*` path only. `backend/src/billing/events.js` and `backend/src/fin/ledger/transactions.js` untouched. No `/api/admin/fin/**` (Stage 12). No `commercial.*` writes.
+
+**UN-501:** `/api/agent/credits/top-up` and `/api/agency/credits/top-up` route to `createPurchaseIntent` + `submitPurchasePayment` when `FIN_FUNDING_ENABLED` is on **and** a `fin.tenants` row exists for the public tenant. Otherwise they still return 501 (`topup_unavailable`). Gate is HTTP-only (DL-093). `POST /webhooks/stripe` verifies Stripe signatures and calls `confirmWebhook` (401 unsigned; 409 IN_FLIGHT).
+
+Follow-up (2026-08-20): R057/R058 moved to the end of the CHECKS array so runner.test.js line 28 passes. Three deferred hardenings logged as DL-101 (env/now from req.body), DL-102 (single CUSTOMER book per billing_account UNIQUE), DL-103 (withRetry only covers 40P01).
+
+**Addressed in this PR:**
+
+| Finding | What landed | Still LIVE / deferred |
+|---|---|---|
+| §49 `purchase_intents` missing / top-up 501 | Full B §4 machine; UNIQUE(provider, provider_event_id) never expires; FUNDING paid+bonus lots (DL-092) | commercial.* top-up/ledger until Stage 13 |
+| PSP retries double-charge (E-10 class) | Claim `wh:STRIPE:{event_id}` before apply; unique hit on a different intent → `PURCHASE_PROVIDER_EVENT_REUSED`; in-flight → 409 not 200 | Non-money Stripe events still OPEN (E §5.3) |
+| Auto top-up inline charge | Worker emits intent + `webhook.stripe`; spend/capture that trips the threshold does not submit (DL-094) | Scheduler / cron wiring is ops |
+| F R057 / R058 | Wired; GREEN after a real confirm | R050–R056 / R059 Stage 8 (DL-099) |
+
+**Deferred (do not silently patch):**
+
+| Item | Why |
+|---|---|
+| `refundPurchase` / REFUND ledger tx | Stage 10 (DL-095) |
+| `GrantCredits` / `TransferCredits` new tables | Already Stage 1 commands; no `fin.grants` (DL-034 / DL-096) |
+| Airwallex / Areeba adapters | Stage 8+; interface is pluggable |
+| Cutover of `ai_credit_*` / `events.js` | Stage 13. This PR must not write `commercial.*` or touch `billing/events.js` |
+| Live Stripe SDK charge | After-commit adapter returns a TEST client_secret when `STRIPE_SECRET_KEY` is unset; worker wiring is ops |
+| B13 disputes / B22 payments machines | Tables are Stage 8/10 (DL-099) |
+| Scheduler / cron of `runAutoTopupTick` | Ops; this PR ships the runnable function |
+
+**CI rule:** if a test file name below does not appear in the **postgres** job summary, it did not run. `products.test.js` / `quotes.test.js` / `stripe.test.js` are fast-suite-valid (they also contain or share a file with postgres where noted).
+
+- `products.test.js` `quotes.test.js` `stripe.test.js` (fast; products also has a postgres create)
+- `purchase-intents.test.js` `fund-purchase.test.js` `psp-retry.test.js` `auto-topup.test.js` (under `backend/src/fin/funding/`)
+- `runner-funded-green.test.js` `r057-r058.test.js` `runner.test.js`
+

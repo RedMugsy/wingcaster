@@ -114,15 +114,19 @@ export function registerAgentRoutes(app, { entitlements, credits, pipeline, conf
     }
   })
 
-  app.post('/api/agent/credits/top-up', authMiddleware, async (_req, res) => {
-    // Tenant-facing top-up disabled until Phase 7e wires a real payment gateway.
-    // Until then the ONLY way to credit a tenant is through the platform-admin
-    // manual credit path. Accepting an "amount + payment_intent_id" here without
-    // gateway verification would let any authenticated tenant mint credits.
-    res.status(501).json({
-      error: 'topup_unavailable',
-      reason: 'payment_gateway_not_configured',
-    })
+  app.post('/api/agent/credits/top-up', authMiddleware, async (req, res, next) => {
+    try {
+      const { handleCreditsTopUp } = await import('../../../fin/funding/http.js')
+      const { query } = await import('../../../db.js')
+      const tenants = await query(
+        `SELECT id FROM public.tenants WHERE personal_owner_user_id = $1 LIMIT 1`,
+        [req.user.id],
+      )
+      const publicTenantId = tenants[0]?.id || req.user.id
+      return await handleCreditsTopUp(req, res, { publicTenantId, reasonCode: 'USER_TOPUP' })
+    } catch (err) {
+      next(err)
+    }
   })
 
   app.get('/api/agent/whatsapp-listings/analytics', authMiddleware, async (req, res) => {

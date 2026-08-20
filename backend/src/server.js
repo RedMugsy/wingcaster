@@ -17,6 +17,7 @@ import { signToken, authMiddleware, requireElevated } from './auth.js'
 import { registerTwoFactorRoutes, startSigninChallengeIfRequired } from './auth-2fa.js'
 import { registerPlatformTemplateAdminRoutes } from './notifications/platform-templates/routes.js'
 import { registerFinPricingAdminRoutes } from './fin/admin/pricing/routes.js'
+import { handleStripeWebhook } from './fin/funding/http.js'
 import { sendPlatformNotification } from './notifications/platform-templates/index.js'
 import {
   createAgentAccount,
@@ -479,7 +480,16 @@ if (isProduction && process.env.FORCE_HTTPS === 'true') {
 const captureRawBody = (req, _res, buf) => { req.rawBody = Buffer.from(buf) }
 app.use('/api/webhooks', express.json({ verify: captureRawBody, limit: '1mb' }))
 app.use('/api/webhooks/sms', express.urlencoded({ extended: false, verify: captureRawBody, limit: '1mb' }))
+app.use('/webhooks/stripe', express.json({ verify: captureRawBody, limit: '1mb' }))
 app.use(express.json({ limit: '12mb' }))
+
+app.post('/webhooks/stripe', async (req, res, next) => {
+  try {
+    return await handleStripeWebhook(req, res)
+  } catch (err) {
+    next(err)
+  }
+})
 
 const uploadsDir = join(__dirname, '../uploads')
 if (!existsSync(uploadsDir)) mkdirSync(uploadsDir, { recursive: true })
