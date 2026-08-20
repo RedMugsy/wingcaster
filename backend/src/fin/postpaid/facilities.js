@@ -132,14 +132,20 @@ export async function createFacility(input) {
   })
 }
 
-async function transition(input, { to, approval = true, actorOk = null }) {
+async function transition(input, { to, cmdName, approval = true, actorOk = null }) {
   const env = envelope(input)
   requireReason(env.reasonCode)
   const facilityId = input.facilityId
-  const key = env.idempotencyKey || `FACILITY:${to}:${facilityId}`
   return withRetry(async (client) => {
+    // Pre-load version outside the lock so each state-flip gets a fresh key (DL-114).
+    const pre = await client.query(
+      `SELECT version FROM fin.credit_facilities WHERE id = $1`,
+      [facilityId],
+    )
+    const version = pre.rows[0]?.version ?? 0
+    const key = env.idempotencyKey || `FACILITY:${cmdName}:${facilityId}:v${version}`
     const claimed = await claim(client, env, key, {
-      cmd: `Facility${to}`, facilityId, to,
+      cmd: `Facility${to}`, facilityId, to, cmdName, version,
     })
     if (claimed.kind === 'replay') return claimed.row.response_body
 
@@ -210,25 +216,25 @@ async function transition(input, { to, approval = true, actorOk = null }) {
 }
 
 export function activateFacility(input) {
-  return transition(input, { to: 'ACTIVE', approval: true })
+  return transition(input, { to: 'ACTIVE', cmdName: 'ACTIVATE' })
 }
 
 export function pauseFacility(input) {
-  return transition(input, { to: 'PAUSED', approval: true })
+  return transition(input, { to: 'PAUSED', cmdName: 'PAUSE' })
 }
 
 export function resumeFacility(input) {
-  return transition(input, { to: 'ACTIVE', approval: true })
+  return transition(input, { to: 'ACTIVE', cmdName: 'RESUME' })
 }
 
 export function suspendFacility(input) {
   const env = envelope(input)
   const needsOps = env.actorType === 'USER'
-  return transition(input, { to: 'SUSPENDED', approval: needsOps })
+  return transition(input, { to: 'SUSPENDED', cmdName: 'SUSPEND', approval: needsOps })
 }
 
 export function closeFacility(input) {
-  return transition(input, { to: 'CLOSED', approval: true })
+  return transition(input, { to: 'CLOSED', cmdName: 'CLOSE' })
 }
 
 export async function amendFacilityLimit(input) {

@@ -209,21 +209,36 @@ async function mintFacilityDraw(client, env, {
     drawPriority: 1000,
     now: env.now,
   })
-  const posts = await insertPostingPair(client, {
+  // Issue into AVAILABLE without stamping lot_id (CAPTURE is not excluded
+  // from R009 the way FUNDING/GRANT are). Consume via AVAILABLE→CONSUMED
+  // with the draw allocation on the AVAILABLE debit so allocation.units
+  // equals posting.amount_units (F §16 R009 / DL-054 / DirectSpend shape).
+  // Net postings remain ISSUANCE −u / CONSUMED +u (C §5.16).
+  await insertPostingPair(client, {
     environment: env.environment,
     transactionId: txId,
     bookId: book.id,
     accounts,
     debitType: 'ISSUANCE',
+    creditType: 'AVAILABLE',
+    units,
+    now: env.now,
+  })
+  const consume = await insertPostingPair(client, {
+    environment: env.environment,
+    transactionId: txId,
+    bookId: book.id,
+    accounts,
+    debitType: 'AVAILABLE',
     creditType: 'CONSUMED',
     units,
-    creditLotId: lotId,
+    debitLotId: lotId,
     now: env.now,
   })
   await insertAllocation(client, {
     environment: env.environment,
     lotId,
-    postingId: posts.creditId,
+    postingId: consume.debitId,
     units: -units,
     now: env.now,
   })
