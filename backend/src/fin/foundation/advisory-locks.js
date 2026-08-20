@@ -20,6 +20,10 @@ export const FIN_METERING = 1013
 export const FIN_RATING = 1014
 /** Per-intent serialization inside transaction(fn). xact-scoped, not session. */
 export const FIN_PURCHASE_INTENT = 1015
+/** Facility-reservation TTL sweeper. Mirrors FIN_HOLD_EXPIRY = 1002. Do not reuse 1016 (DL-104). */
+export const FIN_FACILITY_RESERVATION_EXPIRY = 1017
+/** Per-facility header serialization inside transaction(fn). xact-scoped. */
+export const FIN_CREDIT_FACILITY = 1018
 
 export const LOCK_CLASSES = {
   FIN_CONTRACT_RENEWAL,
@@ -37,4 +41,6 @@ export const LOCK_CLASSES = {
   FIN_METERING,
   FIN_RATING,
   FIN_PURCHASE_INTENT,
+  FIN_FACILITY_RESERVATION_EXPIRY,
+  FIN_CREDIT_FACILITY,
 }

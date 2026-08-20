@@ -16,6 +16,8 @@ import {
   insertOutbox, insertPostingPair, loadAccounts, loadBook,
 } from '../ledger/write.js'
 import { resolveDrawPlan } from './lot-resolver.js'
+import { resolveHybridPlan } from '../postpaid/hybrid-resolver.js'
+import { reserveFacility } from '../postpaid/reservations.js'
 
 function iso(value) {
   if (!value) return BusinessClock.now()
@@ -68,7 +70,8 @@ export async function loadActiveLotsForUpdate(client, {
   holderId, bookId, environment,
 }) {
   const { rows } = await client.query(
-    `SELECT l.id, l.status, l.remaining_units, l.draw_priority, l.expires_at, l.issued_at
+    `SELECT l.id, l.status, l.remaining_units, l.draw_priority, l.expires_at, l.issued_at,
+            l.source_kind, l.contract_id
        FROM fin.lots l
       WHERE l.holder_id = $1
         AND l.book_id = $2
@@ -319,7 +322,7 @@ export async function authorizeUsage(input) {
     })
     if (claimed.kind === 'replay') return claimed.row.response_body
 
-    const { book, accounts, plan } = await lockAndResolvePlan(client, {
+    let { book, accounts, plan } = await lockAndResolvePlan(client, {
       ...input, environment, now,
     })
 
@@ -352,29 +355,109 @@ export async function authorizeUsage(input) {
       })
     }
 
+    let facilityReservationId = null
+    let prepaidUnits = unitsRequested
+
     if (!plan.covered) {
-      const authorizationAttemptId = await writeDeniedAttempt(client, {
-        environment, holderId: input.holderId,
-        denialCode: 'INSUFFICIENT_ELIGIBLE_CREDITS',
-        ratedUsageId: input.ratedUsageId, now, actor, reasonCode: input.reasonCode,
+      const controlsRow = (await client.query(
+        `SELECT * FROM fin.account_controls
+          WHERE environment = $1
+            AND (
+              (subject_type = 'HOLDER' AND subject_id = $2)
+              OR (subject_type = 'BILLING_ACCOUNT' AND subject_id = $3)
+            )
+          ORDER BY CASE subject_type WHEN 'HOLDER' THEN 0 ELSE 1 END
+          LIMIT 1`,
+        [environment, input.holderId, book.billing_account_id],
+      )).rows[0] || { allow_postpaid_usage: true }
+
+      const facility = (await client.query(
+        `SELECT * FROM fin.credit_facilities
+          WHERE billing_account_id = $1 AND environment = $2
+          ORDER BY CASE status WHEN 'ACTIVE' THEN 0 ELSE 1 END, id ASC
+          LIMIT 1`,
+        [book.billing_account_id, environment],
+      )).rows[0] || null
+
+      const lots = await loadActiveLotsForUpdate(client, {
+        holderId: input.holderId, bookId: book.id, environment,
       })
-      return finish({
-        ok: false,
-        denialCode: 'INSUFFICIENT_ELIGIBLE_CREDITS',
-        authorizationAttemptId,
-        allocations: serializeAllocations(plan.allocations),
+      const hybrid = resolveHybridPlan({
+        lots,
+        unitsRequested,
+        facility,
+        controls: controlsRow,
+        amountMinor: input.amountMinor ?? null,
+        meterId: input.meterId,
+        actionKey: input.actionKey,
+        category: input.category,
+        vendorId: input.vendorId,
+        now,
       })
+
+      if (!hybrid.covered) {
+        const denialCode = hybrid.denialCode || 'INSUFFICIENT_ELIGIBLE_CREDITS'
+        const authorizationAttemptId = await writeDeniedAttempt(client, {
+          environment, holderId: input.holderId, denialCode,
+          ratedUsageId: input.ratedUsageId, now, actor, reasonCode: input.reasonCode,
+        })
+        return finish({
+          ok: false,
+          denialCode,
+          authorizationAttemptId,
+          allocations: serializeAllocations(hybrid.allocations),
+        })
+      }
+
+      plan = {
+        covered: true,
+        allocations: hybrid.allocations,
+        shortfall: 0n,
+      }
+      prepaidUnits = hybrid.allocations.reduce((sum, row) => sum + BigInt(row.units), 0n)
+      if (hybrid.facilityShortfallMinor > 0n) {
+        try {
+          const reserved = await reserveFacility({
+            environment,
+            tenantId: input.tenantId,
+            facilityId: facility.id,
+            reservedMinor: hybrid.facilityShortfallMinor,
+            holdId: null,
+            expiresAt: input.expiresAt,
+            now,
+            ...actor,
+            reasonCode: input.reasonCode,
+            idempotencyKey: `FACRES:${key}`,
+          })
+          facilityReservationId = reserved.reservationId
+        } catch (error) {
+          const denialCode = error.code === 'FACILITY_LIMIT_EXCEEDED'
+            || error.code === 'FACILITY_NOT_ACTIVE'
+            ? error.code
+            : 'INSUFFICIENT_ELIGIBLE_CREDITS'
+          const authorizationAttemptId = await writeDeniedAttempt(client, {
+            environment, holderId: input.holderId, denialCode,
+            ratedUsageId: input.ratedUsageId, now, actor, reasonCode: input.reasonCode,
+          })
+          return finish({
+            ok: false,
+            denialCode,
+            authorizationAttemptId,
+            allocations: serializeAllocations(plan.allocations),
+          })
+        }
+      }
     }
 
-    let held
-    if (plan.allocations.length === 1) {
+    let held = { holdId: null, txId: null, authorizationAttemptId: null }
+    if (prepaidUnits > 0n && plan.allocations.length === 1) {
       held = await authorizeHold({
         environment,
         tenantId: input.tenantId,
         holderId: input.holderId,
         bookId: input.bookId,
         lotId: plan.allocations[0].lotId,
-        units: Number(unitsRequested),
+        units: Number(prepaidUnits),
         subjectType: input.subjectType || 'RATED_USAGE',
         subjectId: input.subjectId || input.ratedUsageId,
         ratedUsageId: input.ratedUsageId,
@@ -394,11 +477,22 @@ export async function authorizeUsage(input) {
         txId: held.txId,
         authorizationAttemptId: attempt.rows[0]?.id || null,
       }
-    } else {
+    } else if (prepaidUnits > 0n) {
       held = await authorizeHoldPlan(client, {
-        environment, book, accounts, plan, units: unitsRequested,
+        environment, book, accounts, plan, units: prepaidUnits,
         input, now, actor, claimed,
       })
+    }
+
+    if (held.holdId && facilityReservationId) {
+      await client.query(
+        `UPDATE fin.holds SET facility_reservation_id = $2, updated_at = $3 WHERE id = $1`,
+        [held.holdId, facilityReservationId, now],
+      )
+      await client.query(
+        `UPDATE fin.facility_reservations SET hold_id = $2, updated_at = $3 WHERE id = $1`,
+        [facilityReservationId, held.holdId, now],
+      )
     }
 
     await bumpLimitCounters(client, { environment, limits, units: unitsRequested })
@@ -406,6 +500,7 @@ export async function authorizeUsage(input) {
       ok: true,
       holdId: held.holdId,
       txId: held.txId,
+      facilityReservationId,
       allocations: serializeAllocations(plan.allocations),
       authorizationAttemptId: held.authorizationAttemptId,
     })

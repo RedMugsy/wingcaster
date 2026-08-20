@@ -45,6 +45,18 @@ function compare(check, sourceRows, comparisonRows) {
     }
     const src = hasSource ? source.get(id) : 0
     const cmp = hasComparison ? comparison.get(id) : 0
+    if (check.comparisonMode === 'source_gte') {
+      observed += src - cmp
+      if (src < cmp) {
+        drifts.push({
+          entityId: id,
+          expected: { qty: src },
+          actual: { qty: cmp },
+          delta: { qty: src - cmp },
+        })
+      }
+      continue
+    }
     const delta = src - cmp
     observed += delta
     if (delta !== check.expected_delta_units) {

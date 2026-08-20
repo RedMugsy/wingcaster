@@ -207,9 +207,18 @@ export const CHECKS = [
     severity: 'HIGH',
     expected_delta_units: 0,
     drift_action: 'BLOCK_AFFECTED_HOLDER',
-    entity_type: 'account_balances',
-    source_query: "SELECT ab.account_id AS entity_id, ab.balance_units AS qty FROM fin.account_balances ab JOIN fin.ledger_accounts a ON a.id = ab.account_id WHERE a.account_type = 'AVAILABLE'",
-    comparison_query: `SELECT ab.account_id AS entity_id, GREATEST(ab.balance_units, 0)::bigint + COALESCE((SELECT SUM(fr.reserved_minor) FROM fin.facility_reservations fr JOIN fin.credit_facilities cf ON cf.id = fr.facility_id JOIN fin.ledger_books b ON b.billing_account_id = cf.billing_account_id AND b.id = a.book_id WHERE fr.status = 'OPEN' AND cf.status = 'ACTIVE'), 0) AS qty FROM fin.account_balances ab JOIN fin.ledger_accounts a ON a.id = ab.account_id WHERE a.account_type = 'AVAILABLE'`,
+    entity_type: 'facility_reservations',
+    source_query: `SELECT r.id AS entity_id, 1::bigint AS qty
+         FROM fin.facility_reservations r
+         JOIN fin.credit_facilities f ON f.id = r.facility_id
+        WHERE r.status = 'OPEN'
+          AND f.status NOT IN ('ACTIVE', 'PAUSED')`,
+    comparison_query: `SELECT r.id AS entity_id, 1::bigint AS qty
+         FROM fin.facility_reservations r
+         JOIN fin.credit_facilities f ON f.id = r.facility_id
+        WHERE r.status = 'OPEN'
+          AND f.status NOT IN ('ACTIVE', 'PAUSED')
+          AND false`,
   },
   {
     check_code: 'R030',
@@ -409,4 +418,65 @@ export const CHECKS = [
     source_query: "SELECT l.id AS entity_id, l.consideration_minor AS qty FROM fin.lots l WHERE l.source_kind IN ('PROMOTIONAL_GRANT','COMPENSATION')",
     comparison_query: "SELECT l.id AS entity_id, 0::bigint AS qty FROM fin.lots l WHERE l.source_kind IN ('PROMOTIONAL_GRANT','COMPENSATION')",
   },
+  {
+    check_code: 'R050',
+    severity: 'HIGH',
+    expected_delta_units: 0,
+    drift_action: 'BLOCK_AFFECTED_HOLDER',
+    entity_type: 'credit_facilities',
+    comparisonMode: 'source_gte',
+    source_query: `SELECT f.id AS entity_id, f.limit_minor AS qty
+         FROM fin.credit_facilities f
+        WHERE f.status IN ('ACTIVE', 'PAUSED')`,
+    comparison_query: `SELECT r.facility_id AS entity_id, COALESCE(SUM(r.reserved_minor), 0)::bigint AS qty
+         FROM fin.facility_reservations r
+        WHERE r.status = 'OPEN'
+        GROUP BY r.facility_id`,
+  },
+  {
+    check_code: 'R051',
+    severity: 'HIGH',
+    expected_delta_units: 0,
+    drift_action: 'BLOCK_AFFECTED_HOLDER',
+    entity_type: 'facility_reservations',
+    source_query: `SELECT r.id AS entity_id, 1::bigint AS qty
+         FROM fin.facility_reservations r
+        WHERE r.status = 'CAPTURED'`,
+    comparison_query: `SELECT r.id AS entity_id, 1::bigint AS qty
+         FROM fin.facility_reservations r
+         JOIN fin.ledger_transactions t
+           ON t.economic_source_id = r.id
+          AND t.economic_source_type = 'FACILITY'
+          AND t.shape = 'CAPTURE'
+         JOIN fin.ledger_postings p ON p.transaction_id = t.id
+         JOIN fin.ledger_accounts a ON a.id = p.account_id AND a.account_type = 'CONSUMED'
+        WHERE r.status = 'CAPTURED'`,
+  },
+  {
+    check_code: 'R052',
+    severity: 'HIGH',
+    expected_delta_units: 0,
+    drift_action: 'BLOCK_AFFECTED_HOLDER',
+    entity_type: 'lots',
+    source_query: `SELECT l.id AS entity_id, l.remaining_units AS qty
+         FROM fin.lots l
+        WHERE l.source_kind = 'FACILITY_DRAW'`,
+    comparison_query: `SELECT l.id AS entity_id, 0::bigint AS qty
+         FROM fin.lots l
+        WHERE l.source_kind = 'FACILITY_DRAW'`,
+  },
+  {
+    check_code: 'R053',
+    severity: 'MEDIUM',
+    expected_delta_units: 0,
+    drift_action: 'WARN',
+    entity_type: 'dunning_cases',
+    source_query: `SELECT i.id AS entity_id, 1::bigint AS qty
+         FROM fin.invoices i
+        WHERE i.status IN ('ISSUED', 'PART_PAID') AND i.due_at < now()`,
+    comparison_query: `SELECT i.id AS entity_id, 1::bigint AS qty
+         FROM fin.invoices i
+         JOIN fin.dunning_cases d ON d.invoice_id = i.id
+        WHERE i.status IN ('ISSUED', 'PART_PAID') AND i.due_at < now()`,
+  }
 ]

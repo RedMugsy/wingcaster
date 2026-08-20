@@ -185,16 +185,36 @@ export async function spendCredits(input) {
       txId = authorized.txId || null
       denialCode = authorized.denialCode || null
       if (ok && strategy === 'AUTHORIZE_AND_CAPTURE') {
-        const captured = await captureUsage({
-          holdId,
-          idempotencyKey: `CAPTURE:${holdId}`,
-          now,
-          actorType,
-          actorId,
-          actorEmail,
-          reasonCode: input.reasonCode,
-        })
-        txId = captured.txId
+        const facilityReservationId = authorized.facilityReservationId || null
+        if (holdId) {
+          const captured = await captureUsage({
+            holdId,
+            idempotencyKey: `CAPTURE:${holdId}`,
+            now,
+            actorType,
+            actorId,
+            actorEmail,
+            reasonCode: input.reasonCode,
+          })
+          txId = captured.txId
+        }
+        if (facilityReservationId) {
+          const fac = await captureFacility({
+            environment,
+            tenantId: input.tenantId,
+            reservationId: facilityReservationId,
+            holderId: input.holderId,
+            bookId: input.bookId,
+            allowHold: Boolean(holdId),
+            idempotencyKey: `CAPFAC:${facilityReservationId}`,
+            now,
+            actorType,
+            actorId,
+            actorEmail,
+            reasonCode: input.reasonCode,
+          })
+          if (!txId) txId = fac.txId
+        }
       }
     }
 
