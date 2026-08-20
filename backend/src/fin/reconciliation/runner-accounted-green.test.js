@@ -19,7 +19,7 @@ import { openDunningCase } from '../dunning/cases.js'
 import { advanceDunning } from '../dunning/steps.js'
 import { writeOffInvoice } from '../dunning/write-off-invoice.js'
 
-const ERROR_CODES = new Set(['R042', 'R043', 'R044', 'R049', 'R053'])
+const ERROR_CODES = new Set(['R042', 'R044', 'R049', 'R053'])
 
 finPostgresSuite('reconciliation runner after accounting flow', {}, ({ pool, world }) => {
   it('non-ERROR checks are GREEN and R060–R063 are GREEN after the Stage 9 flow', async () => {

@@ -1347,7 +1347,9 @@ Follow-up #2 (2026-08-20): insertControls now uses ON CONFLICT DO NOTHING (test 
 
 **Landed on `feat/stage-9-accounting`:** migrations `190_fin_accounting_events.sql`, `191_fin_revenue_allocation.sql`, `192_fin_accounting_policy_versions.sql` (v1 seed, DL-119), `193_fin_accounting_periods.sql` (B §550 + HARD_CLOSED insert trigger), `194_fin_tax_snapshots.sql` (table + writer helper only). Services `backend/src/fin/accounting/{events,policy-engine,deferred-revenue,receivables,credit-loss,breakage,periods}.js`, `backend/src/fin/tax/{service,snapshots}.js`, `backend/src/fin/ledger/expire-lot.js` (Stage 9 wrapper; Stage 1 `transactions.js` expireLot untouched), `backend/src/fin/dunning/write-off-invoice.js`. Advisory class `FIN_ACCOUNTING_PERIOD_CLOSE = 1019` (DL-116). Parallel `fin.*` path only. `backend/src/billing/events.js` and Stage 1 `ledger/transactions.js` / `write.js` untouched. No `/api/admin/fin/**` (Stage 12). No Stage 10 invoices / payments / credit notes.
 
-**Decision log:** DL-116 … DL-128.
+**Decision log:** DL-116 … DL-129.
+
+Follow-up (2026-08-20): R043 removed from sibling `ERROR_CODES` (now GREEN; empty `CLOSED_ACCOUNTING`). R042 stays ERROR until `billing_periods` (DL-129).
 
 **Cross-stage wiring (same `transaction(fn)` / ALS reuse):**
 - Stage 7 `confirmPurchasePayment` → `DEFERRED_REVENUE_CREATED` + allocation group

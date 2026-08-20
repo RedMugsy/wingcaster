@@ -21,7 +21,7 @@ function priceEnv(world, extra = {}) {
 }
 
 finPostgresSuite('reconciliation R040–R049 after pricing', {}, ({ pool, world }) => {
-  it('R047 and R048 are GREEN after real activations; R042–R044/R049 stay ERROR; empty R040/R041/R045/R046 GREEN', async () => {
+  it('R047 and R048 are GREEN after real activations; R042/R044/R049 stay ERROR; R043 GREEN; empty R040/R041/R045/R046 GREEN', async () => {
     const price = await createPrice(priceEnv(world(), { code: 'r047.p', currency: 'USD' }))
     const pv = await draftPriceVersion(priceEnv(world(), {
       priceId: price.id,
@@ -64,7 +64,8 @@ finPostgresSuite('reconciliation R040–R049 after pricing', {}, ({ pool, world 
     for (const code of ['R040', 'R041', 'R045', 'R046']) {
       expect(byCode[code].result, code).toBe('GREEN')
     }
-    for (const code of ['R042', 'R043', 'R044', 'R049']) {
+    expect(byCode.R043.result).toBe('GREEN')
+    for (const code of ['R042', 'R044', 'R049']) {
       expect(byCode[code].result, code).toBe('ERROR')
     }
   })

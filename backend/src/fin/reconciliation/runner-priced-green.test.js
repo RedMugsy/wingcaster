@@ -13,7 +13,7 @@ import { runReconciliation } from './runner.js'
 // Own throwaway DB: runner.test.js's conservation-trigger bypass leaves R001
 // unable to go GREEN in that same file afterwards.
 
-const ERROR_CODES = new Set(['R042', 'R043', 'R044', 'R049', 'R053'])
+const ERROR_CODES = new Set(['R042', 'R044', 'R049', 'R053'])
 
 finPostgresSuite('reconciliation runner after pricing activations', {}, ({ pool, world }) => {
   it('R047/R048 land in the GREEN batch after real price and contract activations', async () => {
