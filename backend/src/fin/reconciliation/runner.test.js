@@ -7,13 +7,13 @@ import { CHECKS } from './checks.js'
 import { runReconciliation } from './runner.js'
 
 finPostgresSuite('reconciliation runner', {}, ({ pool, world }) => {
-  it('inserts R001–R023, R030–R039, R040–R049; R023 and period/invoice rating checks ERROR', async () => {
+  it('inserts R001–R023, R030–R039, R040–R049; R042-R044/R049/R053 ERROR (R023 is GREEN after Stage 8)', async () => {
     const run = await runReconciliation(pool(), { now: NOW })
     expect(run.skipped).toBe(false)
     expect(run.results).toHaveLength(CHECKS.length)
     expect(CHECKS.map((c) => c.check_code)).toEqual(run.results.map((r) => r.check_code))
     const byCode = Object.fromEntries(run.results.map((r) => [r.check_code, r]))
-    const errorCodes = new Set(['R023', 'R042', 'R043', 'R044', 'R049'])
+    const errorCodes = new Set(['R042', 'R043', 'R044', 'R049', 'R053'])
     for (const check of CHECKS.filter((c) => !errorCodes.has(c.check_code))) {
       expect(byCode[check.check_code].result, check.check_code).toBe('GREEN')
     }

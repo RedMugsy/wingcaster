@@ -64,7 +64,8 @@ export async function insertControls(client, {
        allow_prepaid_usage, allow_postpaid_usage, allow_purchases,
        allow_transfers, allow_refunds, allow_grants,
        reason_code, created_at, updated_at
-     ) VALUES ($1,$2,$3,$4, true, true, $5, true, true, true, 'TEST', $6, $6)`,
+     ) VALUES ($1,$2,$3,$4, true, true, $5, true, true, true, 'TEST', $6, $6)
+     ON CONFLICT (environment, subject_type, subject_id) DO NOTHING`,
     [id, environment, subjectType, subjectId, allowPurchases, now],
   )
   return id

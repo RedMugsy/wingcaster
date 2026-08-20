@@ -1311,3 +1311,34 @@ Follow-up (2026-08-20): R057/R058 moved to the end of the CHECKS array so runner
 - `purchase-intents.test.js` `fund-purchase.test.js` `psp-retry.test.js` `auto-topup.test.js` (under `backend/src/fin/funding/`)
 - `runner-funded-green.test.js` `r057-r058.test.js` `runner.test.js`
 
+### Stage 8 / postpaid — 2026-08-20
+
+**Landed on `feat/stage-8-postpaid`:** migrations `180_fin_credit_facilities.sql`, `181_fin_facility_reservations.sql`, `182_fin_dunning.sql`, `183_fin_hold_facility_link.sql`. Command services `backend/src/fin/postpaid/{facilities,reservations,hybrid-resolver,capture,capture-hybrid,direct-spend,expiry-worker,helpers}.js` and `backend/src/fin/dunning/{cases,steps,worker}.js`. Advisory classes `FIN_FACILITY_RESERVATION_EXPIRY = 1017`, `FIN_CREDIT_FACILITY = 1018`. Stage 6 `authorize.js` consults the hybrid resolver for facility shortfall (only authorized cross-stage edit). `spend.js` captures a linked facility reservation after Stage 1 `captureUsage`. Parallel `fin.*` path only. `backend/src/billing/events.js` and Stage 1 `ledger/transactions.js` / `write.js` untouched. No `/api/admin/fin/**` (Stage 12).
+
+**Decision log:** DL-104 … DL-112.
+
+**Spec §122 postpaid acceptance (10):**
+
+| # | Test | Where | Status |
+|---|---|---|---|
+| 1 | Facility header B §18 transitions | `postpaid/facilities.test.js` | Landed |
+| 2 | Reservation OPEN→CAPTURED/RELEASED/EXPIRED | `postpaid/reservations.test.js` | Landed |
+| 3 | Concurrent reserve over limit | `postpaid/reservations.test.js` | Landed |
+| 4 | FACILITY_DRAW `remaining_units = 0` after capture | `postpaid/capture-postpaid.test.js` | Landed |
+| 5 | DirectSpendPostpaid no hold | `postpaid/direct-spend-postpaid.test.js` | Landed |
+| 6 | Hybrid prepaid-then-facility covers Stage 6 denial | `hybrid-resolver.test.js` + authorize wiring | Landed (pure + authorize path) |
+| 7 | Dunning B §6 + snapshot restore | `dunning/cases.test.js` | Landed |
+| 8 | Dunning steps APPEND_ONLY | `dunning/steps.test.js` | Landed |
+| 9 | Receivable / revenue event at capture | — | Deferred Stage 10 (DL-106 / DL-109) |
+| 10 | Invoice PAID cures dunning | — | Deferred Stage 10 (DL-109) |
+
+**F R05x:** R050 (limit ≥ OPEN reserved, slack GREEN), R051 (CAPTURED has CONSUMED posting), R052 (FACILITY_DRAW remaining 0) landed. F invoice R052 / R053 need `fin.invoices` — R053 registered as 42P01 ERROR (DL-109).
+
+**Still LIVE on commercial.\* until Stage 13 cutover:** commercial wallet, commercial dunning/email, commercial postpaid invoices. This PR does not write `commercial.*`.
+
+**CI file list (must appear in the postgres job summary):**
+`postpaid/hybrid-resolver.test.js`, `postpaid/facilities.test.js`, `postpaid/reservations.test.js`, `postpaid/capture-postpaid.test.js`, `postpaid/direct-spend-postpaid.test.js`, `postpaid/expiry-worker.test.js`, `dunning/cases.test.js`, `dunning/steps.test.js`, `dunning/worker.test.js`, `reconciliation/r050-r053.test.js`, `reconciliation/runner-postpaid-green.test.js`.
+
+Follow-up (2026-08-20): R050–R053 reordered in CHECKS so insertion order matches alphabetical (runner.test.js line 28). Stray R023.result=ERROR assertions in runner-funded-green.test.js and r020-r021.test.js flipped to GREEN (R023 was refactored to reservations-orphan in Stage 8). DL-113 logged for the spend.js → authorize.js amountMinor pass-through, reserved for Stage 10.
+
+Follow-up #2 (2026-08-20): insertControls now uses ON CONFLICT DO NOTHING (test isolation). Three sibling all-green runners updated to swap R023 for R053 in ERROR_CODES. Facility default idempotency key now includes cmdName and loaded facility.version so activate/resume and repeated resumes never collide (DL-114). Postpaid CAPTURE now inserts matching lot_allocations for FACILITY_DRAW (DL-115).

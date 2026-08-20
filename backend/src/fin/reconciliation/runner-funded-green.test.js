@@ -8,7 +8,7 @@ import {
 } from '../funding/purchase-intents.js'
 import { fundingEnv, seedProduct } from '../funding/test-support.js'
 
-const ERROR_CODES = new Set(['R023', 'R042', 'R043', 'R044', 'R049'])
+const ERROR_CODES = new Set(['R042', 'R043', 'R044', 'R049', 'R053'])
 
 finPostgresSuite('reconciliation runner after funding', {}, ({ pool, world }) => {
   it('non-ERROR checks are GREEN after a real confirm → FUND', async () => {
@@ -36,6 +36,6 @@ finPostgresSuite('reconciliation runner after funding', {}, ({ pool, world }) =>
     }
     expect(byCode.R057.result).toBe('GREEN')
     expect(byCode.R058.result).toBe('GREEN')
-    expect(byCode.R023.result).toBe('ERROR')
+    expect(byCode.R023.result).toBe('GREEN')
   })
 })
