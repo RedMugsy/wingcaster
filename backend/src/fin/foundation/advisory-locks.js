@@ -24,6 +24,8 @@ export const FIN_PURCHASE_INTENT = 1015
 export const FIN_FACILITY_RESERVATION_EXPIRY = 1017
 /** Per-facility header serialization inside transaction(fn). xact-scoped. */
 export const FIN_CREDIT_FACILITY = 1018
+/** Per-period SoftClose / HardClose / Reopen. xact-scoped (DL-116). Do not reuse 1016. */
+export const FIN_ACCOUNTING_PERIOD_CLOSE = 1019
 
 export const LOCK_CLASSES = {
   FIN_CONTRACT_RENEWAL,
@@ -43,4 +45,5 @@ export const LOCK_CLASSES = {
   FIN_PURCHASE_INTENT,
   FIN_FACILITY_RESERVATION_EXPIRY,
   FIN_CREDIT_FACILITY,
+  FIN_ACCOUNTING_PERIOD_CLOSE,
 }

@@ -646,6 +646,15 @@ Envelope is spec §109 (`code`, `category`, `retryable`, `customer_actionable`, 
 | `UNKNOWN_PROVIDER` | VALIDATION | provider not in {STRIPE, MANUAL, INVOICE}; submit requires STRIPE |
 | `NOT_IMPLEMENTED` | PRECONDITION | `refundPurchase` reserved for Stage 10 (DL-095) |
 | `AUTO_TOPUP_LOCK_HELD` | CONFLICT | auto-topup tick did not acquire class 1010; retryable — caller skips |
+| `ACCOUNTING_PERIOD_SKIP_TO_HARD` | PRECONDITION | OPEN→HARD_CLOSED (B §550) |
+| `ACCOUNTING_PERIOD_REOPEN_WITHOUT_APPROVAL` | APPROVAL | ReopenAccountingPeriod without RECONCILIATION_OVERRIDE |
+| `ACCOUNTING_PERIOD_CANNOT_FULLY_REOPEN` | PRECONDITION | SOFT_CLOSED→OPEN / HARD_CLOSED→OPEN (B §550 default) |
+| `ACCOUNTING_PERIOD_NOT_FOUND` | PRECONDITION | missing period, or no period covers event_at |
+| `ACCOUNTING_PERIOD_NOT_ENDED` | PRECONDITION | SoftClose before ends_at |
+| `ACCOUNTING_PERIOD_RECON_INCOMPLETE` | PRECONDITION | HardClose without COMPLETED recon / unresolved BLOCK_* |
+| `ACCOUNTING_POLICY_NOT_FOUND` | PRECONDITION | no effective accounting_policy_versions row |
+| `ACCOUNTING_WRITE_OFF_UNAPPROVED` | APPROVAL | WriteOffInvoice without WRITE_OFF approval |
+| `ACCOUNTING_EVENT_OUTSIDE_PERIOD` | PRECONDITION | event_at not in [starts_at, ends_at) |
 
 Agent C may add lock-timeout / serialization codes; they must not reuse these strings for other meanings.
 

@@ -11,6 +11,7 @@ import { meterPeriod } from '../metering/pipeline.js'
 import { periodKeyFromNow, periodWindow } from '../metering/worker.js'
 import { rateMeteredUsage } from '../rating/engine.js'
 import { ingestUsageEventWithClient } from '../usage/ingest.js'
+import { recognizeRevenueForCapture } from '../accounting/deferred-revenue.js'
 import { authorizeUsage, lockAndResolvePlan } from './authorize.js'
 import { captureUsage } from './capture.js'
 
@@ -177,6 +178,13 @@ export async function spendCredits(input) {
           reasonCode: input.reasonCode,
         })
         txId = spent.txId
+        await recognizeRevenueForCapture(client, {
+          holdId: null,
+          ratedUsageId: rated.ratedUsageId,
+          captureTxId: txId,
+          now,
+          actor: { type: actorType, id: actorId, email: actorEmail },
+        })
       }
     } else {
       const authorized = await authorizeUsage(authInput)
@@ -189,6 +197,7 @@ export async function spendCredits(input) {
         if (holdId) {
           const captured = await captureUsage({
             holdId,
+            ratedUsageId: rated.ratedUsageId,
             idempotencyKey: `CAPTURE:${holdId}`,
             now,
             actorType,

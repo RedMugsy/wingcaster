@@ -1342,3 +1342,45 @@ Follow-up (2026-08-20): R057/R058 moved to the end of the CHECKS array so runner
 Follow-up (2026-08-20): R050–R053 reordered in CHECKS so insertion order matches alphabetical (runner.test.js line 28). Stray R023.result=ERROR assertions in runner-funded-green.test.js and r020-r021.test.js flipped to GREEN (R023 was refactored to reservations-orphan in Stage 8). DL-113 logged for the spend.js → authorize.js amountMinor pass-through, reserved for Stage 10.
 
 Follow-up #2 (2026-08-20): insertControls now uses ON CONFLICT DO NOTHING (test isolation). Three sibling all-green runners updated to swap R023 for R053 in ERROR_CODES. Facility default idempotency key now includes cmdName and loaded facility.version so activate/resume and repeated resumes never collide (DL-114). Postpaid CAPTURE now inserts matching lot_allocations for FACILITY_DRAW (DL-115).
+
+### Stage 9 / accounting — 2026-08-20
+
+**Landed on `feat/stage-9-accounting`:** migrations `190_fin_accounting_events.sql`, `191_fin_revenue_allocation.sql`, `192_fin_accounting_policy_versions.sql` (v1 seed, DL-119), `193_fin_accounting_periods.sql` (B §550 + HARD_CLOSED insert trigger), `194_fin_tax_snapshots.sql` (table + writer helper only). Services `backend/src/fin/accounting/{events,policy-engine,deferred-revenue,receivables,credit-loss,breakage,periods}.js`, `backend/src/fin/tax/{service,snapshots}.js`, `backend/src/fin/ledger/expire-lot.js` (Stage 9 wrapper; Stage 1 `transactions.js` expireLot untouched), `backend/src/fin/dunning/write-off-invoice.js`. Advisory class `FIN_ACCOUNTING_PERIOD_CLOSE = 1019` (DL-116). Parallel `fin.*` path only. `backend/src/billing/events.js` and Stage 1 `ledger/transactions.js` / `write.js` untouched. No `/api/admin/fin/**` (Stage 12). No Stage 10 invoices / payments / credit notes.
+
+**Decision log:** DL-116 … DL-128.
+
+**Cross-stage wiring (same `transaction(fn)` / ALS reuse):**
+- Stage 7 `confirmPurchasePayment` → `DEFERRED_REVENUE_CREATED` + allocation group
+- Stage 6 `captureUsage` / `spendCredits` DIRECT_SPEND → `REVENUE_RECOGNIZED` + line accumulator
+- Stage 8 `captureFacility` → `RECEIVABLE_CREATED` + `REVENUE_RECOGNIZED`
+- Stage 6 hold-expiry worker: **no** accounting event (comment only)
+- Stage 1 `expireLot` via Stage 9 wrapper → `BREAKAGE_RECOGNIZED`
+- Dunning `WriteOffInvoice` → `BAD_DEBT_WRITE_OFF` only (spec §73)
+
+**Spec §123 accounting acceptance (9):**
+
+| # | Test | Where | Status |
+|---|---|---|---|
+| 1 | Policy evaluate* branches (prepaid / postpaid / breakage / §73) | `accounting/policy-engine.test.js` | Landed (fast) |
+| 2 | Insert OPEN / SOFT_CLOSED allowed / HARD_CLOSED rejected | `accounting/events.test.js` | Landed |
+| 3 | OPEN→SOFT→HARD; reopen requires override | `accounting/periods.test.js` | Landed |
+| 4 | FUND writes DEFERRED = quoted_minor + group | `accounting/deferred-revenue.test.js` | Landed |
+| 5 | Capture writes REVENUE = rated.amount_minor; line bumped | `accounting/consumption.test.js` | Landed |
+| 6 | Facility capture writes RECEIVABLE + REVENUE | `accounting/postpaid-capture.test.js` | Landed |
+| 7 | expireLot writes BREAKAGE = remaining × unit value | `accounting/breakage.test.js` | Landed |
+| 8 | WriteOffInvoice §73 (no revenue reversal, no CONSUMED touch) | `accounting/write-off.test.js` | Landed |
+| 9 | R060–R063 + runner-accounted-green | `r060-r063.test.js` / `runner-accounted-green.test.js` | Landed; R061 payments=0 (DL-121) |
+
+**Deferred to Stage 10:**
+- `fin.invoices` lookup inside WriteOffInvoice (DL-121)
+- R061 applied-payments side (no `fin.payments`)
+- Tax at ISSUE / `tax_registrations` (DL-122 / DL-126)
+- `REFUND_REVENUE_REVERSED` wiring (`refundPurchase` still `NOT_IMPLEMENTED`, DL-095)
+- Invoice PAID cures dunning
+
+**Still LIVE on commercial.* until Stage 13 cutover:** commercial ledger, commercial invoices/tax, commercial dunning/email. This PR does not write `commercial.*`.
+
+**CI file list (must appear in the postgres job summary):**
+`accounting/events.test.js`, `accounting/periods.test.js`, `accounting/deferred-revenue.test.js`, `accounting/consumption.test.js`, `accounting/postpaid-capture.test.js`, `accounting/breakage.test.js`, `accounting/write-off.test.js`, `accounting/rollforward.test.js`, `reconciliation/r060-r063.test.js`, `reconciliation/runner-accounted-green.test.js`.
+ Fast suite also runs `accounting/policy-engine.test.js` plus the validation describes in `events.test.js` / `periods.test.js`.
+
