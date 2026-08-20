@@ -192,14 +192,15 @@ async function flipInvoiceForAllocation(client, env, invoice, allocated) {
     to = 'PART_PAID'
   }
   if (to !== invoice.status) {
-    await client.query(
+    const updated = (await client.query(
       `UPDATE fin.invoices
           SET status = $2, updated_at = $3,
               updated_by_actor_type = $4, updated_by_actor_id = $5
-        WHERE id = $1`,
+        WHERE id = $1
+        RETURNING *`,
       [invoice.id, to, env.now, env.actorType, env.actorId],
-    )
-    await writeInvoiceStatus(client, env, invoice, to)
+    )).rows[0]
+    await writeInvoiceStatus(client, env, updated, to)
   }
   return to
 }

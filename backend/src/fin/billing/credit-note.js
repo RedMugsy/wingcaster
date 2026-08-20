@@ -155,14 +155,15 @@ export async function issueCreditNote(input) {
     )).rows[0]
     const net = BigInt(invoice.total_minor) - BigInt(note.amount_minor)
     if (invoice.status === 'PAID' && BigInt(allocated.qty) > net) {
-      await client.query(
+      const updated = (await client.query(
         `UPDATE fin.invoices
             SET status = 'PART_PAID', updated_at = $2,
                 updated_by_actor_type = $3, updated_by_actor_id = $4
-          WHERE id = $1`,
+          WHERE id = $1
+          RETURNING *`,
         [invoice.id, env.now, env.actorType, env.actorId],
-      )
-      await writeInvoiceStatus(client, env, invoice, 'PART_PAID')
+      )).rows[0]
+      await writeInvoiceStatus(client, env, updated, 'PART_PAID')
     }
     await insertOutbox(client, {
       environment: env.environment,

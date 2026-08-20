@@ -532,10 +532,11 @@ export const CHECKS = [
          FROM fin.revenue_allocation_groups g`,
   },
   {
-    // Stage 10 full form (DL-138): RECEIVABLE = applied allocations + write-offs + outstanding AR.
-    // Outstanding is independently SUM(ISSUED/PART_PAID invoice.total − allocations).
-    // When no such invoices exist, outstanding falls back to the event residual so
-    // Stage 9 worlds without invoices stay GREEN.
+    // Stage 10 full form (DL-138 / DL-149): RECEIVABLE = AR-scoped allocations
+    // + AR-scoped write-offs + outstanding AR invoices (EXISTS RECEIVABLE_CREATED)
+    // + RECEIVABLE_CREATED not keyed to an invoice (Stage 9 postpaid residual).
+    // Outstanding COALESCE is 0 — prepaid invoice cash is settlement, not AR.
+    // Prepaid BAD_DEBT (no matching RECEIVABLE) is not AR either.
     check_code: 'R061',
     severity: 'CRITICAL',
     expected_delta_units: 0,
@@ -554,22 +555,39 @@ export const CHECKS = [
                    AND ae.source_id = pa.invoice_id
               )
            ), 0)
-           + COALESCE((SELECT SUM(amount_minor) FROM fin.accounting_events WHERE event_kind = 'BAD_DEBT_WRITE_OFF'), 0)
-           + COALESCE(
-               (
-                 SELECT SUM(i.total_minor - COALESCE(a.qty, 0))
-                   FROM fin.invoices i
-                   LEFT JOIN (
-                     SELECT invoice_id, SUM(amount_minor) AS qty
-                       FROM fin.invoice_payment_allocations
-                      GROUP BY invoice_id
-                   ) a ON a.invoice_id = i.id
-                  WHERE i.status IN ('ISSUED', 'PART_PAID')
-               ),
-               COALESCE((SELECT SUM(amount_minor) FROM fin.accounting_events WHERE event_kind = 'RECEIVABLE_CREATED'), 0)
-               - COALESCE((SELECT SUM(amount_minor) FROM fin.payment_allocations), 0)
-               - COALESCE((SELECT SUM(amount_minor) FROM fin.accounting_events WHERE event_kind = 'BAD_DEBT_WRITE_OFF'), 0)
-             )
+           + COALESCE((
+               SELECT SUM(ae.amount_minor)
+                 FROM fin.accounting_events ae
+                WHERE ae.event_kind = 'BAD_DEBT_WRITE_OFF'
+                  AND EXISTS (
+                    SELECT 1 FROM fin.accounting_events rec
+                     WHERE rec.event_kind = 'RECEIVABLE_CREATED'
+                       AND rec.source_id = ae.source_id
+                  )
+             ), 0)
+           + COALESCE((
+               SELECT SUM(i.total_minor - COALESCE(a.qty, 0))
+                 FROM fin.invoices i
+                 LEFT JOIN (
+                   SELECT invoice_id, SUM(amount_minor) AS qty
+                     FROM fin.invoice_payment_allocations
+                    GROUP BY invoice_id
+                 ) a ON a.invoice_id = i.id
+                WHERE i.status IN ('ISSUED', 'PART_PAID')
+                  AND EXISTS (
+                    SELECT 1 FROM fin.accounting_events ae
+                     WHERE ae.event_kind = 'RECEIVABLE_CREATED'
+                       AND ae.source_id = i.id
+                  )
+             ), 0)
+           + COALESCE((
+               SELECT SUM(ae.amount_minor)
+                 FROM fin.accounting_events ae
+                WHERE ae.event_kind = 'RECEIVABLE_CREATED'
+                  AND NOT EXISTS (
+                    SELECT 1 FROM fin.invoices i WHERE i.id = ae.source_id
+                  )
+             ), 0)
          )::bigint AS qty`,
   },
   {

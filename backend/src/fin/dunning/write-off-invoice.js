@@ -115,14 +115,15 @@ export async function writeOffInvoice(input) {
       actor: { type: env.actorType, id: env.actorId, email: env.actorEmail },
     })
     if (invoice && ['ISSUED', 'PART_PAID'].includes(invoice.status)) {
-      await client.query(
+      const updated = (await client.query(
         `UPDATE fin.invoices
             SET status = 'UNCOLLECTIBLE', reason_code = $2, updated_at = $3,
                 updated_by_actor_type = $4, updated_by_actor_id = $5
-          WHERE id = $1`,
+          WHERE id = $1
+          RETURNING *`,
         [invoiceId, env.reasonCode, env.now, env.actorType, env.actorId],
-      )
-      await writeInvoiceStatus(client, env, invoice, 'UNCOLLECTIBLE')
+      )).rows[0]
+      await writeInvoiceStatus(client, env, updated, 'UNCOLLECTIBLE')
     }
 
     await insertOutbox(client, {

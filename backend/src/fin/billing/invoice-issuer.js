@@ -24,6 +24,9 @@ async function loadInvoice(client, invoiceId, { forUpdate = false } = {}) {
 }
 
 async function writeInvoiceStatus(client, env, invoice, to, extra = {}) {
+  // `invoice` MUST be the post-flip row (UPDATE … RETURNING *). trg_bump_version
+  // increments version during the UPDATE; a stale pre-flip object reuses the
+  // same dedupe key when a later flip lands on the same status (DL-148 / DL-100).
   await insertOutbox(client, {
     environment: env.environment,
     topic: 'fin.invoice.status',
@@ -161,17 +164,17 @@ export async function draftInvoice(input) {
       return insertLines(client, env, id, lines)
     })()
 
-    await client.query(
+    const drafted = (await client.query(
       `UPDATE fin.invoices
           SET subtotal_minor = $2, tax_minor = 0, total_minor = $2, updated_at = $3
-        WHERE id = $1`,
+        WHERE id = $1
+        RETURNING *`,
       [id, subtotal.toString(), env.now],
-    )
+    )).rows[0]
     if (period && period.status === 'RATING_CLOSED') {
       await flipBillingPeriod(client, env, period, 'INVOICE_DRAFTED')
     }
-    const invoice = await loadInvoice(client, id)
-    await writeInvoiceStatus(client, env, { ...invoice, status: null, version: 1 }, 'DRAFT')
+    await writeInvoiceStatus(client, env, { ...drafted, status: null }, 'DRAFT')
     return finish(client, claimed, env, {
       invoiceId: id,
       invoiceDraftId: id,
@@ -221,17 +224,18 @@ export async function approveInvoice(input) {
         details: { reason: 'total_mismatch', lines: lines.toString(), total: String(invoice.total_minor) },
       })
     }
-    await client.query(
+    const updated = (await client.query(
       `UPDATE fin.invoices
           SET status = 'APPROVED', subtotal_minor = $2, tax_minor = $3, total_minor = $4,
               updated_at = $5, updated_by_actor_type = $6, updated_by_actor_id = $7
-        WHERE id = $1`,
+        WHERE id = $1
+        RETURNING *`,
       [
         invoiceId, lines.toString(), tax.toString(), (lines + tax).toString(),
         env.now, env.actorType, env.actorId,
       ],
-    )
-    await writeInvoiceStatus(client, env, invoice, 'APPROVED')
+    )).rows[0]
+    await writeInvoiceStatus(client, env, updated, 'APPROVED')
     return finish(client, claimed, env, { invoiceId, status: 'APPROVED' })
   })
 }
@@ -321,8 +325,9 @@ export async function issueInvoice(input) {
       throw finError('INVOICE_ZATCA_FIELDS_MISSING', { category: CATEGORY.PRECONDITION })
     }
 
+    let issued
     try {
-      await client.query(
+      issued = (await client.query(
         `UPDATE fin.invoices
             SET status = 'ISSUED',
                 invoice_number = $2,
@@ -335,13 +340,14 @@ export async function issueInvoice(input) {
                 updated_at = $4,
                 updated_by_actor_type = $9,
                 updated_by_actor_id = $10
-          WHERE id = $1`,
+          WHERE id = $1
+          RETURNING *`,
         [
           invoiceId, seq.number, seq.sequenceId, env.now,
           subtotal.toString(), taxTotal.toString(), total.toString(),
           xmlUuid, env.actorType, env.actorId,
         ],
-      )
+      )).rows[0]
     } catch (error) {
       if (error.code === '23505') {
         throw finError('INVOICE_SEQUENCE_REUSE', { category: CATEGORY.CONFLICT })
@@ -374,7 +380,7 @@ export async function issueInvoice(input) {
       }
     }
 
-    await writeInvoiceStatus(client, env, invoice, 'ISSUED', {
+    await writeInvoiceStatus(client, env, issued, 'ISSUED', {
       invoiceNumber: seq.number,
       assigned: seq.assigned,
     })
@@ -420,14 +426,15 @@ export async function voidIssuedInvoice(input) {
 
     if (!['ISSUED', 'PART_PAID'].includes(invoice.status)) {
       if (invoice.status === 'DRAFT' || invoice.status === 'APPROVED') {
-        await client.query(
+        const voidedDraft = (await client.query(
           `UPDATE fin.invoices
               SET status = 'VOID', reason_code = $2, updated_at = $3,
                   updated_by_actor_type = $4, updated_by_actor_id = $5
-            WHERE id = $1`,
+            WHERE id = $1
+            RETURNING *`,
           [invoiceId, env.reasonCode, env.now, env.actorType, env.actorId],
-        )
-        await writeInvoiceStatus(client, env, invoice, 'VOID')
+        )).rows[0]
+        await writeInvoiceStatus(client, env, voidedDraft, 'VOID')
         return finish(client, claimed, env, {
           invoiceId, status: 'VOID', invoiceNumber: invoice.invoice_number,
         })
@@ -452,15 +459,16 @@ export async function voidIssuedInvoice(input) {
       throw finError('INVOICE_VOID_WITH_CASH', { category: CATEGORY.PRECONDITION })
     }
 
-    await client.query(
+    const voided = (await client.query(
       `UPDATE fin.invoices
           SET status = 'VOID', reason_code = $2, updated_at = $3,
               updated_by_actor_type = $4, updated_by_actor_id = $5
-        WHERE id = $1`,
+        WHERE id = $1
+        RETURNING *`,
       [invoiceId, env.reasonCode, env.now, env.actorType, env.actorId],
-    )
-    await writeInvoiceStatus(client, env, invoice, 'VOID', {
-      invoiceNumber: invoice.invoice_number,
+    )).rows[0]
+    await writeInvoiceStatus(client, env, voided, 'VOID', {
+      invoiceNumber: voided.invoice_number,
     })
     return finish(client, claimed, env, {
       invoiceId,
@@ -500,14 +508,15 @@ export async function setInvoicePaidStatus(client, env, invoice, allocated) {
   }
   if (to !== invoice.status && ISSUED_LIKE.includes(invoice.status) || ['ISSUED', 'PART_PAID', 'PAID', 'UNCOLLECTIBLE'].includes(invoice.status)) {
     if (to !== invoice.status) {
-      await client.query(
+      const updated = (await client.query(
         `UPDATE fin.invoices
             SET status = $2, updated_at = $3,
                 updated_by_actor_type = $4, updated_by_actor_id = $5
-          WHERE id = $1`,
+          WHERE id = $1
+          RETURNING *`,
         [invoice.id, to, env.now, env.actorType, env.actorId],
-      )
-      await writeInvoiceStatus(client, env, invoice, to)
+      )).rows[0]
+      await writeInvoiceStatus(client, env, updated, to)
     }
   }
   return to
