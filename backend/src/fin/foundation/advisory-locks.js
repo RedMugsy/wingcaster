@@ -26,6 +26,8 @@ export const FIN_FACILITY_RESERVATION_EXPIRY = 1017
 export const FIN_CREDIT_FACILITY = 1018
 /** Per-period SoftClose / HardClose / Reopen. xact-scoped (DL-116). Do not reuse 1016. */
 export const FIN_ACCOUNTING_PERIOD_CLOSE = 1019
+/** Per-period 12-step billing close (B §11 / spec §77). xact-scoped (DL-131). Do not reuse 1016. */
+export const FIN_BILLING_PERIOD_CLOSE = 1020
 
 export const LOCK_CLASSES = {
   FIN_CONTRACT_RENEWAL,
@@ -46,4 +48,5 @@ export const LOCK_CLASSES = {
   FIN_FACILITY_RESERVATION_EXPIRY,
   FIN_CREDIT_FACILITY,
   FIN_ACCOUNTING_PERIOD_CLOSE,
+  FIN_BILLING_PERIOD_CLOSE,
 }

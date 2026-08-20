@@ -1,6 +1,7 @@
 /**
- * Dunning case commands (B §6). invoice_id is a UUID argument (no fin.invoices
- * table yet — DL-109). controls_snapshot taken at OPEN (DL-107 / DL-036).
+ * Dunning case commands (B §6). Stage 10 wires invoice ISSUED/PART_PAID +
+ * overdue against real `fin.invoices` (DL-136). `DUNNING_INVOICE_NOT_ELIGIBLE`
+ * otherwise.
  */
 import { CATEGORY, finError } from '../errors.js'
 import { insertAudit, insertOutbox } from '../ledger/write.js'
@@ -73,15 +74,14 @@ export async function restoreControlsSnapshot(client, env, dunningCase) {
 export async function openDunningCase(input) {
   const env = envelope(input)
   requireReason(env.reasonCode)
-  const invoiceStatus = input.invoiceStatus
-  if (!['ISSUED', 'PART_PAID'].includes(invoiceStatus)) {
-    throw finError('DUNNING_STEP_SKIP', {
+  if (input.invoiceStatus && !['ISSUED', 'PART_PAID'].includes(input.invoiceStatus)) {
+    throw finError('DUNNING_INVOICE_NOT_ELIGIBLE', {
       category: CATEGORY.PRECONDITION,
-      details: { reason: 'invoice_not_overdue_status', invoiceStatus },
+      details: { reason: 'invoice_not_overdue_status', invoiceStatus: input.invoiceStatus },
     })
   }
-  if (!input.dueAt || new Date(input.dueAt) >= new Date(env.now)) {
-    throw finError('DUNNING_STEP_SKIP', {
+  if (input.dueAt && new Date(input.dueAt) >= new Date(env.now)) {
+    throw finError('DUNNING_INVOICE_NOT_ELIGIBLE', {
       category: CATEGORY.PRECONDITION,
       details: { reason: 'invoice_not_past_due' },
     })
@@ -92,6 +92,31 @@ export async function openDunningCase(input) {
       cmd: 'OpenDunningCase', invoiceId: input.invoiceId,
     })
     if (claimed.kind === 'replay') return claimed.row.response_body
+
+    const invoice = input.invoiceId
+      ? (await client.query(
+        `SELECT id, status, due_at FROM fin.invoices WHERE id = $1`,
+        [input.invoiceId],
+      )).rows[0]
+      : null
+    if (!invoice) {
+      throw finError('DUNNING_INVOICE_NOT_ELIGIBLE', {
+        category: CATEGORY.PRECONDITION,
+        details: { reason: 'invoice_not_found' },
+      })
+    }
+    if (!['ISSUED', 'PART_PAID'].includes(invoice.status)) {
+      throw finError('DUNNING_INVOICE_NOT_ELIGIBLE', {
+        category: CATEGORY.PRECONDITION,
+        details: { reason: 'invoice_not_overdue_status', invoiceStatus: invoice.status },
+      })
+    }
+    if (!invoice.due_at || new Date(invoice.due_at) >= new Date(env.now)) {
+      throw finError('DUNNING_INVOICE_NOT_ELIGIBLE', {
+        category: CATEGORY.PRECONDITION,
+        details: { reason: 'invoice_not_past_due' },
+      })
+    }
 
     const existing = await client.query(
       `SELECT id FROM fin.dunning_cases

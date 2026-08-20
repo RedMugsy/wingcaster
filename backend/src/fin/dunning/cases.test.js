@@ -9,6 +9,7 @@ import {
 import { advanceDunning } from './steps.js'
 import { runDunningTick } from './worker.js'
 import { FIN_DUNNING } from '../foundation/advisory-locks.js'
+import { seedIssuedInvoice } from '../billing/test-support.js'
 
 describe('openDunningCase validation (fast)', () => {
   it('rejects a missing reason before opening a transaction', async () => {
@@ -28,12 +29,16 @@ finPostgresSuite('dunning cases B §6', {}, ({ pool, world }) => {
       subjectType: 'BILLING_ACCOUNT',
       subjectId: world().tenantA.billingAccountId,
     })
+    const issued = await seedIssuedInvoice(pool(), world(), {
+      dueAt: '2020-01-01T00:00:00.000Z',
+      amountMinor: 100,
+    })
     const opened = await openDunningCase({
       ...env,
-      invoiceId: randomUUID(),
+      invoiceId: issued.invoiceId,
       billingAccountId: world().tenantA.billingAccountId,
       invoiceStatus: 'ISSUED',
-      dueAt: new Date(Date.parse(env.now) - 86_400_000).toISOString(),
+      dueAt: issued.dueAt,
       policyDelayMs: 0,
       now: new Date(Date.now() + nowOffsetMs).toISOString(),
     })
@@ -84,9 +89,12 @@ finPostgresSuite('dunning steps APPEND_ONLY', {}, ({ pool, world }) => {
       subjectType: 'BILLING_ACCOUNT',
       subjectId: world().tenantA.billingAccountId,
     })
+    const issued = await seedIssuedInvoice(pool(), world(), {
+      dueAt: '2020-01-01T00:00:00.000Z',
+    })
     const opened = await openDunningCase({
       ...env,
-      invoiceId: randomUUID(),
+      invoiceId: issued.invoiceId,
       billingAccountId: world().tenantA.billingAccountId,
       invoiceStatus: 'ISSUED',
       dueAt: '2020-01-01T00:00:00.000Z',

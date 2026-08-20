@@ -397,8 +397,27 @@ export const CHECKS = [
     expected_delta_units: 0,
     drift_action: 'BLOCK_BILLING_CLOSE',
     entity_type: 'metered_usage',
-    source_query: "SELECT m.id AS entity_id, 1::bigint AS qty FROM fin.metered_usage m JOIN fin.rated_usage r_probe ON r_probe.metered_usage_id = m.id JOIN fin.billing_periods bp ON bp.id = r_probe.billing_period_id WHERE m.status = 'ACTIVE' AND bp.status IN ('RATING_CLOSED','INVOICE_DRAFTED','INVOICED','FINAL')",
-    comparison_query: "SELECT m.id AS entity_id, 1::bigint AS qty FROM fin.metered_usage m JOIN fin.rated_usage r ON r.metered_usage_id = m.id WHERE m.status = 'ACTIVE'",
+    source_query: `SELECT m.id AS entity_id, 1::bigint AS qty
+         FROM fin.metered_usage m
+         JOIN fin.holders h ON h.id = m.holder_id
+         JOIN fin.billing_accounts ba
+           ON ba.holder_id = h.id AND ba.environment = m.environment
+         JOIN fin.billing_periods bp
+           ON bp.billing_account_id = ba.id AND bp.environment = m.environment
+        WHERE m.status = 'ACTIVE'
+          AND bp.status IN ('RATING_CLOSED','INVOICE_DRAFTED','INVOICED','FINAL')
+          AND m.metered_at >= bp.starts_at AND m.metered_at < bp.ends_at`,
+    comparison_query: `SELECT m.id AS entity_id, 1::bigint AS qty
+         FROM fin.metered_usage m
+         JOIN fin.holders h ON h.id = m.holder_id
+         JOIN fin.billing_accounts ba
+           ON ba.holder_id = h.id AND ba.environment = m.environment
+         JOIN fin.billing_periods bp
+           ON bp.billing_account_id = ba.id AND bp.environment = m.environment
+         JOIN fin.rated_usage r ON r.metered_usage_id = m.id
+        WHERE m.status = 'ACTIVE'
+          AND bp.status IN ('RATING_CLOSED','INVOICE_DRAFTED','INVOICED','FINAL')
+          AND m.metered_at >= bp.starts_at AND m.metered_at < bp.ends_at`,
   },
   {
     check_code: 'R050',
@@ -513,33 +532,45 @@ export const CHECKS = [
          FROM fin.revenue_allocation_groups g`,
   },
   {
-    // Payments table is Stage 10. Applied payments = 0 (DL-121).
+    // Stage 10 full form (DL-138): RECEIVABLE = applied allocations + write-offs + outstanding AR.
+    // Outstanding is independently SUM(ISSUED/PART_PAID invoice.total − allocations).
+    // When no such invoices exist, outstanding falls back to the event residual so
+    // Stage 9 worlds without invoices stay GREEN.
     check_code: 'R061',
     severity: 'CRITICAL',
     expected_delta_units: 0,
     drift_action: 'BLOCK_BILLING_CLOSE',
     entity_type: 'accounting_events',
-    source_query: `SELECT ae.source_id AS entity_id, SUM(ae.amount_minor)::bigint AS qty
-         FROM fin.accounting_events ae
-        WHERE ae.event_kind = 'RECEIVABLE_CREATED'
-        GROUP BY ae.source_id`,
-    comparison_query: `SELECT recv.source_id AS entity_id,
+    source_query: `SELECT '00000000-0000-4000-8000-000000000061'::uuid AS entity_id,
+         COALESCE((SELECT SUM(amount_minor) FROM fin.accounting_events WHERE event_kind = 'RECEIVABLE_CREATED'), 0)::bigint AS qty`,
+    comparison_query: `SELECT '00000000-0000-4000-8000-000000000061'::uuid AS entity_id,
          (
-           COALESCE(wo.qty, 0)
-           + (recv.qty - COALESCE(wo.qty, 0))
-         )::bigint AS qty
-         FROM (
-           SELECT source_id, SUM(amount_minor)::bigint AS qty
-             FROM fin.accounting_events
-            WHERE event_kind = 'RECEIVABLE_CREATED'
-            GROUP BY source_id
-         ) recv
-         LEFT JOIN (
-           SELECT source_id, SUM(amount_minor)::bigint AS qty
-             FROM fin.accounting_events
-            WHERE event_kind = 'BAD_DEBT_WRITE_OFF'
-            GROUP BY source_id
-         ) wo ON wo.source_id = recv.source_id`,
+           COALESCE((
+             SELECT SUM(pa.amount_minor)
+               FROM fin.payment_allocations pa
+              WHERE EXISTS (
+                SELECT 1 FROM fin.accounting_events ae
+                 WHERE ae.event_kind = 'RECEIVABLE_CREATED'
+                   AND ae.source_id = pa.invoice_id
+              )
+           ), 0)
+           + COALESCE((SELECT SUM(amount_minor) FROM fin.accounting_events WHERE event_kind = 'BAD_DEBT_WRITE_OFF'), 0)
+           + COALESCE(
+               (
+                 SELECT SUM(i.total_minor - COALESCE(a.qty, 0))
+                   FROM fin.invoices i
+                   LEFT JOIN (
+                     SELECT invoice_id, SUM(amount_minor) AS qty
+                       FROM fin.invoice_payment_allocations
+                      GROUP BY invoice_id
+                   ) a ON a.invoice_id = i.id
+                  WHERE i.status IN ('ISSUED', 'PART_PAID')
+               ),
+               COALESCE((SELECT SUM(amount_minor) FROM fin.accounting_events WHERE event_kind = 'RECEIVABLE_CREATED'), 0)
+               - COALESCE((SELECT SUM(amount_minor) FROM fin.payment_allocations), 0)
+               - COALESCE((SELECT SUM(amount_minor) FROM fin.accounting_events WHERE event_kind = 'BAD_DEBT_WRITE_OFF'), 0)
+             )
+         )::bigint AS qty`,
   },
   {
     check_code: 'R062',
@@ -588,5 +619,92 @@ export const CHECKS = [
          JOIN fin.accounting_periods ap ON ap.id = ae.accounting_period_id
         WHERE ap.status <> 'HARD_CLOSED'
            OR ae.event_at < ap.ends_at`,
+  },
+  {
+    check_code: 'R070',
+    severity: 'CRITICAL',
+    expected_delta_units: 0,
+    drift_action: 'BLOCK_BILLING_CLOSE',
+    entity_type: 'invoices',
+    source_query: `SELECT i.id AS entity_id, i.total_minor AS qty
+         FROM fin.invoices i
+        WHERE i.invoice_number IS NOT NULL`,
+    comparison_query: `SELECT i.id AS entity_id,
+         (
+           COALESCE((SELECT SUM(il.amount_minor) FROM fin.invoice_lines il WHERE il.invoice_id = i.id), 0)
+           + COALESCE((SELECT SUM(tl.tax_minor) FROM fin.invoice_tax_lines tl WHERE tl.invoice_id = i.id), 0)
+           + COALESCE((SELECT SUM(adj.amount_minor) FROM fin.invoice_adjustments adj WHERE adj.invoice_id = i.id), 0)
+         )::bigint AS qty
+         FROM fin.invoices i
+        WHERE i.invoice_number IS NOT NULL`,
+  },
+  {
+    check_code: 'R071',
+    severity: 'CRITICAL',
+    expected_delta_units: 0,
+    drift_action: 'BLOCK_BILLING_CLOSE',
+    entity_type: 'invoices',
+    source_query: `SELECT i.id AS entity_id, 1::bigint AS qty
+         FROM fin.invoices i
+        WHERE i.invoice_number IS NOT NULL`,
+    comparison_query: `SELECT i.id AS entity_id, 1::bigint AS qty
+         FROM fin.invoices i
+         JOIN fin.invoice_sequences s ON s.id = i.invoice_sequence_id
+        WHERE i.invoice_number IS NOT NULL
+          AND i.invoice_number LIKE s.prefix || '%'
+          AND s.next_n > 0`,
+  },
+  {
+    check_code: 'R072',
+    severity: 'CRITICAL',
+    expected_delta_units: 0,
+    drift_action: 'BLOCK_BILLING_CLOSE',
+    entity_type: 'invoices',
+    source_query: `SELECT i.id AS entity_id,
+         CASE
+           WHEN i.status = 'PAID' THEN i.total_minor
+           WHEN i.status = 'PART_PAID'
+             AND COALESCE((SELECT SUM(ipa.amount_minor) FROM fin.invoice_payment_allocations ipa WHERE ipa.invoice_id = i.id), 0) > 0
+             AND COALESCE((SELECT SUM(ipa.amount_minor) FROM fin.invoice_payment_allocations ipa WHERE ipa.invoice_id = i.id), 0) < i.total_minor
+             THEN COALESCE((SELECT SUM(ipa.amount_minor) FROM fin.invoice_payment_allocations ipa WHERE ipa.invoice_id = i.id), 0)
+           WHEN i.status = 'ISSUED'
+             AND COALESCE((SELECT SUM(ipa.amount_minor) FROM fin.invoice_payment_allocations ipa WHERE ipa.invoice_id = i.id), 0) = 0
+             THEN 0
+           ELSE -1
+         END::bigint AS qty
+         FROM fin.invoices i
+        WHERE i.status IN ('ISSUED', 'PART_PAID', 'PAID')`,
+    comparison_query: `SELECT i.id AS entity_id,
+         COALESCE((SELECT SUM(ipa.amount_minor) FROM fin.invoice_payment_allocations ipa WHERE ipa.invoice_id = i.id), 0)::bigint AS qty
+         FROM fin.invoices i
+        WHERE i.status IN ('ISSUED', 'PART_PAID', 'PAID')`,
+  },
+  {
+    check_code: 'R073',
+    severity: 'CRITICAL',
+    expected_delta_units: 0,
+    drift_action: 'BLOCK_BILLING_CLOSE',
+    entity_type: 'unapplied_cash',
+    missingSourceIsCacheMissing: true,
+    source_query: `SELECT u.billing_account_id AS entity_id, u.balance_minor AS qty
+         FROM fin.unapplied_cash u`,
+    comparison_query: `SELECT u.billing_account_id AS entity_id,
+         (
+           COALESCE((
+             SELECT SUM(p.amount_minor) FROM fin.payments p
+              WHERE p.environment = u.environment
+                AND p.billing_account_id = u.billing_account_id
+                AND p.currency = u.currency
+                AND p.status IN ('RECEIVED', 'ALLOCATED')
+           ), 0)
+           - COALESCE((
+             SELECT SUM(ipa.amount_minor) FROM fin.invoice_payment_allocations ipa
+             JOIN fin.invoices i ON i.id = ipa.invoice_id
+              WHERE i.billing_account_id = u.billing_account_id
+                AND i.currency = u.currency
+                AND i.environment = u.environment
+           ), 0)
+         )::bigint AS qty
+         FROM fin.unapplied_cash u`,
   },
 ]

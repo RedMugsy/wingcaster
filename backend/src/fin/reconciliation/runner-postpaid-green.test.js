@@ -4,7 +4,7 @@ import { finPostgresSuite } from '../testing/suite.js'
 import { captureFacility, reserveFacility } from '../postpaid/reservations.js'
 import { futureExpiry, seedActiveFacility } from '../postpaid/test-support.js'
 
-const ERROR_CODES = new Set(['R042', 'R044', 'R049', 'R053'])
+const ERROR_CODES = new Set()
 
 finPostgresSuite('reconciliation runner after postpaid capture', {}, ({ pool, world }) => {
   it('non-ERROR checks are GREEN after reserve+capture', async () => {

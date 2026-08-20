@@ -5,15 +5,21 @@
  */
 import { randomUUID } from 'node:crypto'
 import { CATEGORY, finError } from '../errors.js'
-import { insertAudit, insertOutbox } from '../ledger/write.js'
+import {
+  insertAllocation, insertAudit, insertLedgerTx, insertLot, insertOutbox,
+  insertPostingPair, loadAccounts, loadBook,
+} from '../ledger/write.js'
+import { lockAccounts, lockBooks, lockLots } from '../ledger/locks.js'
 import {
   assertProvider, claim, envelope, finish, illegalTransition, lockPurchaseIntent,
   requireReason, withRetry,
 } from './helpers.js'
 import { recordDeferredRevenueForIntent } from '../accounting/deferred-revenue.js'
+import { insertEvaluatedEvents, loadActivePolicy } from '../accounting/events.js'
+import { evaluateRefund } from '../accounting/policy-engine.js'
 import { fundPurchaseFromIntent } from './paid-lots.js'
 import { quoteFromProduct, quoteProduct } from './quotes.js'
-import { asUnits, unitsString } from './units.js'
+import { asUnits, toSqlInt, unitsString } from './units.js'
 
 const ALLOW_SUBJECTS = ['BILLING_ACCOUNT', 'HOLDER', 'TENANT']
 
@@ -549,10 +555,287 @@ export async function cancelPurchase(input) {
   })
 }
 
-export async function refundPurchase() {
-  throw finError('NOT_IMPLEMENTED', {
-    category: CATEGORY.PRECONDITION,
-    httpStatus: 501,
-    details: { reserved_for: 'Stage 10 C §5.7' },
+async function allowRefunds(client, { environment, tenantId, holderId, billingAccountId }) {
+  const { rows } = await client.query(
+    `SELECT subject_type, allow_refunds
+       FROM fin.account_controls
+      WHERE environment = $1
+        AND (
+          (subject_type = 'BILLING_ACCOUNT' AND subject_id = $2)
+          OR (subject_type = 'HOLDER' AND subject_id = $3)
+          OR (subject_type = 'TENANT' AND subject_id = $4)
+        )`,
+    [environment, billingAccountId, holderId, tenantId],
+  )
+  for (const rank of ALLOW_SUBJECTS) {
+    const hit = rows.find((r) => r.subject_type === rank)
+    if (hit && hit.allow_refunds === false) {
+      throw finError('CONTROL_DENY', {
+        category: CATEGORY.CONTROL,
+        details: { flag: 'allow_refunds', subject_type: rank },
+      })
+    }
+  }
+}
+
+/**
+ * C §5.7 / Stage 10 un-501 of DL-095.
+ * Reverse PURCHASE-lot remaining first (LIFO). If remaining depleted, emit
+ * REFUND_REVERSAL lot. Cumulative REFUND txs ≤ quoted_minor. Full refund
+ * flips PAID → REFUNDED. Stage 9 evaluateRefund → REFUND_REVENUE_REVERSED
+ * (does NOT book credit-loss).
+ */
+export async function refundPurchase(input = {}) {
+  const env = envelope(input)
+  requireReason(env.reasonCode)
+  const intentId = input.intentId || input.id || input.purchaseIntentId
+  if (!intentId) {
+    throw finError('PURCHASE_INTENT_NOT_FOUND', { category: CATEGORY.VALIDATION, httpStatus: 404 })
+  }
+  const provider = input.provider || null
+  const providerEventId = input.providerEventId || input.provider_event_id || null
+  const key = env.idempotencyKey
+    || (providerEventId
+      ? `wh:${provider || 'STRIPE'}:${providerEventId}`
+      : `REFUND:${intentId}:${input.idemSuffix || '1'}`)
+  return withRetry(async (client) => {
+    const claimed = await claim(client, env, key, {
+      cmd: 'RefundPurchase', intentId, provider, providerEventId,
+      amountMinor: input.amountMinor != null ? String(input.amountMinor) : null,
+    })
+    if (claimed.kind === 'replay') return claimed.row.response_body
+    await lockPurchaseIntent(client, intentId)
+    const intent = await loadIntent(client, intentId, { forUpdate: true })
+    if (intent.status !== 'PAID' && intent.status !== 'REFUNDED') {
+      throw illegalTransition(intent.status, 'REFUNDED', 'RefundPurchase')
+    }
+    if (intent.status === 'REFUNDED') {
+      return finish(client, claimed, env, {
+        command: 'RefundPurchase', id: intentId, status: 'REFUNDED', replayed: true,
+      })
+    }
+    await allowRefunds(client, {
+      environment: intent.environment,
+      tenantId: intent.tenant_id,
+      holderId: intent.holder_id,
+      billingAccountId: intent.billing_account_id,
+    })
+
+    const thisMinor = asUnits(input.amountMinor ?? input.amount_minor ?? intent.quoted_minor)
+    const prior = await client.query(
+      `SELECT COALESCE(SUM(ae.amount_minor), 0)::bigint AS qty
+         FROM fin.accounting_events ae
+        WHERE ae.event_kind = 'REFUND_REVENUE_REVERSED'
+          AND ae.source_type = 'PURCHASE_INTENT'
+          AND ae.source_id = $1`,
+      [intentId],
+    )
+    if (asUnits(prior.rows[0].qty) + thisMinor > asUnits(intent.quoted_minor)) {
+      throw finError('NOTE_EXCEEDS_INVOICE', {
+        category: CATEGORY.PRECONDITION,
+        details: { reason: 'cumulative_refund_exceeds_quoted' },
+      })
+    }
+
+    const lots = await client.query(
+      `SELECT * FROM fin.lots
+        WHERE purchase_intent_id = $1 AND source_kind = 'PURCHASE'
+        ORDER BY created_at DESC, id DESC
+        FOR UPDATE`,
+      [intentId],
+    )
+    await lockLots(client, lots.rows.map((l) => l.id))
+    const openHold = await client.query(
+      `SELECT h.id FROM fin.holds h
+         JOIN fin.lot_allocations a ON a.hold_id = h.id
+        WHERE a.lot_id = ANY($1::uuid[]) AND h.status = 'OPEN'
+        LIMIT 1`,
+      [lots.rows.map((l) => l.id)],
+    )
+    if (openHold.rowCount) {
+      throw finError('HOLD_NOT_OPEN', {
+        category: CATEGORY.PRECONDITION,
+        details: { reason: 'open_hold_on_refund_lot', holdId: openHold.rows[0].id },
+      })
+    }
+
+    const quotedUnits = asUnits(intent.quoted_units)
+    const quotedMinor = asUnits(intent.quoted_minor)
+    let unitsToReverse = input.units != null
+      ? asUnits(input.units)
+      : (quotedMinor === 0n ? 0n : (thisMinor * quotedUnits) / quotedMinor)
+    if (unitsToReverse <= 0n) unitsToReverse = quotedUnits
+
+    const bookRow = (await client.query(
+      `SELECT * FROM fin.ledger_books
+        WHERE billing_account_id = $1 AND environment = $2 AND book_type = 'CUSTOMER'
+        ORDER BY id ASC LIMIT 1`,
+      [intent.billing_account_id, intent.environment],
+    )).rows[0]
+    const book = await loadBook(client, bookRow.id)
+    const accounts = await loadAccounts(client, book.id)
+    await lockBooks(client, [book.id])
+    await lockAccounts(client, Object.values(accounts))
+
+    const refundId = randomUUID()
+    const txId = await insertLedgerTx(client, {
+      environment: intent.environment,
+      bookId: book.id,
+      shape: 'REFUND',
+      economicSourceType: 'REFUND',
+      economicSourceId: refundId,
+      actorType: env.actorType,
+      actorId: env.actorId,
+      reasonCode: env.reasonCode,
+      idempotencyKeyId: claimed.row.id,
+      now: env.now,
+    })
+
+    let remainingNeed = unitsToReverse
+    const reversedLots = []
+    for (const lot of lots.rows) {
+      if (remainingNeed <= 0n) break
+      const avail = asUnits(lot.remaining_units)
+      if (avail <= 0n) continue
+      const take = avail < remainingNeed ? avail : remainingNeed
+      const pair = await insertPostingPair(client, {
+        environment: intent.environment,
+        transactionId: txId,
+        bookId: book.id,
+        accounts,
+        debitType: 'AVAILABLE',
+        creditType: 'ISSUANCE',
+        units: toSqlInt(take),
+        debitLotId: lot.id,
+        now: env.now,
+      })
+      await insertAllocation(client, {
+        environment: intent.environment,
+        lotId: lot.id,
+        postingId: pair.debitId,
+        units: toSqlInt(-take),
+        now: env.now,
+      })
+      if (avail === take) {
+        await client.query(
+          `UPDATE fin.lots SET status = 'EXHAUSTED', updated_at = $2 WHERE id = $1`,
+          [lot.id, env.now],
+        )
+      }
+      remainingNeed -= take
+      reversedLots.push({ lotId: lot.id, units: take.toString(), kind: 'REMAINING' })
+    }
+
+    let reversalLotId = null
+    if (remainingNeed > 0n) {
+      reversalLotId = await insertLot(client, {
+        environment: intent.environment,
+        tenantId: intent.tenant_id,
+        bookId: book.id,
+        billingAccountId: intent.billing_account_id,
+        holderId: intent.holder_id,
+        sourceKind: 'REFUND_REVERSAL',
+        grantedUnits: toSqlInt(remainingNeed),
+        remainingUnits: toSqlInt(remainingNeed),
+        considerationMinor: 0,
+        currency: intent.currency,
+        purchaseIntentId: intentId,
+        now: env.now,
+      })
+      await insertPostingPair(client, {
+        environment: intent.environment,
+        transactionId: txId,
+        bookId: book.id,
+        accounts,
+        debitType: 'ISSUANCE',
+        creditType: 'AVAILABLE',
+        units: toSqlInt(remainingNeed),
+        creditLotId: reversalLotId,
+        now: env.now,
+      })
+      reversedLots.push({
+        lotId: reversalLotId, units: remainingNeed.toString(), kind: 'REFUND_REVERSAL',
+      })
+    }
+
+    const recognized = await client.query(
+      `SELECT COALESCE(SUM(amount_minor), 0)::bigint AS qty
+         FROM fin.accounting_events
+        WHERE event_kind = 'REVENUE_RECOGNIZED'
+          AND source_type = 'PURCHASE_INTENT'
+          AND source_id = $1`,
+      [intentId],
+    )
+    const policy = await loadActivePolicy(client, {
+      environment: intent.environment,
+      now: env.now,
+    })
+    const ba = (await client.query(
+      `SELECT seller_legal_entity_id FROM fin.billing_accounts WHERE id = $1`,
+      [intent.billing_account_id],
+    )).rows[0]
+    const evaluated = evaluateRefund({
+      id: intentId,
+      currency: intent.currency,
+      recognized_minor: recognized.rows[0].qty,
+      refund_minor: thisMinor.toString(),
+      sourceType: 'PURCHASE_INTENT',
+    }, { id: txId, amountMinor: thisMinor.toString() }, policy.policy_definition)
+    const events = await insertEvaluatedEvents(client, {
+      evaluated,
+      environment: intent.environment,
+      tenantId: intent.tenant_id,
+      billingAccountId: intent.billing_account_id,
+      legalEntityId: ba?.seller_legal_entity_id,
+      ledgerTransactionId: txId,
+      now: env.now,
+      actor: { type: env.actorType, id: env.actorId, email: env.actorEmail },
+      currency: intent.currency,
+    })
+
+    const full = asUnits(prior.rows[0].qty) + thisMinor >= quotedMinor
+    let status = 'PAID'
+    if (full) {
+      const updated = await stampTransition(client, intent, {
+        to: 'REFUNDED',
+        now: env.now,
+        actorType: env.actorType,
+        actorId: env.actorId,
+        reasonCode: env.reasonCode,
+      })
+      status = 'REFUNDED'
+      await writeStatusOutbox(client, updated, { to: 'REFUNDED', now: env.now })
+      await writeLifecycle(client, updated, { to: 'REFUNDED', now: env.now })
+    }
+    await insertOutbox(client, {
+      environment: intent.environment,
+      topic: 'fin.ledger.posted',
+      dedupeKey: `tx:${txId}`,
+      payload: { txId, shape: 'REFUND' },
+      now: env.now,
+    })
+    await insertAudit(client, {
+      environment: intent.environment,
+      actorType: env.actorType,
+      actorId: env.actorId,
+      actorEmail: env.actorEmail,
+      action: 'PURCHASE_REFUNDED',
+      targetType: 'PURCHASE_INTENT',
+      targetId: intentId,
+      afterState: { status, txId, refundId, lots: reversedLots },
+      reasonCode: env.reasonCode,
+      now: env.now,
+    })
+    return finish(client, claimed, env, {
+      command: 'RefundPurchase',
+      id: intentId,
+      status,
+      txId,
+      refundId,
+      amountMinor: thisMinor.toString(),
+      lots: reversedLots,
+      reversalLotId,
+      events: events.map((e) => e.id),
+    })
   })
 }

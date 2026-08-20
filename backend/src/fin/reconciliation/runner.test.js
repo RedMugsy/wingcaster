@@ -7,20 +7,16 @@ import { CHECKS } from './checks.js'
 import { runReconciliation } from './runner.js'
 
 finPostgresSuite('reconciliation runner', {}, ({ pool, world }) => {
-  it('inserts R001–R023, R030–R039, R040–R049; R042/R044/R049/R053 ERROR; R043 GREEN after Stage 9 periods', async () => {
+  it('inserts R001–R023, R030–R039, R040–R049; R042/R044/R049/R053 GREEN now that billing tables exist', async () => {
     const run = await runReconciliation(pool(), { now: NOW })
     expect(run.skipped).toBe(false)
     expect(run.results).toHaveLength(CHECKS.length)
     expect(CHECKS.map((c) => c.check_code)).toEqual(run.results.map((r) => r.check_code))
     const byCode = Object.fromEntries(run.results.map((r) => [r.check_code, r]))
-    const errorCodes = new Set(['R042', 'R044', 'R049', 'R053'])
-    for (const check of CHECKS.filter((c) => !errorCodes.has(c.check_code))) {
+    for (const check of CHECKS) {
       expect(byCode[check.check_code].result, check.check_code).toBe('GREEN')
     }
     expect(byCode.R022.result).toBe('GREEN')
-    for (const code of errorCodes) {
-      expect(byCode[code].result, code).toBe('ERROR')
-    }
     const stored = await pool().query(
       `SELECT check_code FROM fin.reconciliation_checks WHERE run_id = $1 ORDER BY check_code`,
       [run.runId],

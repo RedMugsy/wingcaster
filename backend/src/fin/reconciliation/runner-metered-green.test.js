@@ -11,7 +11,7 @@ import { runReconciliation } from './runner.js'
 // unable to go GREEN in that same file afterwards.
 
 finPostgresSuite('reconciliation runner after metering', {}, ({ pool, world }) => {
-  it('R001–R039 stay GREEN after a metered seed world (R053 ERROR; R042/R044/R049 ERROR; R043 GREEN)', async () => {
+  it('R001–R039 stay GREEN after a metered seed world (R042/R044/R049/R053 GREEN; R043 GREEN)', async () => {
     const { meterVersionId, eventType } = await seedIsolatedMeter(pool(), { label: 'runner' })
     await ingestUsageEvent(usagePayload(world(), { eventType, quantityUnits: 1_000_000 }))
     await ingestUsageEvent(usagePayload(world(), { eventType, quantityUnits: 2_000_000 }))
@@ -21,7 +21,7 @@ finPostgresSuite('reconciliation runner after metering', {}, ({ pool, world }) =
 
     const run = await runReconciliation(pool(), { now: NOW })
     const byCode = Object.fromEntries(run.results.map((r) => [r.check_code, r]))
-    const errorCodes = new Set(['R042', 'R044', 'R049', 'R053'])
+    const errorCodes = new Set()
     for (const check of CHECKS.filter((c) => !errorCodes.has(c.check_code))) {
       expect(byCode[check.check_code].result, check.check_code).toBe('GREEN')
     }
