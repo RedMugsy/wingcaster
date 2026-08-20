@@ -64,6 +64,9 @@ export async function runHoldExpiryTick({
             if (!lockedHold.rowCount) {
               return { skipped: true, reason: 'skipped_locked', holdId: hold.id }
             }
+            // Hold TTL: no accounting event. The hold never captured, so
+            // nothing is recognized and BREAKAGE is a lot-expiry concern
+            // (C §5.8 / expire-lot.js), not a hold-expiry concern.
             const expired = await expireHold({
               holdId: hold.id,
               now: clock,

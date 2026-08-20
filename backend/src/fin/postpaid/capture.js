@@ -8,7 +8,8 @@
  *   (net ISSUANCE −u / CONSUMED +u; draw allocation on the AVAILABLE debit)
  *   audit + outbox fin.facility.reservation
  *
- * NOT landed (Stage 10 — DL-106 / DL-109): fin.receivables, accounting_events,
- * IssueInvoice, revenue-event at capture. Do not invent those tables.
+ * Stage 9 (DL-120): after FACILITY_DRAW mint + consume, reservations.js
+ * inserts REVENUE_RECOGNIZED + RECEIVABLE_CREATED in the same tx.
+ * Invoice ISSUE / tax-at-issue remain Stage 10.
  */
 export { captureFacility, captureFacilityForHold } from './reservations.js'

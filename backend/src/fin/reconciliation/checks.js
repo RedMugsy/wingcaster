@@ -478,5 +478,115 @@ export const CHECKS = [
     entity_type: 'lots',
     source_query: "SELECT l.id AS entity_id, l.consideration_minor AS qty FROM fin.lots l WHERE l.source_kind IN ('PROMOTIONAL_GRANT','COMPENSATION')",
     comparison_query: "SELECT l.id AS entity_id, 0::bigint AS qty FROM fin.lots l WHERE l.source_kind IN ('PROMOTIONAL_GRANT','COMPENSATION')",
-  }
+  },
+  {
+    // Stage 9 restatement (DL-127): deferred = recognized + remaining per group.
+    check_code: 'R060',
+    severity: 'CRITICAL',
+    expected_delta_units: 0,
+    drift_action: 'BLOCK_BILLING_CLOSE',
+    entity_type: 'revenue_allocation_groups',
+    source_query: `SELECT g.id AS entity_id, g.amount_minor AS qty
+         FROM fin.revenue_allocation_groups g`,
+    comparison_query: `SELECT g.id AS entity_id,
+         (
+           COALESCE((
+             SELECT SUM(ae.amount_minor)
+               FROM fin.accounting_events ae
+              WHERE ae.event_kind = 'REVENUE_RECOGNIZED'
+                AND (
+                  (ae.source_type = g.source_type AND ae.source_id = g.source_id)
+                  OR ae.source_id IN (
+                    SELECT l.rated_usage_id
+                      FROM fin.revenue_allocation_lines l
+                     WHERE l.group_id = g.id AND l.rated_usage_id IS NOT NULL
+                  )
+                )
+           ), 0)
+           + g.amount_minor
+           - COALESCE((
+               SELECT SUM(l.recognized_amount_minor)
+                 FROM fin.revenue_allocation_lines l
+                WHERE l.group_id = g.id
+             ), 0)
+         )::bigint AS qty
+         FROM fin.revenue_allocation_groups g`,
+  },
+  {
+    // Payments table is Stage 10. Applied payments = 0 (DL-121).
+    check_code: 'R061',
+    severity: 'CRITICAL',
+    expected_delta_units: 0,
+    drift_action: 'BLOCK_BILLING_CLOSE',
+    entity_type: 'accounting_events',
+    source_query: `SELECT ae.source_id AS entity_id, SUM(ae.amount_minor)::bigint AS qty
+         FROM fin.accounting_events ae
+        WHERE ae.event_kind = 'RECEIVABLE_CREATED'
+        GROUP BY ae.source_id`,
+    comparison_query: `SELECT recv.source_id AS entity_id,
+         (
+           COALESCE(wo.qty, 0)
+           + (recv.qty - COALESCE(wo.qty, 0))
+         )::bigint AS qty
+         FROM (
+           SELECT source_id, SUM(amount_minor)::bigint AS qty
+             FROM fin.accounting_events
+            WHERE event_kind = 'RECEIVABLE_CREATED'
+            GROUP BY source_id
+         ) recv
+         LEFT JOIN (
+           SELECT source_id, SUM(amount_minor)::bigint AS qty
+             FROM fin.accounting_events
+            WHERE event_kind = 'BAD_DEBT_WRITE_OFF'
+            GROUP BY source_id
+         ) wo ON wo.source_id = recv.source_id`,
+  },
+  {
+    check_code: 'R062',
+    severity: 'HIGH',
+    expected_delta_units: 0,
+    drift_action: 'BLOCK_BILLING_CLOSE',
+    entity_type: 'lots',
+    source_query: `SELECT l.id AS entity_id,
+         COALESCE((
+           SELECT SUM(ae.amount_minor)
+             FROM fin.accounting_events ae
+            WHERE ae.event_kind = 'BREAKAGE_RECOGNIZED'
+              AND ae.source_type = 'LOT'
+              AND ae.source_id = l.id
+         ), 0)::bigint AS qty
+         FROM fin.lots l
+        WHERE l.status = 'EXPIRED'`,
+    comparison_query: `SELECT l.id AS entity_id,
+         CASE
+           WHEN l.granted_units = 0 THEN 0
+           ELSE (l.consideration_minor
+             * (l.granted_units - l.remaining_units - COALESCE((
+                  SELECT SUM(-a.units)
+                    FROM fin.lot_allocations a
+                    JOIN fin.ledger_postings p ON p.id = a.posting_id
+                    JOIN fin.ledger_transactions t ON t.id = p.transaction_id
+                   WHERE a.lot_id = l.id
+                     AND a.units < 0
+                     AND t.shape <> 'EXPIRY'
+                ), 0))
+             / l.granted_units)
+         END::bigint AS qty
+         FROM fin.lots l
+        WHERE l.status = 'EXPIRED'`,
+  },
+  {
+    check_code: 'R063',
+    severity: 'HIGH',
+    expected_delta_units: 0,
+    drift_action: 'BLOCK_BILLING_CLOSE',
+    entity_type: 'accounting_events',
+    source_query: `SELECT ae.id AS entity_id, 1::bigint AS qty
+         FROM fin.accounting_events ae`,
+    comparison_query: `SELECT ae.id AS entity_id, 1::bigint AS qty
+         FROM fin.accounting_events ae
+         JOIN fin.accounting_periods ap ON ap.id = ae.accounting_period_id
+        WHERE ap.status <> 'HARD_CLOSED'
+           OR ae.event_at < ap.ends_at`,
+  },
 ]

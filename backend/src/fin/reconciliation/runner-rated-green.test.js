@@ -10,7 +10,7 @@ import { captureUsage } from '../auth/capture.js'
 import { CHECKS } from './checks.js'
 import { runReconciliation } from './runner.js'
 
-const ERROR_CODES = new Set(['R042', 'R043', 'R044', 'R049', 'R053'])
+const ERROR_CODES = new Set(['R042', 'R044', 'R049', 'R053'])
 
 finPostgresSuite('reconciliation runner after rating', {}, ({ pool, world }) => {
   it('R040/R041/R045/R046 land in the GREEN batch after a real rating run', async () => {

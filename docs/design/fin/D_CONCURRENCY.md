@@ -419,6 +419,7 @@ Prefer the two-int form so classes cannot collide: `pg_try_advisory_lock(class i
 | `1011` | `FIN_PARTITION_DDL` | `hash(residency_key)` | Legal-entity create / partition ensure | **No** per `residency_key` — see §7.4 |
 | `1012` | `FIN_IDEMPOTENCY_SWEEP` | `0` | Expires `idempotency_keys` (E) | **No** |
 | `1013` | `FIN_METERING` | `0` (tick) or `hashtext(meterVersionId:holderId:periodKey)` (`meterPeriod`) | Metering aggregator (Stage 3) | **No** per key. Tick is singleton (`key2=0`). Per-tuple keys may run in parallel across different (meter, holder, period) |
+| `1019` | `FIN_ACCOUNTING_PERIOD_CLOSE` | `hashtext(periodId)` (xact) | SoftClose / HardClose / Reopen (Stage 9, DL-116) | **No** per period. `1008` remains the SOX worker class. Do not reuse `1016` |
 
 `hash(uuid)` for `key2` is `('x' || right(replace(uuid::text, '-', ''), 8))::bit(32)::int` — stable, not `hashtext` of a locale-sensitive collation.
 

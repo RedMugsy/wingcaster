@@ -49,7 +49,16 @@ export async function seedPlatform(client) {
                'SAR', 'ksa', $3, $3)`,
     [legalEntityId, platformId, NOW],
   )
-  return { platformId, liveEnvId, testEnvId, legalEntityId }
+  const accountingPeriodId = randomUUID()
+  await client.query(
+    `INSERT INTO fin.accounting_periods (
+       id, environment, legal_entity_id, period_key, starts_at, ends_at, status,
+       created_at, updated_at
+     ) VALUES ($1, 'LIVE', $2, '2026-08', '2026-08-01T00:00:00.000Z',
+               '2026-09-01T00:00:00.000Z', 'OPEN', $3, $3)`,
+    [accountingPeriodId, legalEntityId, NOW],
+  )
+  return { platformId, liveEnvId, testEnvId, legalEntityId, accountingPeriodId }
 }
 
 export async function seedFinTenant(client, {

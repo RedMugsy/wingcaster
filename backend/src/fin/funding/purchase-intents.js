@@ -10,6 +10,7 @@ import {
   assertProvider, claim, envelope, finish, illegalTransition, lockPurchaseIntent,
   requireReason, withRetry,
 } from './helpers.js'
+import { recordDeferredRevenueForIntent } from '../accounting/deferred-revenue.js'
 import { fundPurchaseFromIntent } from './paid-lots.js'
 import { quoteFromProduct, quoteProduct } from './quotes.js'
 import { asUnits, unitsString } from './units.js'
@@ -427,6 +428,12 @@ export async function confirmPurchasePayment(input) {
       intentId, now: env.now, actorType: env.actorType, actorId: env.actorId,
       actorEmail: env.actorEmail, reasonCode: env.reasonCode || 'PSP_CAPTURE',
       idempotencyKeyId: claimed.row.id,
+    })
+    await recordDeferredRevenueForIntent(client, {
+      intent: updated,
+      fundingTxId: funded.txId,
+      now: env.now,
+      actor: { type: env.actorType, id: env.actorId, email: env.actorEmail },
     })
     await insertAudit(client, {
       environment: env.environment,

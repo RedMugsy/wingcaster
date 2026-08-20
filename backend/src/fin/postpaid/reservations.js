@@ -2,6 +2,7 @@
  * Facility reservations (B §12). reserve / capture / release / expire.
  * Capture mints a FACILITY_DRAW lot with remaining_units = 0 (R052 / DL-105).
  */
+import { recordPostpaidCapture } from '../accounting/receivables.js'
 import { CATEGORY, finError } from '../errors.js'
 import { lockAccounts, lockBooks } from '../ledger/locks.js'
 import {
@@ -328,6 +329,13 @@ export async function captureFacility(input) {
     )
     const next = await loadReservation(client, reservationId)
     await reservationOutbox(client, env, next, 'CAPTURED')
+    await recordPostpaidCapture(client, {
+      reservationId,
+      captureTxId: minted.txId,
+      amountMinor: reservation.reserved_minor,
+      now: env.now,
+      actor: { type: env.actorType, id: env.actorId, email: env.actorEmail },
+    })
     return finish(client, claimed, env, {
       reservationId,
       status: 'CAPTURED',
