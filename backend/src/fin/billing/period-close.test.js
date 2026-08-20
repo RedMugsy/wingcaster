@@ -88,6 +88,7 @@ finPostgresSuite('billing period-close 12-step', {}, ({ pool, world }) => {
       fiscalContext: '2026',
     })
     expect(closed.status).toBe('FINAL')
+    expect(closed.invoiceStatus).toBe('ISSUED')
     const period = await pool().query(
       `SELECT status FROM fin.billing_periods WHERE id = $1`,
       [periodId],

@@ -164,18 +164,23 @@ export function evaluateRefund(purchase, refundTx, policyDefinition) {
   const policy = normalizePolicy(policyDefinition)
   const recognized = asMinor(purchase?.recognized_minor ?? purchase?.recognizedMinor)
   const requested = asMinor(purchase?.refund_minor ?? purchase?.refundMinor ?? refundTx?.amountMinor)
+  // Revenue reversal is independent of lot remaining_units (DL-144). Fully
+  // consumed purchases still reverse min(requested, recognized).
   const amount = requested < recognized ? requested : recognized
-  return pack([
-    event(
-      'REFUND_REVENUE_REVERSED',
-      amount,
-      purchase?.currency || 'USD',
-      purchase?.sourceType || 'PURCHASE_INTENT',
-      purchase?.id || purchase?.purchaseId || purchase?.intentId,
-      `refund:${refundTx?.id || refundTx?.txId || 'none'}`,
-      policy,
-    ),
-  ])
+  if (amount <= 0n) return pack([])
+  return {
+    events: [{
+      eventKind: 'REFUND_REVENUE_REVERSED',
+      amountMinor: minorString(amount),
+      currency: purchase?.currency || 'USD',
+      sourceType: purchase?.sourceType || 'PURCHASE_INTENT',
+      sourceId: purchase?.id || purchase?.purchaseId || purchase?.intentId,
+      memo: `refund:${refundTx?.id || refundTx?.txId || 'none'}`,
+      accountCode: policy.accounts.REFUND_REVENUE_REVERSED || 'REVENUE',
+    }],
+    groups: [],
+    lines: [],
+  }
 }
 
 export function evaluatePostpaidCapture(reservation, captureTx, ratedUsage, policyDefinition) {

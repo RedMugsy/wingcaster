@@ -1422,3 +1422,5 @@ Follow-up (2026-08-20): additive migration 195 fixes latent Stage 1 JCS `jsonb_t
 `billing/period-close.test.js`, `billing/invoices.test.js`, `billing/invoice-sequences.test.js`, `billing/credit-note.test.js`, `billing/debit-note.test.js`, `billing/payments.test.js`, `billing/immutable-after-issue.test.js`, `billing/dunning-cure.test.js`, `billing/refund-purchase.test.js`, `reconciliation/r070-r073.test.js`, `reconciliation/runner-billed-green.test.js`.
  Fast suite also runs `billing/invoice-assembler.test.js`, `billing/periods.test.js`, `billing/payment-allocation.test.js`.
 
+Follow-up (2026-08-20): PAID→ISSUED reversal transition allowed via migration 205 (DL-143). refundPurchase consumed-path now fires REFUND_REVENUE_REVERSED (DL-144). period-close returns period status (DL-145). runner-billed-green DRAFT-precondition guard fixed (DL-146). Idempotent role provisioning via migration 206 (DL-147).
+

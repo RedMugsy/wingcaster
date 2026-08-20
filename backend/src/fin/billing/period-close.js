@@ -339,12 +339,32 @@ function nextStepIndex(status, invoiceStatus) {
   if (status === 'USAGE_CLOSED') return 2
   if (status === 'RATING_CLOSED') return 4
   if (status === 'INVOICE_DRAFTED') {
-    if (!invoiceStatus || invoiceStatus === 'DRAFT') return 5
+    // Tax checklist (steps 6–8) is snapshotted at ISSUE (C §5.6). Those
+    // steps do not change period/invoice status, so driving them from
+    // nextStepIndex loops forever on DRAFT (DL-145 / DL-146). Jump to approve.
+    if (!invoiceStatus || invoiceStatus === 'DRAFT') return 8
     if (invoiceStatus === 'APPROVED') return 9
     return 10
   }
   if (status === 'INVOICED') return 11
   return -1
+}
+
+async function periodCloseResult(periodId) {
+  return withRetry(async (client) => {
+    const period = (await client.query(
+      `SELECT * FROM fin.billing_periods WHERE id = $1`,
+      [periodId],
+    )).rows[0]
+    const invoice = period ? await periodInvoice(client, periodId) : null
+    return {
+      billingPeriodId: periodId,
+      periodId,
+      status: period?.status,
+      invoiceId: invoice?.id || null,
+      invoiceStatus: invoice?.status || null,
+    }
+  })
 }
 
 export async function advanceBillingPeriodClose(input) {
@@ -372,11 +392,12 @@ export async function advanceBillingPeriodClose(input) {
       throw finError('BILLING_PERIOD_SKIP', { category: CATEGORY.PRECONDITION })
     }
     if (snapshot.period.status === 'FINAL' || (target && snapshot.period.status === target)) {
-      return last || { periodId, status: snapshot.period.status, done: true }
+      const result = await periodCloseResult(periodId)
+      return { ...result, done: true }
     }
     const idx = nextStepIndex(snapshot.period.status, snapshot.invoice?.status)
     if (idx < 0) {
-      return last || { periodId, status: snapshot.period.status, done: true }
+      return periodCloseResult(periodId)
     }
     last = await STEP_FNS[idx]({
       ...env,
@@ -384,9 +405,12 @@ export async function advanceBillingPeriodClose(input) {
       fiscalContext: input.fiscalContext,
       idempotencyKey: undefined,
     })
-    if (!target) return last
+    if (!target) {
+      const result = await periodCloseResult(periodId)
+      return { ...result, last }
+    }
   }
-  return last
+  return periodCloseResult(periodId)
 }
 
 export { STEPS }

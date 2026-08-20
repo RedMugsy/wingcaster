@@ -265,6 +265,9 @@ export async function applyPayment(input) {
       const amount = BigInt(alloc.amountMinor ?? alloc.amount_minor ?? 0)
       if (amount === 0n) continue
       const invoice = await loadInvoice(client, alloc.invoiceId)
+      // ApplyPayment is cash against an issued receivable. DRAFT is correctly
+      // rejected here (not inverted). runner-billed-green must ISSUE first
+      // (period-close nextStepIndex; DL-146).
       if (!invoice || !['ISSUED', 'PART_PAID', 'UNCOLLECTIBLE'].includes(invoice.status)) {
         throw finError('INVOICE_NOT_DRAFT', {
           category: CATEGORY.PRECONDITION,

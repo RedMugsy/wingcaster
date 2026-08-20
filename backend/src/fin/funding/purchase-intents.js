@@ -758,12 +758,50 @@ export async function refundPurchase(input = {}) {
       })
     }
 
+    // Stage 9 stamps REVENUE_RECOGNIZED as RATED_USAGE (DL-128), not
+    // PURCHASE_INTENT. GREATEST of events vs the ON_CONSUMPTION line
+    // accumulator so a fully consumed purchase still reverses (DL-144).
     const recognized = await client.query(
-      `SELECT COALESCE(SUM(amount_minor), 0)::bigint AS qty
-         FROM fin.accounting_events
-        WHERE event_kind = 'REVENUE_RECOGNIZED'
-          AND source_type = 'PURCHASE_INTENT'
-          AND source_id = $1`,
+      `SELECT GREATEST(
+           COALESCE((
+             SELECT SUM(ae.amount_minor)
+               FROM fin.accounting_events ae
+              WHERE ae.event_kind = 'REVENUE_RECOGNIZED'
+                AND (
+                  (ae.source_type = 'PURCHASE_INTENT' AND ae.source_id = $1)
+                  OR (
+                    ae.source_type = 'RATED_USAGE'
+                    AND ae.source_id IN (
+                      SELECT l.rated_usage_id
+                        FROM fin.revenue_allocation_lines l
+                        JOIN fin.revenue_allocation_groups g ON g.id = l.group_id
+                       WHERE g.source_type = 'PURCHASE_INTENT'
+                         AND g.source_id = $1
+                         AND l.rated_usage_id IS NOT NULL
+                    )
+                  )
+                  OR (
+                    ae.source_type = 'RATED_USAGE'
+                    AND ae.source_id IN (
+                      SELECT h.subject_id
+                        FROM fin.lots l
+                        JOIN fin.lot_allocations a ON a.lot_id = l.id
+                        JOIN fin.holds h ON h.id = a.hold_id
+                       WHERE l.purchase_intent_id = $1
+                         AND h.subject_type = 'RATED_USAGE'
+                         AND h.subject_id IS NOT NULL
+                    )
+                  )
+                )
+           ), 0),
+           COALESCE((
+             SELECT SUM(l.recognized_amount_minor)
+               FROM fin.revenue_allocation_lines l
+               JOIN fin.revenue_allocation_groups g ON g.id = l.group_id
+              WHERE g.source_type = 'PURCHASE_INTENT'
+                AND g.source_id = $1
+           ), 0)
+         )::bigint AS qty`,
       [intentId],
     )
     const policy = await loadActivePolicy(client, {
@@ -774,10 +812,16 @@ export async function refundPurchase(input = {}) {
       `SELECT seller_legal_entity_id FROM fin.billing_accounts WHERE id = $1`,
       [intent.billing_account_id],
     )).rows[0]
+    let recognizedMinor = asUnits(recognized.rows[0].qty)
+    if (recognizedMinor === 0n && reversalLotId) {
+      // Consumed-then-refund: units are gone so remaining_units cannot gate
+      // the reversal. Reverse the refund amount itself (DL-144).
+      recognizedMinor = thisMinor
+    }
     const evaluated = evaluateRefund({
       id: intentId,
       currency: intent.currency,
-      recognized_minor: recognized.rows[0].qty,
+      recognized_minor: recognizedMinor.toString(),
       refund_minor: thisMinor.toString(),
       sourceType: 'PURCHASE_INTENT',
     }, { id: txId, amountMinor: thisMinor.toString() }, policy.policy_definition)
