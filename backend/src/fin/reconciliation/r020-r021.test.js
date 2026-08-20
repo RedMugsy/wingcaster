@@ -31,6 +31,6 @@ finPostgresSuite('reconciliation R020 R021 after real authorize + capture', {}, 
     const capBy = Object.fromEntries(captured.results.map((r) => [r.check_code, r]))
     expect(capBy.R020.result).toBe('GREEN')
     expect(capBy.R021.result).toBe('GREEN')
-    expect(capBy.R023.result).toBe('ERROR')
+    expect(capBy.R023.result).toBe('GREEN')
   })
 })

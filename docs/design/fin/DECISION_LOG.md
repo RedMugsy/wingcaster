@@ -117,5 +117,6 @@ Living log. Append only. Date + decision + rationale + who. Never silently rewri
 | 2026-08-20 | DL-110 | A omitted `currency` on `credit_facilities`; added `CHAR(3) NOT NULL`. `limit_minor` is mutable on ACTIVE/PAUSED with `FACILITY_OPS` (no separate amendment machine). | A §8.2 vs B §18 | Stage 8 |
 | 2026-08-20 | DL-111 | A omitted `kind`. UNIQUE `(environment, billing_account_id, currency)` — one facility per currency per billing account. | A §8.2 uniqueness | Stage 8 |
 | 2026-08-20 | DL-112 | SYSTEM may activate/pause/resume/close without `FACILITY_OPS` (tests/control-plane). USER still requires it. WORKER may suspend without it (dunning USAGE_SUSPENDED). | B §18 actor vs test actor | Stage 8 |
+| 2026-08-20 | DL-113 | `authorizeUsage` (Stage 6) reads `input.amountMinor` when it calls `resolveHybridPlan`, but `spend.js` does not compute or forward this value into `authorizeUsage`. Result: the hybrid facility-shortfall path in the spendCredits chain sees `amountMinor: null` and cannot cover a real shortfall. Direct-spend-postpaid tests exercise the reservation path directly, which is why CI did not catch this. Reserved for Stage 10 when the spend↔hybrid wiring is completed alongside invoicing. Do not patch in Stage 8 | Audit of PR #13 | Stage 8 |
 
 

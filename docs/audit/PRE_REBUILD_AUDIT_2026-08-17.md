@@ -1338,3 +1338,5 @@ Follow-up (2026-08-20): R057/R058 moved to the end of the CHECKS array so runner
 
 **CI file list (must appear in the postgres job summary):**
 `postpaid/hybrid-resolver.test.js`, `postpaid/facilities.test.js`, `postpaid/reservations.test.js`, `postpaid/capture-postpaid.test.js`, `postpaid/direct-spend-postpaid.test.js`, `postpaid/expiry-worker.test.js`, `dunning/cases.test.js`, `dunning/steps.test.js`, `dunning/worker.test.js`, `reconciliation/r050-r053.test.js`, `reconciliation/runner-postpaid-green.test.js`.
+
+Follow-up (2026-08-20): R050–R053 reordered in CHECKS so insertion order matches alphabetical (runner.test.js line 28). Stray R023.result=ERROR assertions in runner-funded-green.test.js and r020-r021.test.js flipped to GREEN (R023 was refactored to reservations-orphan in Stage 8). DL-113 logged for the spend.js → authorize.js amountMinor pass-through, reserved for Stage 10.

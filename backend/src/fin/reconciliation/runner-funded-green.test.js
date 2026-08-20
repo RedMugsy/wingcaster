@@ -36,6 +36,6 @@ finPostgresSuite('reconciliation runner after funding', {}, ({ pool, world }) =>
     }
     expect(byCode.R057.result).toBe('GREEN')
     expect(byCode.R058.result).toBe('GREEN')
-    expect(byCode.R023.result).toBe('ERROR')
+    expect(byCode.R023.result).toBe('GREEN')
   })
 })
