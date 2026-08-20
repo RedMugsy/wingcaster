@@ -1282,6 +1282,8 @@ Follow-up on `feat/stage-1-command-service-fixup` after QA on `feat/stage-1-comm
 
 **UN-501:** `/api/agent/credits/top-up` and `/api/agency/credits/top-up` route to `createPurchaseIntent` + `submitPurchasePayment` when `FIN_FUNDING_ENABLED` is on **and** a `fin.tenants` row exists for the public tenant. Otherwise they still return 501 (`topup_unavailable`). Gate is HTTP-only (DL-093). `POST /webhooks/stripe` verifies Stripe signatures and calls `confirmWebhook` (401 unsigned; 409 IN_FLIGHT).
 
+Follow-up (2026-08-20): R057/R058 moved to the end of the CHECKS array so runner.test.js line 28 passes. Three deferred hardenings logged as DL-101 (env/now from req.body), DL-102 (single CUSTOMER book per billing_account UNIQUE), DL-103 (withRetry only covers 40P01).
+
 **Addressed in this PR:**
 
 | Finding | What landed | Still LIVE / deferred |
