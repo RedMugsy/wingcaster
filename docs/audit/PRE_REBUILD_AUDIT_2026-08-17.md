@@ -1347,9 +1347,10 @@ Follow-up #2 (2026-08-20): insertControls now uses ON CONFLICT DO NOTHING (test 
 
 **Landed on `feat/stage-9-accounting`:** migrations `190_fin_accounting_events.sql`, `191_fin_revenue_allocation.sql`, `192_fin_accounting_policy_versions.sql` (v1 seed, DL-119), `193_fin_accounting_periods.sql` (B §550 + HARD_CLOSED insert trigger), `194_fin_tax_snapshots.sql` (table + writer helper only). Services `backend/src/fin/accounting/{events,policy-engine,deferred-revenue,receivables,credit-loss,breakage,periods}.js`, `backend/src/fin/tax/{service,snapshots}.js`, `backend/src/fin/ledger/expire-lot.js` (Stage 9 wrapper; Stage 1 `transactions.js` expireLot untouched), `backend/src/fin/dunning/write-off-invoice.js`. Advisory class `FIN_ACCOUNTING_PERIOD_CLOSE = 1019` (DL-116). Parallel `fin.*` path only. `backend/src/billing/events.js` and Stage 1 `ledger/transactions.js` / `write.js` untouched. No `/api/admin/fin/**` (Stage 12). No Stage 10 invoices / payments / credit notes.
 
-**Decision log:** DL-116 … DL-129.
+**Decision log:** DL-116 … DL-130.
 
 Follow-up (2026-08-20): R043 removed from sibling `ERROR_CODES` (now GREEN; empty `CLOSED_ACCOUNTING`). R042 stays ERROR until `billing_periods` (DL-129).
+Follow-up (2026-08-20): additive migration 195 fixes latent Stage 1 JCS `jsonb_typeof='bool'` typo (should be `'boolean'`) surfaced by Stage 9 accounting periods audit. DL-130 logged. Stage 1 migration 107 not edited.
 
 **Cross-stage wiring (same `transaction(fn)` / ALS reuse):**
 - Stage 7 `confirmPurchasePayment` → `DEFERRED_REVENUE_CREATED` + allocation group
@@ -1383,6 +1384,6 @@ Follow-up (2026-08-20): R043 removed from sibling `ERROR_CODES` (now GREEN; empt
 **Still LIVE on commercial.* until Stage 13 cutover:** commercial ledger, commercial invoices/tax, commercial dunning/email. This PR does not write `commercial.*`.
 
 **CI file list (must appear in the postgres job summary):**
-`accounting/events.test.js`, `accounting/periods.test.js`, `accounting/deferred-revenue.test.js`, `accounting/consumption.test.js`, `accounting/postpaid-capture.test.js`, `accounting/breakage.test.js`, `accounting/write-off.test.js`, `accounting/rollforward.test.js`, `reconciliation/r060-r063.test.js`, `reconciliation/runner-accounted-green.test.js`.
+`accounting/events.test.js`, `accounting/periods.test.js`, `accounting/deferred-revenue.test.js`, `accounting/consumption.test.js`, `accounting/postpaid-capture.test.js`, `accounting/breakage.test.js`, `accounting/write-off.test.js`, `accounting/rollforward.test.js`, `reconciliation/r060-r063.test.js`, `reconciliation/runner-accounted-green.test.js`, `ledger/audit-jcs-boolean.test.js`.
  Fast suite also runs `accounting/policy-engine.test.js` plus the validation describes in `events.test.js` / `periods.test.js`.
 
