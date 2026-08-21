@@ -11,11 +11,17 @@
  */
 
 import { v4 as uuidv4 } from 'uuid'
-import { insert } from '../db.js'
+import { insert, transaction } from '../db.js'
 import { RATE_CARD_LATEST_VERSION, CAST_VALUE_MINOR_SEED } from './rate-card.js'
 import { resolveActiveSubscription, meteredRateOverride } from './entitlements.js'
 import { recordConsumption, currentBillingPeriod } from './ledger.js'
 import { resolveEffectivePrice, resolveMarketContext } from './pricing/index.js'
+import { BusinessClock } from '../fin/clock.js'
+import { resolveCutoverMode } from '../fin/cutover/mode.js'
+import { dualWrite } from '../fin/cutover/dual-writer.js'
+import { usageEventInput } from '../fin/cutover/mapping.js'
+import { resolveFinMirrorContext } from '../fin/cutover/context.js'
+import { ingestUsageEventWithClient } from '../fin/usage/ingest.js'
 
 // Sentinel territory_id for events with no market context (webhook
 // receipts, platform-scoped telemetry). commercial.usage_events is
@@ -129,24 +135,83 @@ export async function emitUsageEvent({
       territory_id: cost.territory_id || territoryId || PLATFORM_TERRITORY_ID,
       zone_id: cost.zone_id || zoneId,
       metadata: metadata || {},
-      occurred_at: new Date().toISOString(),
+      occurred_at: BusinessClock.now(),
       billing_period: currentBillingPeriod(),
     }
-    await insert('usage_events', event)
 
-    // If this event has cost AND the tenant is on a plan that meters this
-    // as a quota (e.g. WhatsApp outbound), record the consumption against
-    // the tenant's ledger balance for the current period.
-    const quotaKeyForAction = QUOTA_KEY_FOR_ACTION[actionKey]
-    if (quotaKeyForAction && cost.casts_charged > 0 && active?.subscription?.id) {
-      await recordConsumption({
-        tenantId,
-        subscriptionId: active.subscription.id,
-        quotaKey: quotaKeyForAction,
-        amount: quantity,
-        sourceEventId: event.id,
-        metadata: { action_key: actionKey, casts: cost.casts_charged, country, channel },
+    const environment = metadata?.fin_environment === 'TEST' ? 'TEST' : 'LIVE'
+    const mode = await resolveCutoverMode({ publicTenantId: tenantId, environment })
+
+    // DL-171 / Stage 13a — when DUAL/FIN_ONLY, legacy + fin.* share one
+    // transaction(fn) (I-14 / D-T11). OFF keeps the historical separate
+    // inserts so non-allowlisted tenants see unchanged behaviour.
+    if (mode === 'DUAL' || mode === 'FIN_ONLY') {
+      await transaction(async (client) => {
+        await insert('usage_events', event)
+
+        // DL-171 / Stage 13a — dual-write to fin.*. Failure logs to
+        // fin.cutover_dual_write_errors and does NOT block the legacy write.
+        const ctx = await resolveFinMirrorContext({
+          publicTenantId: tenantId,
+          environment,
+          client,
+        })
+        await dualWrite({
+          client,
+          environment,
+          tenantId,
+          finCommand: 'ingestUsageEventWithClient',
+          legacy: {
+            source: 'commercial.usage_events',
+            rowId: event.id,
+            payload: event,
+          },
+          fin: async (finClient) => {
+            if (!ctx) {
+              throw Object.assign(new Error('FIN_MIRROR_CONTEXT_MISSING'), {
+                code: 'FIN_MIRROR_CONTEXT_MISSING',
+              })
+            }
+            return ingestUsageEventWithClient(finClient, usageEventInput(event, {
+              environment: ctx.environment,
+              finTenantId: ctx.tenantId,
+              holderId: ctx.holderId,
+              billingAccountId: ctx.billingAccountId,
+              now: event.occurred_at,
+            }))
+          },
+          now: event.occurred_at,
+        })
+
+        const quotaKeyForAction = QUOTA_KEY_FOR_ACTION[actionKey]
+        if (quotaKeyForAction && cost.casts_charged > 0 && active?.subscription?.id) {
+          await recordConsumption({
+            tenantId,
+            subscriptionId: active.subscription.id,
+            quotaKey: quotaKeyForAction,
+            amount: quantity,
+            sourceEventId: event.id,
+            metadata: { action_key: actionKey, casts: cost.casts_charged, country, channel },
+            cutoverMode: mode,
+            cutoverEnvironment: environment,
+            cutoverClient: client,
+          })
+        }
       })
+    } else {
+      await insert('usage_events', event)
+
+      const quotaKeyForAction = QUOTA_KEY_FOR_ACTION[actionKey]
+      if (quotaKeyForAction && cost.casts_charged > 0 && active?.subscription?.id) {
+        await recordConsumption({
+          tenantId,
+          subscriptionId: active.subscription.id,
+          quotaKey: quotaKeyForAction,
+          amount: quantity,
+          sourceEventId: event.id,
+          metadata: { action_key: actionKey, casts: cost.casts_charged, country, channel },
+        })
+      }
     }
 
     return event

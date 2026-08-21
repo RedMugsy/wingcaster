@@ -169,3 +169,13 @@ Living log. Append only. Date + decision + rationale + who. Never silently rewri
 
 
 
+
+| 2026-08-21 | DL-171 | Stage 13a un-freezes `billing/events.js` and legacy write paths for dual-write only. Legacy remains source of truth in DUAL mode. `emitUsageEvent` wraps legacy + fin mirror in one `transaction(fn)` when mode is DUAL/FIN_ONLY (closes A/B-1 for allowlisted tenants). | Stage 13 step 1 / I-14 | Stage 13a |
+| 2026-08-21 | DL-172 | `FIN_CUTOVER_MODE_GLOBAL` env flag: `OFF` (default) / `DUAL` (per-tenant allowlist) / `FIN_ONLY` (global). Global `FIN_ONLY` wins; otherwise `fin.cutover_tenant_allowlist.mode='DUAL'`; else `OFF`. Per-tenant rows never store `FIN_ONLY`. | Cutover gate | Stage 13a |
+| 2026-08-21 | DL-173 | Dual-write failures go to append-only `fin.cutover_dual_write_errors`. Legacy write is NEVER blocked by a fin.* failure (SAVEPOINT + DLQ insert). No outbox row on failure. | Additive dual-write | Stage 13a |
+| 2026-08-21 | DL-174 | R084 monitors dual-write error rate: DRIFT when `COUNT(*)` of errors with `occurred_at > now()-24h` is `>= 100`. Severity MEDIUM, `drift_action WARN`. (F's original R084 vendor A/B is deferred; vendor recon stays with Stage 11/13c.) Recon role may SELECT the DLQ table. | Operational guard | Stage 13a |
+| 2026-08-21 | DL-175 | Translator `usageEventInput`: `source_system='commercial.usage_events'`, `source_event_id=legacy.id`, `event_type=action_key`, `quantity_units=quantity` 1:1 (scale refinement deferred to 13b parity). | Pure mapping | Stage 13a |
+| 2026-08-21 | DL-176 | Translator `holdAuthorizeInput`: maps hold-shaped payloads to `authorizeUsage`. No `commercial.holds` writers exist today; translator is ready for 13b/backfill. | Pure mapping | Stage 13a |
+| 2026-08-21 | DL-177 | Translators `captureUsageInput` / `captureFacilityInput` for capture-shaped payloads. No commercial capture writers today. | Pure mapping | Stage 13a |
+| 2026-08-21 | DL-178 | Translator `refundPurchaseInput` for refund/credit-note shaped payloads toward Stage 10 `refundPurchase`. Commercial credit-notes are not wired in 13a. | Pure mapping | Stage 13a |
+| 2026-08-21 | DL-179 | `commercial.ledger_entries` consumption dual-writes via `ledgerConsumptionAuthorizeInput` -> `authorizeUsage`. Missing fin mirror context / book / funded lots land in the DLQ; legacy consumption still commits. | Translator choice | Stage 13a |
