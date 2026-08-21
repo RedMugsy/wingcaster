@@ -4,10 +4,10 @@
 import { randomUUID } from 'node:crypto'
 import { expect, it } from 'vitest'
 import { transaction } from '../../db.js'
-import { NOW } from '../../testing/seed.js'
-import { finPostgresSuite } from '../../testing/suite.js'
-import { ingestUsageEvent } from '../../usage/ingest.js'
-import { insertAccountingEvent } from '../../accounting/events.js'
+import { NOW } from '../testing/seed.js'
+import { finPostgresSuite } from '../testing/suite.js'
+import { ingestUsageEvent } from '../usage/ingest.js'
+import { insertAccountingEvent } from '../accounting/events.js'
 import { runReconciliation } from '../runner.js'
 
 async function dropUsageEnvCheck(pool) {
