@@ -10,6 +10,7 @@ import { CATEGORY, finError } from '../errors.js'
 import { FIN_RATING } from '../foundation/advisory-locks.js'
 import { insertAudit, insertOutbox } from '../ledger/write.js'
 import { sha256Canonical } from '../metering/hash.js'
+import { maybeWriteVendorCostEstimate } from '../vendors/cost-estimate.js'
 
 const LATE_CLASS_STAGE_5 = 'OPEN_PERIOD'
 const PRICE_COMPONENT_TYPES = ['METER_PRICE', 'OVERAGE_PRICE']
@@ -502,6 +503,17 @@ export async function rateMeteredUsage({
           adjustmentOf,
         ],
       )
+
+      await maybeWriteVendorCostEstimate(client, {
+        ratedUsageId,
+        meterId: metered.meter_id,
+        quantityUnits: measuredUnits,
+        occurredAt: metered.metered_at,
+        environment,
+        now: clock,
+        actorType: actor,
+        actorId,
+      })
 
       await insertOutbox(client, {
         environment,

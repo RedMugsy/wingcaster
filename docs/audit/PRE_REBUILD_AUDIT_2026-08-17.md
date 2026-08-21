@@ -1426,3 +1426,32 @@ Follow-up (2026-08-20): PAID→ISSUED reversal transition allowed via migration 
 Follow-up #2 (2026-08-20): writeInvoiceStatus dedupe uses post-flip version via UPDATE ... RETURNING (DL-148). R061 outstanding sum is AR-scoped (EXISTS RECEIVABLE_CREATED) with fallback 0 — prepaid invoice cash is settlement, not AR (DL-149).
 Follow-up #3 (2026-08-20): notification.lifecycle dedupe now includes version (DL-150) — the DL-148 fix missed the sibling notify write inside writeInvoiceStatus.
 
+### Stage 11 / vendor economics — 2026-08-21
+
+**Landed on `feat/stage-11-vendor`:** migrations `210_fin_vendors.sql` (vendors / products / rate_cards / rate_versions / meter_vendor_map; DRAFT→ACTIVE→DEPRECATED flip), `211_fin_vendor_usage.sql` (usage_events APPEND_ONLY + permanent UNIQUE(vendor_id, source_event_id); reported_usage MUTABLE; cost_estimates ACTIVE/SUPERSEDED; actual_costs), `212_fin_vendor_statements.sql` (DRAFT→RECEIVED→RECONCILED→FINALIZED; line freeze after FINALIZE; `vendor_variance_reasons` TABLE + `vendor_variances`; actuals FK), `213_fin_accounting_events_add_provider_cost.sql` (PROVIDER_COST_ATTRIBUTED + VENDOR_ACTUAL_COST). Services `backend/src/fin/vendors/{registry,usage-ingest,statement-ingest,reconciliation,margin,cost-estimate,helpers}.js`, `backend/src/fin/accounting/provider-cost.js`, read-only `backend/src/fin/admin/vendors/routes.js` gated on `FIN_VENDOR_OPS_ENABLED`. Advisory class `FIN_VENDOR_STATEMENT_RECON = 1021` (DL-151). Parallel `fin.*` path only. `backend/src/billing/events.js` and Stage 1 `ledger/transactions.js` / `write.js` untouched. No write routes under `/api/admin/fin/vendors/**` (Stage 12).
+
+**Decision log:** DL-151 … DL-159.
+
+**Cross-stage wiring (same `transaction(fn)` / ALS reuse):**
+- Stage 5 `rateMeteredUsage` → `maybeWriteVendorCostEstimate` when `fin.meter_vendor_map` exists; silent skip otherwise (DL-153)
+- Stage 6 authorize / capture: no vendor wiring (cost estimated at rating; actualized at FINALIZE)
+- Stage 9 `evaluate*` unchanged; `PROVIDER_COST_ATTRIBUTED` inserted by Stage 11 `accounting/provider-cost.js` on statement FINALIZE (DL-155)
+- R080–R083 registered (DL-159 restatement)
+
+**Spec §125 provider acceptance (5):**
+
+| # | Test | Where | Status |
+|---|---|---|---|
+| 1 | Internal-vs-provider usage variance calculated | `vendors/statement-recon.test.js` / `reconciliation.test.js` | Landed |
+| 2 | Cost rate change respects effective date | `vendors/rate-effective-date.test.js` | Landed |
+| 3 | Provider invoice mismatch detected | `vendors/provider-mismatch.test.js` | Landed; FINALIZE rejected without override |
+| 4 | Customer charge traceable to provider cost | `vendors/traceability.test.js` | Landed |
+| 5 | Margin does not conflate credit units and accounting revenue | `vendors/margin-not-conflated.test.js` | Landed |
+
+**Still LIVE on commercial.* until Stage 13 cutover:** commercial ledger, commercial invoices/tax/PDF/ZATCA HTTP, commercial dunning/email, commercial wallet, commercial vendor/SKU maps. This PR does not write `commercial.*`. Vendor-API fetches stay outbox (I-14); recon is in-tx facts only.
+
+**CI file list (must appear in the postgres job summary):**
+`vendors/registry-pg.test.js`, `vendors/usage-ingest.test.js`, `vendors/statement-recon.test.js`, `vendors/rate-effective-date.test.js`, `vendors/provider-mismatch.test.js`, `vendors/traceability.test.js`, `vendors/margin-not-conflated.test.js`, `reconciliation/r080-r083.test.js`, `reconciliation/runner-vendor-green.test.js`.
+ Fast suite also runs `vendors/registry.test.js`, `vendors/margin.test.js`, `vendors/reconciliation.test.js`.
+
+

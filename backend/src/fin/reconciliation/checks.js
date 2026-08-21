@@ -725,4 +725,79 @@ export const CHECKS = [
          )::bigint AS qty
          FROM fin.unapplied_cash u`,
   },
+  {
+    check_code: 'R080',
+    severity: 'HIGH',
+    expected_delta_units: 0,
+    drift_action: 'WARN',
+    entity_type: 'vendor_statements',
+    source_query: `SELECT s.id AS entity_id, s.total_minor AS qty
+         FROM fin.vendor_statements s`,
+    comparison_query: `SELECT s.id AS entity_id,
+         COALESCE((
+           SELECT SUM(a.amount_minor) FROM fin.vendor_actual_costs a
+           JOIN fin.vendor_statement_lines l ON l.id = a.vendor_statement_line_id
+          WHERE l.statement_id = s.id
+         ), 0)::bigint AS qty
+         FROM fin.vendor_statements s`,
+  },
+  {
+    check_code: 'R081',
+    severity: 'MEDIUM',
+    expected_delta_units: 0,
+    drift_action: 'WARN',
+    entity_type: 'vendor_cost_estimates',
+    source_query: `SELECT e.id AS entity_id, 1::bigint AS qty
+         FROM fin.vendor_cost_estimates e
+        WHERE e.status = 'ACTIVE'`,
+    comparison_query: `SELECT e.id AS entity_id, 1::bigint AS qty
+         FROM fin.vendor_cost_estimates e
+         JOIN fin.vendor_rate_versions v ON v.id = e.vendor_rate_version_id
+        WHERE e.status = 'ACTIVE'
+          AND v.effective_from <= e.created_at
+          AND (v.effective_to IS NULL OR v.effective_to >= e.created_at)`,
+  },
+  {
+    check_code: 'R082',
+    severity: 'HIGH',
+    expected_delta_units: 0,
+    drift_action: 'WARN',
+    entity_type: 'vendor_statements',
+    source_query: `SELECT s.id AS entity_id, 1::bigint AS qty
+         FROM fin.vendor_statements s
+        WHERE s.status = 'FINALIZED'`,
+    comparison_query: `SELECT s.id AS entity_id, 1::bigint AS qty
+         FROM fin.vendor_statements s
+        WHERE s.status = 'FINALIZED'
+          AND NOT EXISTS (
+            SELECT 1 FROM fin.vendor_variances v
+             WHERE v.statement_id = s.id AND v.resolved = false
+          )`,
+  },
+  {
+    check_code: 'R083',
+    severity: 'HIGH',
+    expected_delta_units: 0,
+    drift_action: 'WARN',
+    entity_type: 'vendor_actual_costs',
+    source_query: `SELECT s.id AS entity_id,
+         COALESCE((
+           SELECT SUM(a.amount_minor) FROM fin.vendor_actual_costs a
+           JOIN fin.vendor_statement_lines l ON l.id = a.vendor_statement_line_id
+          WHERE l.statement_id = s.id
+         ), 0)::bigint AS qty
+         FROM fin.vendor_statements s
+        WHERE s.status = 'FINALIZED'`,
+    comparison_query: `SELECT s.id AS entity_id,
+         COALESCE((
+           SELECT SUM(ae.amount_minor) FROM fin.accounting_events ae
+           JOIN fin.vendor_actual_costs a ON a.id = ae.source_id
+           JOIN fin.vendor_statement_lines l ON l.id = a.vendor_statement_line_id
+          WHERE l.statement_id = s.id
+            AND ae.event_kind = 'PROVIDER_COST_ATTRIBUTED'
+            AND ae.source_type = 'VENDOR_ACTUAL_COST'
+         ), 0)::bigint AS qty
+         FROM fin.vendor_statements s
+        WHERE s.status = 'FINALIZED'`,
+  },
 ]

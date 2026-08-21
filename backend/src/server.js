@@ -17,6 +17,7 @@ import { signToken, authMiddleware, requireElevated } from './auth.js'
 import { registerTwoFactorRoutes, startSigninChallengeIfRequired } from './auth-2fa.js'
 import { registerPlatformTemplateAdminRoutes } from './notifications/platform-templates/routes.js'
 import { registerFinPricingAdminRoutes } from './fin/admin/pricing/routes.js'
+import { registerFinVendorAdminRoutes } from './fin/admin/vendors/routes.js'
 import { handleStripeWebhook } from './fin/funding/http.js'
 import { sendPlatformNotification } from './notifications/platform-templates/index.js'
 import {
@@ -607,6 +608,10 @@ registerPlatformTemplateAdminRoutes(app, {
 })
 
 registerFinPricingAdminRoutes(app, {
+  authMiddleware,
+  requirePlatformAdmin,
+})
+registerFinVendorAdminRoutes(app, {
   authMiddleware,
   requirePlatformAdmin,
 })

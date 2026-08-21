@@ -28,6 +28,8 @@ export const FIN_CREDIT_FACILITY = 1018
 export const FIN_ACCOUNTING_PERIOD_CLOSE = 1019
 /** Per-period 12-step billing close (B §11 / spec §77). xact-scoped (DL-131). Do not reuse 1016. */
 export const FIN_BILLING_PERIOD_CLOSE = 1020
+/** Per-statement vendor recon (A §11 / D). xact-scoped (DL-151). Stage 12 uses 1030+. */
+export const FIN_VENDOR_STATEMENT_RECON = 1021
 
 export const LOCK_CLASSES = {
   FIN_CONTRACT_RENEWAL,
@@ -49,4 +51,5 @@ export const LOCK_CLASSES = {
   FIN_CREDIT_FACILITY,
   FIN_ACCOUNTING_PERIOD_CLOSE,
   FIN_BILLING_PERIOD_CLOSE,
+  FIN_VENDOR_STATEMENT_RECON,
 }
