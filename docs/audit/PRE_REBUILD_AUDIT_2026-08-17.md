@@ -1473,3 +1473,30 @@ Follow-up #3 (2026-08-20): notification.lifecycle dedupe now includes version (D
 
 Follow-up (2026-08-21 / PR #17): recon test Boolean-wraps the runId truthy check (no response-shape change). Billing reopen of OPEN is a Stage 12 route-level 409 `BILLING_PERIOD_ALREADY_OPEN` (DL-170) â€” Stage 10 already SKIP'd OPEN; the red test had closed first so reopen of `USAGE_CLOSING` returned 200. Facility activate seed now stamps `valid_from` 5s before frozen `NOW`. Invoice void test seeds an `INVOICE_VOID` approval. Domain commands and Stage 8 `transition()` untouched.
 
+
+### Stage 13a / dual-write infrastructure — 2026-08-21
+
+**Landed on `feat/stage-13a-dual-write`:** dual-write infrastructure only. Base is main @ `35f1e1e` (Stage 12). Does **not** flip source-of-truth (13d). Does **not** add R090-R092 or backfill (13b). Does **not** drop/alter `commercial.*` schemas or touch the commercial recon path.
+
+**Migrations:**
+- `230_fin_cutover_dual_write.sql` — append-only `fin.cutover_dual_write_errors` (FORCE RLS; app INSERT; admin/recon SELECT).
+- `231_fin_cutover_tenant_allowlist.sql` — `fin.cutover_tenant_allowlist` keyed by `(environment, public tenant_id)` with mode `OFF|DUAL`; seeded empty.
+
+**Services:** `backend/src/fin/cutover/{mode,dual-writer,mapping,context}.js` + `attachFinCutoverMiddleware` for `req.finCutover`.
+
+**Boundary (un-frozen for dual-write only):**
+- `billing/events.js` `emitUsageEvent` — DUAL/FIN_ONLY tenants: legacy `commercial.usage_events` + `ingestUsageEventWithClient` in one `transaction(fn)` (DL-171).
+- `billing/ledger.js` `recordConsumption` / consumption `writeLedgerEntry` — dual-write to `authorizeUsage` via DL-179 mapping; failures to DLQ.
+- No `commercial.holds` / commercial capture / commercial `refundPurchase` writers found; translators DL-176..178 land for later wiring.
+
+**Reconciliation:** R084 only (dual-write error rate WARN). R085-R089 reserved. R090-R092 deferred to 13b/13c.
+
+**Decision log:** DL-171 .. DL-179.
+
+**Rollback:** set `FIN_CUTOVER_MODE_GLOBAL=OFF` and/or delete allowlist rows. No fin.* rows dropped.
+
+**CI file list (must appear in the postgres job summary):**
+`cutover/dual-write-error-dlq.test.js`, `cutover/dual-write-happy.test.js`, `cutover/dual-write-off.test.js`, `reconciliation/r084.test.js`, `e2e/dual-write-happy.test.js`.
+Fast suite also runs `cutover/mode.test.js`, `cutover/mapping.test.js`.
+
+**Business gate:** no Finance sign-off required (DUAL off by default). Finance sign-off lives at Stage 13d.

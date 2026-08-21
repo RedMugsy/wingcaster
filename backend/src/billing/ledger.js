@@ -12,6 +12,12 @@
 
 import { v4 as uuidv4 } from 'uuid'
 import { findAll, insert, transaction } from '../db.js'
+import { BusinessClock } from '../fin/clock.js'
+import { resolveCutoverMode } from '../fin/cutover/mode.js'
+import { dualWrite } from '../fin/cutover/dual-writer.js'
+import { ledgerConsumptionAuthorizeInput } from '../fin/cutover/mapping.js'
+import { resolveFinMirrorContext } from '../fin/cutover/context.js'
+import { authorizeUsage } from '../fin/auth/authorize.js'
 
 export const LEDGER_ENTRY_TYPES = ['allowance_grant', 'consumption', 'overage', 'topup', 'adjustment']
 
@@ -44,10 +50,73 @@ export async function writeLedgerEntry({
     amount: Number(amount) || 0,
     source_event_id: sourceEventId || null,
     metadata: metadata || {},
-    created_at: new Date().toISOString(),
+    created_at: BusinessClock.now(),
   }
-  await insert('ledger_entries', row)
+
+  if (type !== 'consumption') {
+    await insert('ledger_entries', row)
+    return row
+  }
+
+  // DL-171 / Stage 13a — dual-write to fin.*. Failure logs to
+  // fin.cutover_dual_write_errors and does NOT block the legacy write.
+  await transaction(async (client) => {
+    await insert('ledger_entries', row)
+    await maybeDualWriteLedgerConsumption(row, { client })
+  })
   return row
+}
+
+async function maybeDualWriteLedgerConsumption(row, {
+  mode: modeHint = null,
+  environment: envHint = 'LIVE',
+  client = null,
+} = {}) {
+  const environment = envHint === 'TEST' ? 'TEST' : 'LIVE'
+  const mode = modeHint || await resolveCutoverMode({
+    publicTenantId: row.tenant_id,
+    environment,
+    client,
+  })
+  if (mode !== 'DUAL' && mode !== 'FIN_ONLY') return
+
+  const run = async (txClient) => {
+    const ctx = await resolveFinMirrorContext({
+      publicTenantId: row.tenant_id,
+      environment,
+      client: txClient,
+    })
+    await dualWrite({
+      client: txClient,
+      environment,
+      tenantId: row.tenant_id,
+      finCommand: 'authorizeUsage',
+      legacy: {
+        source: 'commercial.ledger_entries',
+        rowId: row.id,
+        payload: row,
+      },
+      fin: async () => {
+        if (!ctx?.holderId || !ctx?.bookId) {
+          throw Object.assign(new Error('FIN_MIRROR_CONTEXT_MISSING'), {
+            code: 'FIN_MIRROR_CONTEXT_MISSING',
+          })
+        }
+        // authorizeUsage opens/joins transaction() via ALS (D-T11).
+        return authorizeUsage(ledgerConsumptionAuthorizeInput(row, {
+          environment: ctx.environment,
+          finTenantId: ctx.tenantId,
+          holderId: ctx.holderId,
+          bookId: ctx.bookId,
+          now: row.created_at,
+        }))
+      },
+      now: row.created_at,
+    })
+  }
+
+  if (client) return run(client)
+  return transaction((txClient) => run(txClient))
 }
 
 /**
@@ -99,13 +168,24 @@ export async function grantAllowance({ tenantId, subscriptionId, billingPeriod, 
  * balance math sums correctly. Detection of overage happens at
  * consumption time by inspecting the pre-consumption balance.
  */
-export async function recordConsumption({ tenantId, subscriptionId, billingPeriod, quotaKey, amount, sourceEventId, metadata }) {
+export async function recordConsumption({
+  tenantId,
+  subscriptionId,
+  billingPeriod,
+  quotaKey,
+  amount,
+  sourceEventId,
+  metadata,
+  cutoverMode = null,
+  cutoverEnvironment = 'LIVE',
+  cutoverClient = null,
+} = {}) {
   const q = Math.max(0, Number(amount) || 0)
   if (q === 0) return null
   if (!tenantId) throw new Error('tenantId required')
   if (!quotaKey) throw new Error('quotaKey required')
   const period = billingPeriod || currentBillingPeriod()
-  return transaction(async (client) => {
+  const work = async (client) => {
     const { rows } = await client.query(
       `SELECT within_allowance, overage, entry_ids
          FROM commercial.record_consumption($1, $2, $3, $4, $5, $6, $7::jsonb)`,
@@ -129,12 +209,26 @@ export async function recordConsumption({ tenantId, subscriptionId, billingPerio
         created_at: new Date(entry.created_at).toISOString(),
       }))
     }
+
+    // DL-171 / Stage 13a — dual-write to fin.*. Failure logs to
+    // fin.cutover_dual_write_errors and does NOT block the legacy write.
+    for (const entry of entries.filter((e) => e.type === 'consumption')) {
+      await maybeDualWriteLedgerConsumption(entry, {
+        mode: cutoverMode,
+        environment: cutoverEnvironment,
+        client,
+      })
+    }
+
     return {
       withinAllowance: Number(result.within_allowance),
       overage: Number(result.overage),
       entries,
     }
-  })
+  }
+
+  if (cutoverClient) return work(cutoverClient)
+  return transaction(work)
 }
 
 /**
