@@ -18,6 +18,7 @@ import { registerTwoFactorRoutes, startSigninChallengeIfRequired } from './auth-
 import { registerPlatformTemplateAdminRoutes } from './notifications/platform-templates/routes.js'
 import { registerFinPricingAdminRoutes } from './fin/admin/pricing/routes.js'
 import { registerFinVendorAdminRoutes } from './fin/admin/vendors/routes.js'
+import { registerFinOpsAdminRoutes } from './fin/admin/routes.js'
 import { handleStripeWebhook } from './fin/funding/http.js'
 import { sendPlatformNotification } from './notifications/platform-templates/index.js'
 import {
@@ -612,6 +613,11 @@ registerFinPricingAdminRoutes(app, {
   requirePlatformAdmin,
 })
 registerFinVendorAdminRoutes(app, {
+  authMiddleware,
+  requirePlatformAdmin,
+})
+
+registerFinOpsAdminRoutes(app, {
   authMiddleware,
   requirePlatformAdmin,
 })

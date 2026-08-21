@@ -259,3 +259,71 @@ describe('7f/3 — fin/admin/pricing/routes', () => {
     expect(src).toContain('requireIfMatch')
   })
 })
+
+describe('7f/3 — fin/admin/routes (ops writes)', () => {
+  const sensitive = [
+    ['post', '/api/admin/fin/facilities'],
+    ['post', '/api/admin/fin/facilities/f-1/pause'],
+    ['post', '/api/admin/fin/facilities/f-1/resume'],
+    ['post', '/api/admin/fin/facilities/f-1/suspend'],
+    ['post', '/api/admin/fin/facilities/f-1/close'],
+    ['post', '/api/admin/fin/facilities/f-1/limit'],
+    ['post', '/api/admin/fin/reconciliation/run'],
+    ['post', '/api/admin/fin/reconciliation/drift/d-1/resolve'],
+    ['post', '/api/admin/fin/approvals/a-1/approve'],
+    ['post', '/api/admin/fin/approvals/a-1/reject'],
+    ['post', '/api/admin/fin/dunning/cases/c-1/advance'],
+    ['post', '/api/admin/fin/dunning/cases/c-1/cure'],
+    ['post', '/api/admin/fin/dunning/cases/c-1/write-off'],
+    ['post', '/api/admin/fin/billing/periods/p-1/close'],
+    ['post', '/api/admin/fin/billing/periods/p-1/reopen'],
+    ['post', '/api/admin/fin/invoices/i-1/void'],
+    ['post', '/api/admin/fin/invoices/i-1/credit-note'],
+    ['post', '/api/admin/fin/invoices/i-1/debit-note'],
+    ['post', '/api/admin/fin/payments'],
+    ['post', '/api/admin/fin/payments/p-1/apply'],
+    ['post', '/api/admin/fin/payments/p-1/reverse'],
+    ['post', '/api/admin/fin/accounting/periods/p-1/soft-close'],
+    ['post', '/api/admin/fin/accounting/periods/p-1/hard-close'],
+    ['post', '/api/admin/fin/accounting/periods/p-1/reopen'],
+  ]
+
+  let app
+  beforeEach(async () => {
+    await withPatchedEnv(async () => {
+      const { registerFinOpsAdminRoutes } = await import('./fin/admin/routes.js')
+      app = express()
+      app.use(express.json())
+      registerFinOpsAdminRoutes(app, {
+        authMiddleware: (req, _res, next) => {
+          req.user = { id: 'admin-1', token_version: 0, platform_role: 'platform_admin' }
+          next()
+        },
+        requirePlatformAdmin: fakePlatformAdmin,
+      })
+    })
+  })
+
+  it.each(sensitive)('%s %s refuses without X-Elevated-Token', async (method, route) => {
+    const res = await request(app)[method](route).send({})
+    expectStepUpRequired(res)
+  })
+
+  it('declares ops write routes behind writeGuards', async () => {
+    const fs = await import('node:fs/promises')
+    const src = await fs.readFile('src/fin/admin/routes.js', 'utf8')
+    expect(src).toContain("app.post('/api/admin/fin/facilities'")
+    expect(src).toContain("app.post('/api/admin/fin/reconciliation/run'")
+    expect(src).toContain("app.post('/api/admin/fin/approvals/:id/approve'")
+    expect(src).toContain("app.post('/api/admin/fin/dunning/cases/:id/advance'")
+    expect(src).toContain("app.post('/api/admin/fin/billing/periods/:id/close'")
+    expect(src).toContain("app.post('/api/admin/fin/invoices/:id/void'")
+    expect(src).toContain("app.post('/api/admin/fin/payments'")
+    expect(src).toContain("app.post('/api/admin/fin/accounting/periods/:id/soft-close'")
+    expect(src).toContain('writeGuards')
+    expect(src).toContain('requireElevated()')
+    expect(src).toContain('adminMutationLimiter')
+    expect(src).toContain('requireIfMatch')
+    expect(src).toContain("default-src 'self'")
+  })
+})

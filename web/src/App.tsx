@@ -46,6 +46,12 @@ import { AgentWhatsAppListingsPage } from '@/pages/agent/whatsapp-listings/Agent
 import { AdminAreasPage } from '@/pages/admin/areas/AdminAreasPage'
 import { AdminScoringPage } from '@/pages/admin/scoring/AdminScoringPage'
 import { PricingAdminPage } from '@/pages/admin/pricing/PricingAdminPage'
+import {
+  ApprovalsPage, AuditPage, ConfigurationPage, ContractsPage, CreditsPage,
+  ExceptionsPage, FacilitiesPage, HoldsPage, InvoicesPage, OverviewPage,
+  PricingPage as FinPricingPage, ReconciliationPage, TenantsPage, UsagePage,
+  VendorCostsPage,
+} from '@/pages/admin/fin'
 import { TerritoriesAdminPage } from '@/pages/admin/commercial-pricing/TerritoriesAdminPage'
 import { TerritoryDetailPage } from '@/pages/admin/commercial-pricing/TerritoryDetailPage'
 import { RateCardsAdminPage } from '@/pages/admin/commercial-pricing/RateCardsAdminPage'
@@ -119,6 +125,22 @@ function AppShell() {
           <Route path="/admin/areas" element={<AdminAreasPage />} />
           <Route path="/admin/scoring" element={<AdminScoringPage />} />
           <Route path="/admin/pricing" element={<PricingAdminPage />} />
+          <Route path="/admin/fin" element={<Navigate to="/admin/fin/overview" replace />} />
+          <Route path="/admin/fin/overview" element={<OverviewPage />} />
+          <Route path="/admin/fin/tenants" element={<TenantsPage />} />
+          <Route path="/admin/fin/usage" element={<UsagePage />} />
+          <Route path="/admin/fin/credits" element={<CreditsPage />} />
+          <Route path="/admin/fin/holds" element={<HoldsPage />} />
+          <Route path="/admin/fin/facilities" element={<FacilitiesPage />} />
+          <Route path="/admin/fin/contracts" element={<ContractsPage />} />
+          <Route path="/admin/fin/pricing" element={<FinPricingPage />} />
+          <Route path="/admin/fin/invoices" element={<InvoicesPage />} />
+          <Route path="/admin/fin/vendor-costs" element={<VendorCostsPage />} />
+          <Route path="/admin/fin/reconciliation" element={<ReconciliationPage />} />
+          <Route path="/admin/fin/exceptions" element={<ExceptionsPage />} />
+          <Route path="/admin/fin/approvals" element={<ApprovalsPage />} />
+          <Route path="/admin/fin/audit" element={<AuditPage />} />
+          <Route path="/admin/fin/configuration" element={<ConfigurationPage />} />
           <Route path="/admin/commercial-pricing" element={<Navigate to="/admin/commercial-pricing/territories" replace />} />
           <Route path="/admin/commercial-pricing/territories" element={<TerritoriesAdminPage />} />
           <Route path="/admin/commercial-pricing/territories/:id" element={<TerritoryDetailPage />} />
