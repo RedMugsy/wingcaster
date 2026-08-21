@@ -34,6 +34,7 @@ import { approveCreditNote, draftCreditNote, issueCreditNote } from '../billing/
 import { approveDebitNote, draftDebitNote, issueDebitNote } from '../billing/debit-note.js'
 import { applyPayment, recordPayment, reversePayment } from '../billing/payment-allocation.js'
 import { hardClosePeriod, reopenPeriod, softClosePeriod } from '../accounting/periods.js'
+import { loadCutoverReadiness } from '../cutover/backfill/readiness.js'
 
 let registerFinVendorAdminRoutes = null
 const vendorRoutesPath = join(dirname(fileURLToPath(import.meta.url)), 'vendors', 'routes.js')
@@ -245,6 +246,14 @@ export function registerFinOpsAdminRoutes(app, { authMiddleware, requirePlatform
 
   app.get('/api/admin/fin/configuration', readGuards, wrap(async (req, res) => {
     const payload = await listConfiguration({ environment: sessionEnvironment(req) })
+    return res.status(200).json(payload)
+  }))
+
+  app.get('/api/admin/fin/cutover/readiness', readGuards, wrap(async (req, res) => {
+    const payload = await loadCutoverReadiness(getPool(), {
+      environment: sessionEnvironment(req),
+      now: req.fin.now,
+    })
     return res.status(200).json(payload)
   }))
 

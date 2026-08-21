@@ -818,4 +818,71 @@ export const CHECKS = [
         WHERE occurred_at > now() - interval '24 hours'`,
     comparison_query: `SELECT '00000000-0000-4000-8000-000000000084'::uuid AS entity_id, 0::bigint AS qty`,
   },
+  {
+    // Stage 13b cutover isolation (DL-183). CHECK on environment makes this
+    // detective: any row that bypassed the CHECK is contamination.
+    check_code: 'R090',
+    severity: 'HIGH',
+    expected_delta_units: 0,
+    drift_action: 'BLOCK_CUTOVER',
+    entity_type: 'usage_events',
+    source_query: `SELECT id AS entity_id, 1::bigint AS qty
+         FROM fin.usage_events
+        WHERE environment NOT IN ('LIVE', 'TEST')`,
+    comparison_query: `SELECT id AS entity_id, 0::bigint AS qty
+         FROM fin.usage_events
+        WHERE environment NOT IN ('LIVE', 'TEST')`,
+  },
+  {
+    check_code: 'R091',
+    severity: 'CRITICAL',
+    expected_delta_units: 0,
+    drift_action: 'BLOCK_CUTOVER',
+    entity_type: 'accounting_events',
+    source_query: `SELECT ae.id AS entity_id, 1::bigint AS qty
+         FROM fin.accounting_events ae
+         JOIN fin.usage_events ue ON ue.id::text = ae.source_id::text
+          AND ae.source_type = 'RATED_USAGE'
+        WHERE ae.tenant_id IS DISTINCT FROM ue.tenant_id`,
+    comparison_query: `SELECT ae.id AS entity_id, 0::bigint AS qty
+         FROM fin.accounting_events ae
+         JOIN fin.usage_events ue ON ue.id::text = ae.source_id::text
+          AND ae.source_type = 'RATED_USAGE'
+        WHERE ae.tenant_id IS DISTINCT FROM ue.tenant_id`,
+  },
+  {
+    // Invoices whose issuer legal_entity_id disagrees with billing_account
+    // seller or with rated_usage → contract → seller (A §10.3 / DL-183).
+    check_code: 'R092',
+    severity: 'HIGH',
+    expected_delta_units: 0,
+    drift_action: 'BLOCK_CUTOVER',
+    entity_type: 'invoices',
+    source_query: `SELECT i.id AS entity_id, 1::bigint AS qty
+         FROM fin.invoices i
+         JOIN fin.billing_accounts ba ON ba.id = i.billing_account_id
+        WHERE i.legal_entity_id IS DISTINCT FROM ba.seller_legal_entity_id
+        UNION
+        SELECT i.id AS entity_id, 1::bigint AS qty
+         FROM fin.invoices i
+         JOIN fin.invoice_lines il
+           ON il.invoice_id = i.id AND il.source_type = 'RATED_USAGE'
+         JOIN fin.rated_usage ru ON ru.id = il.source_id
+         JOIN fin.contract_versions cv ON cv.id = ru.contract_version_id
+         JOIN fin.contracts c ON c.id = cv.contract_id
+        WHERE i.legal_entity_id IS DISTINCT FROM c.seller_legal_entity_id`,
+    comparison_query: `SELECT i.id AS entity_id, 0::bigint AS qty
+         FROM fin.invoices i
+         JOIN fin.billing_accounts ba ON ba.id = i.billing_account_id
+        WHERE i.legal_entity_id IS DISTINCT FROM ba.seller_legal_entity_id
+        UNION
+        SELECT i.id AS entity_id, 0::bigint AS qty
+         FROM fin.invoices i
+         JOIN fin.invoice_lines il
+           ON il.invoice_id = i.id AND il.source_type = 'RATED_USAGE'
+         JOIN fin.rated_usage ru ON ru.id = il.source_id
+         JOIN fin.contract_versions cv ON cv.id = ru.contract_version_id
+         JOIN fin.contracts c ON c.id = cv.contract_id
+        WHERE i.legal_entity_id IS DISTINCT FROM c.seller_legal_entity_id`,
+  },
 ]

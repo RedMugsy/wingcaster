@@ -73,4 +73,10 @@ describe('fin.admin ops fast gates', () => {
     const res = await request(app).get('/api/admin/fin/overview')
     expect(res.status).toBe(403)
   })
+
+  it('GET cutover/readiness refuses a non-admin', async () => {
+    const app = mount({ role: 'agent' })
+    const res = await request(app).get('/api/admin/fin/cutover/readiness')
+    expect(res.status).toBe(403)
+  })
 })
