@@ -165,6 +165,7 @@ Living log. Append only. Date + decision + rationale + who. Never silently rewri
 | 2026-08-21 | DL-167 | Vendor exception types `VENDOR_STATEMENT_DRIFT` and `NEGATIVE_MARGIN` return count `0` and are marked deferred until Stage 11's vendor tables/routes merge. Stage 12 imports `./vendors/routes.js` when present; otherwise GET `/api/admin/fin/vendors` is a 200 stub `{ stage11: false }`. Do not redefine Stage 11 READ routes. | Parallel Stage 11 branch | Stage 12 |
 | 2026-08-21 | DL-168 | `RATE_NOT_CONFIGURED` has no domain command and no dedicated queue table. Exception tile count is `0`; there is no write route. Rating denials stay on Stage 5 `FIN_NO_ACTIVE_PRICE` (DL-081). | Spec §107 | Stage 12 |
 | 2026-08-21 | DL-169 | `TAX_MISMATCH` has no domain command (Stage 9 `resolveTax` is MANUAL / `OUT_OF_SCOPE`, DL-126). Exception tile counts R073 DRIFT rows when present; no write route. | Spec §107 / tax registrations later | Stage 12 |
+| 2026-08-21 | DL-170 | `POST /billing/periods/:id/reopen` reads period status and returns **409** `BILLING_PERIOD_ALREADY_OPEN` when already `OPEN`. Stage 10 `reopenBillingPeriod` already throws `BILLING_PERIOD_SKIP` for OPEN (not a silent no-op; admin `wrap` already maps FinError → 4xx). The PR #17 200 was reopen after a successful close (`USAGE_CLOSING` → `OPEN` is legal). Guard is route-level because Stage 10 files are frozen; no new command. PR #17 named this DL-166; that row already records DecideApproval 501s. | PR #17 audit follow-up | Stage 12 |
 
 
 

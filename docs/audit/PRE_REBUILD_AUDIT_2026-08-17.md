@@ -1471,3 +1471,5 @@ Follow-up #3 (2026-08-20): notification.lifecycle dedupe now includes version (D
 `admin/routes.fast.test.js` (fast suite), `admin/overview-kpi.test.js`, `admin/routes-facilities.test.js`, `admin/routes-reconciliation.test.js`, `admin/routes-approvals.test.js`, `admin/routes-dunning.test.js`, `admin/routes-billing.test.js`, `admin/routes-payments.test.js`, `admin/routes-invoices.test.js`, `admin/routes-accounting.test.js`, `admin/routes-vendors.test.js`, `e2e/admin-fin-traversal.test.js`.
  Fast suite also runs `phase-7f3-wiring.test.js` ops-write inventory. Web jsdom: `web/src/pages/admin/fin/pages.test.tsx`.
 
+Follow-up (2026-08-21 / PR #17): recon test Boolean-wraps the runId truthy check (no response-shape change). Billing reopen of OPEN is a Stage 12 route-level 409 `BILLING_PERIOD_ALREADY_OPEN` (DL-170) — Stage 10 already SKIP'd OPEN; the red test had closed first so reopen of `USAGE_CLOSING` returned 200. Facility activate seed now stamps `valid_from` 5s before frozen `NOW`. Invoice void test seeds an `INVOICE_VOID` approval. Domain commands and Stage 8 `transition()` untouched.
+

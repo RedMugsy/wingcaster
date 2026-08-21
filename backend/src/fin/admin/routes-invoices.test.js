@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import request from 'supertest'
 import { expect, it } from 'vitest'
+import { insertApproval } from '../testing/seed.js'
 import { finPostgresSuite } from '../testing/suite.js'
 import { seedIssuedInvoice } from '../billing/test-support.js'
 import { makeOpsApp, writeHeaders } from './http-support.js'
@@ -9,10 +10,14 @@ finPostgresSuite('admin/routes-invoices', {}, ({ url, world, pool }) => {
   it('voids an issued unpaid invoice', async () => {
     const { app, elevate } = await makeOpsApp(url())
     const issued = await seedIssuedInvoice(pool(), world(), { amountMinor: 30 })
+    const approvalId = await insertApproval(pool(), {
+      tenantId: world().tenantA.tenantId,
+      actionKind: 'INVOICE_VOID',
+    })
     const voided = await request(app)
       .post(`/api/admin/fin/invoices/${issued.invoiceId}/void`)
       .set(writeHeaders(elevate(), { idempotencyKey: `VOID:${randomUUID()}` }))
-      .send({ reason_code: 'TEST' })
+      .send({ reason_code: 'TEST', approval_request_id: approvalId })
     expect(voided.status).toBe(200)
   })
 

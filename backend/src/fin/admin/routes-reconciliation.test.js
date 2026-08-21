@@ -12,7 +12,12 @@ finPostgresSuite('admin/routes-reconciliation', {}, ({ url }) => {
       .set(writeHeaders(token))
       .send({ reason_code: 'TEST', environment: 'TEST', now: '1999-01-01T00:00:00.000Z' })
     expect(ran.status).toBe(200)
-    expect(ran.body.skipped === true || ran.body.runId || ran.body.id || Array.isArray(ran.body.results)).toBe(true)
+    expect(
+      ran.body.skipped === true
+        || Boolean(ran.body.runId)
+        || Boolean(ran.body.id)
+        || Array.isArray(ran.body.results),
+    ).toBe(true)
 
     const list = await request(app).get('/api/admin/fin/reconciliation/runs')
     expect(list.status).toBe(200)

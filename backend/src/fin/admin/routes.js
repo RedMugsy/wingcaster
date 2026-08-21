@@ -8,14 +8,14 @@ import { dirname, join } from 'node:path'
 import { pathToFileURL, fileURLToPath } from 'node:url'
 import { requireElevated } from '../../auth.js'
 import { getPool } from '../../persistence/postgres-adapter.js'
-import { FinError } from '../errors.js'
+import { CATEGORY, FinError, finError } from '../errors.js'
 import { requireIfMatch, sendPreconditionFailed, setETag } from '../middleware/if-match.js'
 import { adminMutationLimiter } from '../../lib/admin-limiter.js'
 import { actorFrom, commandBody, pick, resolveAdminContext, sessionEnvironment } from './context.js'
 import { loadOverviewKpis } from './kpis.js'
 import { deferredExceptionPayload, loadExceptions } from './exceptions.js'
 import {
-  getInvoice, getReconRun, getTenant, listApprovals, listAudit, listConfiguration,
+  getBillingPeriod, getInvoice, getReconRun, getTenant, listApprovals, listAudit, listConfiguration,
   listContracts, listDunningCases, listFacilities, listHolds, listInvoices,
   listLots, listPayments, listReconRuns, listTenants, simulatePrice, usageDrill,
 } from './reads.js'
@@ -98,6 +98,7 @@ function input(req, extra = {}) {
     limitMinor: pick(body, 'limitMinor', 'limit_minor'),
     amountMinor: pick(body, 'amountMinor', 'amount_minor', 'amount'),
     netTermsDays: pick(body, 'netTermsDays', 'net_terms_days'),
+    validFrom: pick(body, 'validFrom', 'valid_from'),
     ...extra,
     ...actorFrom(req),
   }
@@ -341,10 +342,23 @@ export function registerFinOpsAdminRoutes(app, { authMiddleware, requirePlatform
   }))
 
   app.post('/api/admin/fin/billing/periods/:id/reopen', writeGuards, wrap(async (req, res) => {
-    const result = await reopenBillingPeriod(input(req, {
+    const env = input(req, {
       billingPeriodId: req.params.id,
       periodId: req.params.id,
-    }))
+    })
+    // DL-170: OPEN has no reopen transition. Route-level 409; Stage 10 files frozen.
+    const period = await getBillingPeriod({
+      environment: env.environment,
+      id: req.params.id,
+    })
+    if (period?.status === 'OPEN') {
+      throw finError('BILLING_PERIOD_ALREADY_OPEN', {
+        category: CATEGORY.CONFLICT,
+        httpStatus: 409,
+        details: { dl: 'DL-170', status: 'OPEN' },
+      })
+    }
+    const result = await reopenBillingPeriod(env)
     return res.status(200).json(result)
   }))
 

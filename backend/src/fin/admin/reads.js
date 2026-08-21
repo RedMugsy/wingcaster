@@ -270,6 +270,15 @@ export async function getInvoice({ environment, id }) {
   return { ...header, lines, tax_lines: taxLines, adjustments, allocations }
 }
 
+export async function getBillingPeriod({ environment, id }) {
+  const rows = await query(
+    `SELECT id, status, version FROM fin.billing_periods
+      WHERE environment = $1 AND id = $2`,
+    [environment, id],
+  )
+  return rows[0] || null
+}
+
 export async function listPayments({ environment }) {
   return query(
     `SELECT id, tenant_id, billing_account_id, status, amount_minor, currency,

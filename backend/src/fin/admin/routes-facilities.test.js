@@ -1,10 +1,9 @@
 import { randomUUID } from 'node:crypto'
 import request from 'supertest'
 import { expect, it } from 'vitest'
-import { insertApproval } from '../testing/seed.js'
+import { commandEnv, insertApproval, NOW } from '../testing/seed.js'
 import { finPostgresSuite } from '../testing/suite.js'
 import { activateFacility } from '../postpaid/facilities.js'
-import { commandEnv } from '../testing/seed.js'
 import { makeOpsApp, writeHeaders } from './http-support.js'
 
 finPostgresSuite('admin/routes-facilities', {}, ({ world, url, pool }) => {
@@ -52,6 +51,7 @@ finPostgresSuite('admin/routes-facilities', {}, ({ world, url, pool }) => {
         currency: 'CAD',
         limit_minor: 1000,
         net_terms_days: 15,
+        valid_from: new Date(Date.parse(NOW) - 5000).toISOString(),
       })
     expect(created.status).toBe(200)
     await activateFacility({
