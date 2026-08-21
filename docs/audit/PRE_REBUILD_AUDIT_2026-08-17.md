@@ -1424,4 +1424,5 @@ Follow-up (2026-08-20): additive migration 195 fixes latent Stage 1 JCS `jsonb_t
 
 Follow-up (2026-08-20): PAID→ISSUED reversal transition allowed via migration 205 (DL-143). refundPurchase consumed-path now fires REFUND_REVENUE_REVERSED (DL-144). period-close returns period status (DL-145). runner-billed-green DRAFT-precondition guard fixed (DL-146). Idempotent role provisioning via migration 206 (DL-147).
 Follow-up #2 (2026-08-20): writeInvoiceStatus dedupe uses post-flip version via UPDATE ... RETURNING (DL-148). R061 outstanding sum is AR-scoped (EXISTS RECEIVABLE_CREATED) with fallback 0 — prepaid invoice cash is settlement, not AR (DL-149).
+Follow-up #3 (2026-08-20): notification.lifecycle dedupe now includes version (DL-150) — the DL-148 fix missed the sibling notify write inside writeInvoiceStatus.
 

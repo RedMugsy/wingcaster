@@ -38,7 +38,7 @@ async function writeInvoiceStatus(client, env, invoice, to, extra = {}) {
     await insertOutbox(client, {
       environment: env.environment,
       topic: 'notification.lifecycle',
-      dedupeKey: `inv:${invoice.id}:${to}:notify`,
+      dedupeKey: `inv:${invoice.id}:${to}:notify:v${invoice.version || 1}`,
       payload: { invoiceId: invoice.id, status: to },
       now: env.now,
     })
