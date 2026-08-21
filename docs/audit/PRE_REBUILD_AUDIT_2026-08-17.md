@@ -1387,3 +1387,42 @@ Follow-up (2026-08-20): additive migration 195 fixes latent Stage 1 JCS `jsonb_t
 `accounting/events.test.js`, `accounting/periods.test.js`, `accounting/deferred-revenue.test.js`, `accounting/consumption.test.js`, `accounting/postpaid-capture.test.js`, `accounting/breakage.test.js`, `accounting/write-off.test.js`, `accounting/rollforward.test.js`, `reconciliation/r060-r063.test.js`, `reconciliation/runner-accounted-green.test.js`, `ledger/audit-jcs-boolean.test.js`.
  Fast suite also runs `accounting/policy-engine.test.js` plus the validation describes in `events.test.js` / `periods.test.js`.
 
+### Stage 10 / billing — 2026-08-20
+
+**Landed on `feat/stage-10-billing`:** migrations `200_fin_billing_periods.sql` (B §11 7-state), `201_fin_invoices.sql` (lines/tax/adjustments/payment_allocations; sign-flexible amounts), `202_fin_invoice_sequences.sql` (no `version` / no OCC; FOR UPDATE + `next_n`), `203_fin_payments.sql` (permanent UNIQUE(provider, provider_event_id); command-owned `unapplied_cash`), `204_fin_credit_debit_notes.sql`. Services `backend/src/fin/billing/{periods,period-close,invoice-assembler,invoice-issuer,credit-note,debit-note,payment-allocation,helpers}.js`. Advisory class `FIN_BILLING_PERIOD_CLOSE = 1020` (DL-131). Parallel `fin.*` path only. `backend/src/billing/events.js` and Stage 1 `ledger/transactions.js` / `write.js` untouched. No `/api/admin/fin/**` (Stage 12). No Stage 11 vendor economics.
+
+**Decision log:** DL-131 … DL-142. DL-095 is **not** rewritten; DL-135 records that Stage 10 landed `refundPurchase`.
+
+**Cross-stage wiring (same `transaction(fn)` / ALS reuse):**
+- Stage 7 `refundPurchase` un-501'd (C §5.7 / DL-135)
+- Stage 8 `openDunningCase` reads `fin.invoices`; `DUNNING_INVOICE_NOT_ELIGIBLE` otherwise (DL-136)
+- Stage 8 `cureDunning` from `applyPayment` when the invoice reaches PAID (DL-137)
+- Stage 9 `recordCreditLoss` looks up real invoices; `WriteOffInvoice` flips UNCOLLECTIBLE (DL-141)
+- R061 full form (DL-138); R042/R044/R049/R053 leave sibling ERROR_CODES (DL-139)
+- R070–R073 registered (DL-140)
+
+**Spec §124 billing acceptance:**
+
+| # | Test | Where | Status |
+|---|---|---|---|
+| 1 | 12-step close OPEN→FINAL + checklist preconditions | `billing/period-close.test.js` | Landed |
+| 2 | Invoice B §16 + VOID keeps number, next ISSUE monotonic | `billing/invoices.test.js` | Landed |
+| 3 | Concurrent IssueInvoice distinct numbers; fiscal_context splits counters | `billing/invoice-sequences.test.js` | Landed |
+| 4 | Credit note B §17; VOID keeps number | `billing/credit-note.test.js` | Landed |
+| 5 | Debit note B §17; VOID keeps number | `billing/debit-note.test.js` | Landed |
+| 6 | Payments + partial RECEIVED + PSP unique + reverse | `billing/payments.test.js` | Landed |
+| 7 | Lines/tax immutable after ISSUE | `billing/immutable-after-issue.test.js` | Landed |
+| 8 | ApplyPayment to PAID cures dunning | `billing/dunning-cure.test.js` | Landed |
+| 9 | refundPurchase full path / PSP dedupe / REFUND_REVENUE_REVERSED | `billing/refund-purchase.test.js` | Landed |
+| 10 | R070–R073 + runner-billed-green | `r070-r073.test.js` / `runner-billed-green.test.js` | Landed |
+
+**Still LIVE on commercial.* until Stage 13 cutover:** commercial ledger, commercial invoices/tax/PDF/ZATCA HTTP, commercial dunning/email, commercial wallet. This PR does not write `commercial.*`. Invoice render / ZATCA submission is outbox-only (I-14).
+
+**CI file list (must appear in the postgres job summary):**
+`billing/period-close.test.js`, `billing/invoices.test.js`, `billing/invoice-sequences.test.js`, `billing/credit-note.test.js`, `billing/debit-note.test.js`, `billing/payments.test.js`, `billing/immutable-after-issue.test.js`, `billing/dunning-cure.test.js`, `billing/refund-purchase.test.js`, `reconciliation/r070-r073.test.js`, `reconciliation/runner-billed-green.test.js`.
+ Fast suite also runs `billing/invoice-assembler.test.js`, `billing/periods.test.js`, `billing/payment-allocation.test.js`.
+
+Follow-up (2026-08-20): PAID→ISSUED reversal transition allowed via migration 205 (DL-143). refundPurchase consumed-path now fires REFUND_REVENUE_REVERSED (DL-144). period-close returns period status (DL-145). runner-billed-green DRAFT-precondition guard fixed (DL-146). Idempotent role provisioning via migration 206 (DL-147).
+Follow-up #2 (2026-08-20): writeInvoiceStatus dedupe uses post-flip version via UPDATE ... RETURNING (DL-148). R061 outstanding sum is AR-scoped (EXISTS RECEIVABLE_CREATED) with fallback 0 — prepaid invoice cash is settlement, not AR (DL-149).
+Follow-up #3 (2026-08-20): notification.lifecycle dedupe now includes version (DL-150) — the DL-148 fix missed the sibling notify write inside writeInvoiceStatus.
+

@@ -3,6 +3,7 @@
  * Does not insert REFUND_REVENUE_REVERSED. Does not touch ledger CONSUMED postings.
  */
 import { BusinessClock } from '../clock.js'
+import { CATEGORY, finError } from '../errors.js'
 import { insertEvaluatedEvents, loadActivePolicy } from './events.js'
 import { evaluateWriteOff } from './policy-engine.js'
 
@@ -17,6 +18,34 @@ export async function recordCreditLoss(client, {
   environment, now, actor,
 }) {
   const clock = iso(now)
+  let writeOffMinor = amountMinor
+  let writeOffCurrency = currency || 'USD'
+  if (invoiceId) {
+    const invoice = (await client.query(
+      `SELECT i.status, i.total_minor, i.currency, i.billing_account_id, i.legal_entity_id, i.tenant_id
+         FROM fin.invoices i WHERE i.id = $1`,
+      [invoiceId],
+    )).rows[0]
+    if (invoice) {
+      if (!['ISSUED', 'PART_PAID'].includes(invoice.status)) {
+        throw finError('INVOICE_NOT_DRAFT', {
+          category: CATEGORY.PRECONDITION,
+          details: { reason: 'write_off_requires_issued_or_part_paid', status: invoice.status },
+        })
+      }
+      const allocated = (await client.query(
+        `SELECT COALESCE(SUM(amount_minor), 0)::bigint AS qty
+           FROM fin.invoice_payment_allocations WHERE invoice_id = $1`,
+        [invoiceId],
+      )).rows[0]
+      const outstanding = BigInt(invoice.total_minor) - BigInt(allocated.qty)
+      if (writeOffMinor == null) writeOffMinor = outstanding.toString()
+      writeOffCurrency = invoice.currency || writeOffCurrency
+      billingAccountId = billingAccountId || invoice.billing_account_id
+      legalEntityId = legalEntityId || invoice.legal_entity_id
+      tenantId = tenantId || invoice.tenant_id
+    }
+  }
   const policy = await loadActivePolicy(client, {
     environment: environment || 'LIVE',
     now: clock,
@@ -24,8 +53,8 @@ export async function recordCreditLoss(client, {
   const evaluated = evaluateWriteOff({
     id: invoiceId,
     invoiceId,
-    amountMinor,
-    currency: currency || 'USD',
+    amountMinor: writeOffMinor,
+    currency: writeOffCurrency,
   }, policy.policy_definition)
   if (evaluated.events.some((e) => e.eventKind === 'REFUND_REVENUE_REVERSED')) {
     throw new Error('evaluateWriteOff must not emit REFUND_REVENUE_REVERSED')
@@ -39,7 +68,7 @@ export async function recordCreditLoss(client, {
     ledgerTransactionId: null,
     now: clock,
     actor,
-    currency: currency || 'USD',
+    currency: writeOffCurrency,
   })
   return { skipped: false, events: inserted }
 }

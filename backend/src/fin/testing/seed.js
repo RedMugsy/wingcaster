@@ -197,6 +197,18 @@ export async function seedWorld(client) {
     billingAccountId: tenantB.billingAccountId,
     currency: 'USD',
   })
+  for (const docType of ['INVOICE', 'CREDIT_NOTE', 'DEBIT_NOTE']) {
+    for (const fiscal of ['2026', '2026-ZATCA']) {
+      const prefix = `${docType === 'INVOICE' ? 'INV' : docType === 'CREDIT_NOTE' ? 'CN' : 'DN'}-SA-${fiscal}-`
+      await client.query(
+        `INSERT INTO fin.invoice_sequences (
+           id, environment, legal_entity_id, jurisdiction, doc_type,
+           fiscal_context, prefix, next_n, created_at, updated_at
+         ) VALUES ($1, 'LIVE', $2, 'SA', $3, $4, $5, 1, $6, $6)`,
+        [randomUUID(), platform.legalEntityId, docType, fiscal, prefix, NOW],
+      )
+    }
+  }
   return {
     now: NOW,
     ...platform,

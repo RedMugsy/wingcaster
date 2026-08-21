@@ -6,6 +6,7 @@ import { insertControls } from '../funding/test-support.js'
 import { openDunningCase } from '../dunning/cases.js'
 import { advanceDunning } from '../dunning/steps.js'
 import { writeOffInvoice } from '../dunning/write-off-invoice.js'
+import { seedIssuedInvoice } from '../billing/test-support.js'
 import { fundPurchase } from '../ledger/transactions.js'
 
 finPostgresSuite('accounting write-off spec §73', {}, ({ pool, world }) => {
@@ -30,10 +31,13 @@ finPostgresSuite('accounting write-off spec §73', {}, ({ pool, world }) => {
       [world().tenantA.bookUsd.bookId],
     )
 
-    const invoiceId = randomUUID()
+    const issued = await seedIssuedInvoice(pool(), world(), {
+      dueAt: '2020-01-01T00:00:00.000Z',
+      amountMinor: 2500,
+    })
     const opened = await openDunningCase({
       ...env,
-      invoiceId,
+      invoiceId: issued.invoiceId,
       billingAccountId: world().tenantA.billingAccountId,
       invoiceStatus: 'ISSUED',
       dueAt: '2020-01-01T00:00:00.000Z',
@@ -62,7 +66,7 @@ finPostgresSuite('accounting write-off spec §73', {}, ({ pool, world }) => {
     })
     const written = await writeOffInvoice({
       ...env,
-      invoiceId,
+      invoiceId: issued.invoiceId,
       caseId,
       amountMinor: 2500,
       approvalRequestId: approvalId,
@@ -72,7 +76,7 @@ finPostgresSuite('accounting write-off spec §73', {}, ({ pool, world }) => {
 
     const events = await pool().query(
       `SELECT event_kind FROM fin.accounting_events WHERE source_id = $1`,
-      [invoiceId],
+      [issued.invoiceId],
     )
     expect(events.rows.map((r) => r.event_kind)).toEqual(['BAD_DEBT_WRITE_OFF'])
     expect(events.rows.some((r) => r.event_kind === 'REFUND_REVENUE_REVERSED')).toBe(false)

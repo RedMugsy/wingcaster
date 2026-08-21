@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto'
 import { expect, it } from 'vitest'
 import { asRole } from '../testing/seed.js'
 import { finPostgresSuite } from '../testing/suite.js'
@@ -6,6 +5,7 @@ import { insertControls } from '../funding/test-support.js'
 import { commandEnv } from '../testing/seed.js'
 import { openDunningCase } from './cases.js'
 import { advanceDunning } from './steps.js'
+import { seedIssuedInvoice } from '../billing/test-support.js'
 
 finPostgresSuite('dunning steps APPEND_ONLY', {}, ({ pool, world }) => {
   it('UPDATE as fin_app_role is rejected', async () => {
@@ -14,9 +14,12 @@ finPostgresSuite('dunning steps APPEND_ONLY', {}, ({ pool, world }) => {
       subjectType: 'BILLING_ACCOUNT',
       subjectId: world().tenantA.billingAccountId,
     })
+    const issued = await seedIssuedInvoice(pool(), world(), {
+      dueAt: '2020-01-01T00:00:00.000Z',
+    })
     const opened = await openDunningCase({
       ...env,
-      invoiceId: randomUUID(),
+      invoiceId: issued.invoiceId,
       billingAccountId: world().tenantA.billingAccountId,
       invoiceStatus: 'ISSUED',
       dueAt: '2020-01-01T00:00:00.000Z',

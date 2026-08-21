@@ -161,7 +161,24 @@ export async function createTestDatabase(name) {
     await verifyPostGIS(migrationPool)
     // No schemaMap: migrations run verbatim and build real `public`,
     // `commercial`, `wa_listings`, … schemas inside this database.
-    await runMigrations({ pool: migrationPool })
+    // Cluster-global CREATE ROLE in 109 is TOCTOU under parallel per-test-DB
+    // creation (23505 on pg_authid). Retry the full run — the failed attempt
+    // rolled back, so 100–108 re-apply cleanly and 109's IF NOT EXISTS now hits.
+    // DL-147. Additive 206 is a no-op once roles exist.
+    let lastMigrationError
+    for (let attempt = 1; attempt <= 5; attempt += 1) {
+      try {
+        await runMigrations({ pool: migrationPool })
+        lastMigrationError = null
+        break
+      } catch (error) {
+        lastMigrationError = error
+        const roleRace = error.code === '23505' && /pg_authid_rolname_index|fin_migrator/.test(String(error.message || ''))
+        if (!roleRace || attempt === 5) throw error
+        await new Promise((resolve) => setTimeout(resolve, 25 * attempt))
+      }
+    }
+    if (lastMigrationError) throw lastMigrationError
   } catch (error) {
     await migrationPool.end().catch(() => {})
     await dropDatabase(adminPool, database).catch(() => {})

@@ -36,9 +36,9 @@ describe('purchase-intents validation (fast)', () => {
     })).rejects.toMatchObject({ code: 'REASON_CODE_REQUIRED' })
   })
 
-  it('refundPurchase is reserved NOT_IMPLEMENTED', async () => {
+  it('refundPurchase rejects a missing reason before a transaction', async () => {
     await expect(refundPurchase({ intentId: randomUUID() })).rejects.toMatchObject({
-      code: 'NOT_IMPLEMENTED',
+      code: 'REASON_CODE_REQUIRED',
     })
   })
 })
@@ -203,7 +203,7 @@ finPostgresSuite('purchase-intents B §4', {}, ({ pool, world }) => {
     })).rejects.toMatchObject({ code: 'PURCHASE_ILLEGAL_TRANSITION' })
   })
 
-  it('refundPurchase from PAID stays PAID and throws NOT_IMPLEMENTED', async () => {
+  it('refundPurchase from PAID without a reason is rejected before SQL', async () => {
     const created = await createdIntent({ provider: 'MANUAL' })
     await confirmPurchasePayment({
       ...fundingEnv(world(), { actorType: 'SYSTEM' }),
@@ -211,7 +211,7 @@ finPostgresSuite('purchase-intents B §4', {}, ({ pool, world }) => {
       provider: 'MANUAL',
     })
     await expect(refundPurchase({ intentId: created.id })).rejects.toMatchObject({
-      code: 'NOT_IMPLEMENTED',
+      code: 'REASON_CODE_REQUIRED',
     })
     const row = await pool().query(`SELECT status FROM fin.purchase_intents WHERE id = $1`, [created.id])
     expect(row.rows[0].status).toBe('PAID')

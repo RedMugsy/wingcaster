@@ -655,6 +655,12 @@ Envelope is spec §109 (`code`, `category`, `retryable`, `customer_actionable`, 
 | `ACCOUNTING_POLICY_NOT_FOUND` | PRECONDITION | no effective accounting_policy_versions row |
 | `ACCOUNTING_WRITE_OFF_UNAPPROVED` | APPROVAL | WriteOffInvoice without WRITE_OFF approval |
 | `ACCOUNTING_EVENT_OUTSIDE_PERIOD` | PRECONDITION | event_at not in [starts_at, ends_at) |
+| `DUNNING_INVOICE_NOT_ELIGIBLE` | PRECONDITION | openDunningCase: invoice missing, not ISSUED/PART_PAID, or not past due (DL-136) |
+| `BILLING_PERIOD_SKIP` / `BILLING_PERIOD_FINAL` / `BILLING_PERIOD_REOPEN_AFTER_ISSUE` | PRECONDITION | billing_periods B §11 |
+| `BILLING_PERIOD_NOT_ENDED` / `BILLING_PERIOD_DRAINAGE_INCOMPLETE` / `BILLING_PERIOD_RATING_INCOMPLETE` | PRECONDITION | spec §77 close checklist |
+| `INVOICE_NOT_FOUND` / `INVOICE_NOT_DRAFT` / `INVOICE_MUTATE_AFTER_ISSUE` | PRECONDITION | invoices B §16 |
+| `NOTE_PARENT_NOT_ISSUED` / `NOTE_EXCEEDS_INVOICE` / `NOTE_VOID_FORBIDDEN` / `NOTE_SEQUENCE_REUSE` | PRECONDITION | credit/debit notes B §17 |
+| `PAYMENT_NOT_FOUND` / `PAYMENTS_ILLEGAL_TRANSITION` | PRECONDITION | payments machine |
 
 Agent C may add lock-timeout / serialization codes; they must not reuse these strings for other meanings.
 

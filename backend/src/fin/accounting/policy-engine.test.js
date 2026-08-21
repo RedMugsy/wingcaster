@@ -109,6 +109,19 @@ describe('policy-engine evaluate*', () => {
     expect(out.events[0].amountMinor).toBe('40')
   })
 
+  it('evaluateRefund still emits when remaining_units are already 0', () => {
+    const out = evaluateRefund(
+      {
+        id: 'pi', recognizedMinor: 500, refundMinor: 500, remaining_units: 0, currency: 'USD',
+      },
+      { txId: 'ref' },
+      POLICY,
+    )
+    expect(out.events).toHaveLength(1)
+    expect(out.events[0].eventKind).toBe('REFUND_REVENUE_REVERSED')
+    expect(out.events[0].amountMinor).toBe('500')
+  })
+
   it('evaluateWriteOff emits BAD_DEBT_WRITE_OFF and never a revenue reversal (spec §73)', () => {
     const out = evaluateWriteOff({
       id: 'inv', amountMinor: 1200, currency: 'USD',

@@ -17,9 +17,10 @@ import { fundingEnv, insertControls, seedProduct } from '../funding/test-support
 import { expireLot } from '../ledger/expire-lot.js'
 import { openDunningCase } from '../dunning/cases.js'
 import { advanceDunning } from '../dunning/steps.js'
+import { seedIssuedInvoice } from '../billing/test-support.js'
 import { writeOffInvoice } from '../dunning/write-off-invoice.js'
 
-const ERROR_CODES = new Set(['R042', 'R044', 'R049', 'R053'])
+const ERROR_CODES = new Set()
 
 finPostgresSuite('reconciliation runner after accounting flow', {}, ({ pool, world }) => {
   it('non-ERROR checks are GREEN and R060–R063 are GREEN after the Stage 9 flow', async () => {
@@ -113,11 +114,14 @@ finPostgresSuite('reconciliation runner after accounting flow', {}, ({ pool, wor
       subjectType: 'BILLING_ACCOUNT',
       subjectId: world().tenantA.billingAccountId,
     })
-    const invoiceId = randomUUID()
+    const issued = await seedIssuedInvoice(pool(), world(), {
+      dueAt: '2020-01-01T00:00:00.000Z',
+      amountMinor: 100,
+    })
     const env = commandEnv(world(), { reasonCode: 'TEST' })
     const opened = await openDunningCase({
       ...env,
-      invoiceId,
+      invoiceId: issued.invoiceId,
       billingAccountId: world().tenantA.billingAccountId,
       invoiceStatus: 'ISSUED',
       dueAt: '2020-01-01T00:00:00.000Z',
@@ -138,7 +142,7 @@ finPostgresSuite('reconciliation runner after accounting flow', {}, ({ pool, wor
     })
     await writeOffInvoice({
       ...env,
-      invoiceId,
+      invoiceId: issued.invoiceId,
       caseId: opened.caseId,
       amountMinor: 100,
       approvalRequestId: approvalId,

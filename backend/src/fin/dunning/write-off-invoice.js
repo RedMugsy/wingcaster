@@ -1,14 +1,13 @@
 /**
  * WriteOffInvoice (B §6 WRITE_OFF_REVIEW → WRITTEN_OFF / C §5.14).
  * INSERTs BAD_DEBT_WRITE_OFF only. Does NOT reverse REVENUE_RECOGNIZED.
- * Does NOT insert REFUND_REVENUE_REVERSED. Does NOT touch CONSUMED postings.
- *
- * DL-121: invoices don't exist yet. invoice_id is a UUID argument; amount
- * comes from the caller fixture. Fully functional after Stage 10 fin.invoices.
+ * Stage 10: looks up fin.invoices (DL-136 companion) and flips ISSUED/PART_PAID
+ * → UNCOLLECTIBLE so R061 outstanding AR does not double-count the write-off.
  */
 import { randomUUID } from 'node:crypto'
 import { CATEGORY, finError } from '../errors.js'
 import { recordCreditLoss } from '../accounting/credit-loss.js'
+import { loadInvoice, writeInvoiceStatus } from '../billing/invoice-issuer.js'
 import { insertAudit, insertOutbox } from '../ledger/write.js'
 import { claim, envelope, finish, requireReason, withRetry } from '../postpaid/helpers.js'
 import { loadCase } from './cases.js'
@@ -103,17 +102,29 @@ export async function writeOffInvoice(input) {
       )).rows[0]
       : null
 
+    const invoice = await loadInvoice(client, invoiceId, { forUpdate: true })
     const loss = await recordCreditLoss(client, {
       invoiceId,
       amountMinor,
-      currency: input.currency || ba?.billing_currency || 'USD',
-      tenantId: env.tenantId || dunningCase?.tenant_id || ba?.tenant_id,
-      billingAccountId: baId,
-      legalEntityId: input.legalEntityId || ba?.seller_legal_entity_id,
+      currency: input.currency || invoice?.currency || ba?.billing_currency || 'USD',
+      tenantId: env.tenantId || invoice?.tenant_id || dunningCase?.tenant_id || ba?.tenant_id,
+      billingAccountId: baId || invoice?.billing_account_id,
+      legalEntityId: input.legalEntityId || invoice?.legal_entity_id || ba?.seller_legal_entity_id,
       environment: env.environment,
       now: env.now,
       actor: { type: env.actorType, id: env.actorId, email: env.actorEmail },
     })
+    if (invoice && ['ISSUED', 'PART_PAID'].includes(invoice.status)) {
+      const updated = (await client.query(
+        `UPDATE fin.invoices
+            SET status = 'UNCOLLECTIBLE', reason_code = $2, updated_at = $3,
+                updated_by_actor_type = $4, updated_by_actor_id = $5
+          WHERE id = $1
+          RETURNING *`,
+        [invoiceId, env.reasonCode, env.now, env.actorType, env.actorId],
+      )).rows[0]
+      await writeInvoiceStatus(client, env, updated, 'UNCOLLECTIBLE')
+    }
 
     await insertOutbox(client, {
       environment: env.environment,

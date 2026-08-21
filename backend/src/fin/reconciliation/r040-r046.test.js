@@ -7,7 +7,7 @@ import { rateInput, seedRatedCase } from '../rating/test-support.js'
 import { runReconciliation } from './runner.js'
 
 finPostgresSuite('reconciliation R040–R046 after rating', {}, ({ pool, world }) => {
-  it('R040 R041 R045 R046 are GREEN after a real rate + re-rate; R042 stays ERROR', async () => {
+  it('R040 R041 R045 R046 are GREEN after a real rate + re-rate; R042 is GREEN with OPEN_PERIOD', async () => {
     const seeded = await seedRatedCase(pool(), world(), {
       label: 'r040',
       eventCount: 4,
@@ -41,6 +41,6 @@ finPostgresSuite('reconciliation R040–R046 after rating', {}, ({ pool, world }
     expect(byCode.R041.result).toBe('GREEN')
     expect(byCode.R045.result).toBe('GREEN')
     expect(byCode.R046.result).toBe('GREEN')
-    expect(byCode.R042.result).toBe('ERROR')
+    expect(byCode.R042.result).toBe('GREEN')
   })
 })

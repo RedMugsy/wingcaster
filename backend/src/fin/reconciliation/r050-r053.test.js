@@ -5,7 +5,7 @@ import { captureFacility, reserveFacility } from '../postpaid/reservations.js'
 import { futureExpiry, seedActiveFacility } from '../postpaid/test-support.js'
 
 finPostgresSuite('reconciliation R050–R053', {}, ({ pool, world }) => {
-  it('R050–R052 are GREEN after a captured facility draw; R053 is ERROR without invoices', async () => {
+  it('R050–R052 are GREEN after a captured facility draw; R053 is GREEN with no overdue invoices', async () => {
     const seeded = await seedActiveFacility(pool(), world(), { limitMinor: 7_000 })
     const reserved = await reserveFacility({
       ...seeded.env,
@@ -25,6 +25,6 @@ finPostgresSuite('reconciliation R050–R053', {}, ({ pool, world }) => {
     expect(byCode.R050.result).toBe('GREEN')
     expect(byCode.R051.result).toBe('GREEN')
     expect(byCode.R052.result).toBe('GREEN')
-    expect(byCode.R053.result).toBe('ERROR')
+    expect(byCode.R053.result).toBe('GREEN')
   })
 })
