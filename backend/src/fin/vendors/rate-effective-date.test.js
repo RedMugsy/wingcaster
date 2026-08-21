@@ -41,11 +41,8 @@ finPostgresSuite('fin.vendors rate-effective-date', {}, ({ pool, world }) => {
       label: 'rate-new',
       eventCount: 2,
       unitRateMinor: 10,
+      now: '2026-10-02T00:00:00.000Z',
     })
-    await pool().query(
-      `UPDATE fin.metered_usage SET metered_at = $2 WHERE id = $1`,
-      [caseB.meteredUsageId, '2026-10-02T00:00:00.000Z'],
-    )
     await mapMeterVendor(vendorEnv(world(), {
       meterId: caseB.meterId,
       vendorId: seeded.vendorId,

@@ -130,10 +130,26 @@ async function measureAxes(client, statement) {
 
 function hintsForAxis(axis, pair, inputHints = {}) {
   const axisHints = inputHints[axis] || {}
-  if (axis === 'E' && pair.left !== pair.right && !axisHints.reason) {
+  if (axisHints.reason) return axisHints
+  // Auto rate_change on E only when both sides have facts. An empty
+  // estimate side (no rated_usage in this period) is not a rate change
+  // (DL-164). Coerce before !== so BIGINT/string never false-positives.
+  const left = asMinor(pair.left)
+  const right = asMinor(pair.right)
+  if (axis === 'E' && left !== 0n && right !== 0n && left !== right) {
     return { ...axisHints, rateChange: axisHints.rateChange ?? true }
   }
   return axisHints
+}
+
+function skipVacuousAxis(axis, left, right, axisHints = {}) {
+  if (axisHints.reason) return false
+  if (left === 0n && right === 0n) return true
+  // A/B/E compare optional platform metering/rating facts. A matching
+  // vendor statement with no meter map / no estimates must not open
+  // unresolved rows when the platform side is empty (DL-164).
+  if ((axis === 'A' || axis === 'B' || axis === 'E') && left === 0n) return true
+  return false
 }
 
 export async function reconcileStatement(input) {
@@ -165,10 +181,14 @@ export async function reconcileStatement(input) {
     const rows = []
     for (const axis of VARIANCE_AXES) {
       const pair = axes[axis]
+      const left = asMinor(pair.left)
+      const right = asMinor(pair.right)
+      const axisHints = hintsForAxis(axis, { left, right }, input.hints || {})
+      if (skipVacuousAxis(axis, left, right, axisHints)) continue
       const reason = classifyVariance({
-        leftQty: pair.left,
-        rightQty: pair.right,
-        hints: hintsForAxis(axis, pair, input.hints || {}),
+        leftQty: left,
+        rightQty: right,
+        hints: axisHints,
       })
       if (!reason) continue
       const id = randomUUID()
@@ -186,11 +206,11 @@ export async function reconcileStatement(input) {
                updated_at = EXCLUDED.updated_at`,
         [
           id, statementId, statement.environment, axis, reason,
-          pair.left.toString(), pair.right.toString(),
+          left.toString(), right.toString(),
           JSON.stringify({ axis }), env.now,
         ],
       )
-      rows.push({ axis, reason, leftQty: pair.left.toString(), rightQty: pair.right.toString() })
+      rows.push({ axis, reason, leftQty: left.toString(), rightQty: right.toString() })
     }
     const matching = VARIANCE_AXES.filter((axis) => !rows.find((r) => r.axis === axis))
     if (matching.length) {

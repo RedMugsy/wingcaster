@@ -5,6 +5,7 @@
  */
 import { randomUUID } from 'node:crypto'
 import { CATEGORY, finError } from '../errors.js'
+import { requestFingerprint } from '../idempotency/fingerprint.js'
 import { insertAudit, insertOutbox } from '../ledger/write.js'
 import {
   assertIfMatch, bumpHeader, claim, envelope, finish, iso, lockHeader,
@@ -116,11 +117,17 @@ export async function upsertVendorProduct(input) {
   if (!vendorId) throw finError('FIN_VENDOR_NOT_FOUND', { category: CATEGORY.VALIDATION })
   if (!productCode) throw finError('FIN_VENDOR_PRODUCT_CODE_REQUIRED', { category: CATEGORY.VALIDATION })
   const env = envelope(input)
-  const key = env.idempotencyKey || `VENDOR_PRODUCT:${vendorId}:${productCode}`
+  // Semantic A (DL-161): same key + same payload = replay; same key +
+  // different payload = a new claim. Payload hash is in the key so an
+  // intentional UPDATE does not collide on IDEMPOTENCY_FINGERPRINT_CONFLICT.
+  const fingerprintPayload = {
+    cmd: 'UpsertVendorProduct', vendorId, productCode, productClass,
+  }
+  const payloadHash = requestFingerprint(fingerprintPayload)
+  const key = env.idempotencyKey
+    || `VENDOR_PRODUCT:UPSERT:${vendorId}:${productCode}:${payloadHash}`
   return withRetry(async (client) => {
-    const claimed = await claim(client, env, key, {
-      cmd: 'UpsertVendorProduct', vendorId, productCode, productClass,
-    })
+    const claimed = await claim(client, env, key, fingerprintPayload)
     if (claimed.kind === 'replay') return claimed.row.response_body
 
     const vendor = await lockVendor(client, vendorId)
@@ -468,11 +475,14 @@ export async function deprecateRateVersion(input) {
     }
     assertLegalRateVersionTransition(version.status, 'DEPRECATED')
     try {
+      // DL-162: DEPRECATE is a status semantic. Gap-fill already wrote
+      // effective_to when the successor activated; overwriting it with
+      // `now` can reverse tstzrange when effective_from is in the future.
       await client.query(
         `UPDATE fin.vendor_rate_versions
-            SET status = 'DEPRECATED', effective_to = $2
+            SET status = 'DEPRECATED'
           WHERE id = $1 AND status = 'ACTIVE'`,
-        [rateVersionId, env.now],
+        [rateVersionId],
       )
     } catch (error) {
       throw mapVendorPgError(error)
@@ -494,7 +504,7 @@ export async function deprecateRateVersion(input) {
       action: 'VENDOR_RATE_VERSION_DEPRECATED',
       targetType: 'VENDOR_RATE_VERSION',
       targetId: rateVersionId,
-      afterState: { status: 'DEPRECATED', effective_to: env.now },
+      afterState: { status: 'DEPRECATED' },
       reasonCode: env.reasonCode,
       now: env.now,
     })

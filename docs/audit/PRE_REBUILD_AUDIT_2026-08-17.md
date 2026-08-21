@@ -1428,9 +1428,9 @@ Follow-up #3 (2026-08-20): notification.lifecycle dedupe now includes version (D
 
 ### Stage 11 / vendor economics — 2026-08-21
 
-**Landed on `feat/stage-11-vendor`:** migrations `210_fin_vendors.sql` (vendors / products / rate_cards / rate_versions / meter_vendor_map; DRAFT→ACTIVE→DEPRECATED flip), `211_fin_vendor_usage.sql` (usage_events APPEND_ONLY + permanent UNIQUE(vendor_id, source_event_id); reported_usage MUTABLE; cost_estimates ACTIVE/SUPERSEDED; actual_costs), `212_fin_vendor_statements.sql` (DRAFT→RECEIVED→RECONCILED→FINALIZED; line freeze after FINALIZE; `vendor_variance_reasons` TABLE + `vendor_variances`; actuals FK), `213_fin_accounting_events_add_provider_cost.sql` (PROVIDER_COST_ATTRIBUTED + VENDOR_ACTUAL_COST). Services `backend/src/fin/vendors/{registry,usage-ingest,statement-ingest,reconciliation,margin,cost-estimate,helpers}.js`, `backend/src/fin/accounting/provider-cost.js`, read-only `backend/src/fin/admin/vendors/routes.js` gated on `FIN_VENDOR_OPS_ENABLED`. Advisory class `FIN_VENDOR_STATEMENT_RECON = 1021` (DL-151). Parallel `fin.*` path only. `backend/src/billing/events.js` and Stage 1 `ledger/transactions.js` / `write.js` untouched. No write routes under `/api/admin/fin/vendors/**` (Stage 12).
+**Landed on `feat/stage-11-vendor`:** migrations `210_fin_vendors.sql` (vendors / products / rate_cards / rate_versions / meter_vendor_map; DRAFT→ACTIVE→DEPRECATED flip), `211_fin_vendor_usage.sql` (usage_events APPEND_ONLY + permanent UNIQUE(vendor_id, source_event_id); reported_usage MUTABLE; cost_estimates ACTIVE/SUPERSEDED; actual_costs), `212_fin_vendor_statements.sql` (DRAFT→RECEIVED→RECONCILED→FINALIZED; line freeze after FINALIZE; `vendor_variance_reasons` TABLE + `vendor_variances`; actuals FK), `213_fin_accounting_events_add_provider_cost.sql` (PROVIDER_COST_ATTRIBUTED + VENDOR_ACTUAL_COST), `214_fin_approval_vendor_variance_override.sql` (VENDOR_VARIANCE_OVERRIDE on approval_requests.action_kind). Services `backend/src/fin/vendors/{registry,usage-ingest,statement-ingest,reconciliation,margin,cost-estimate,helpers}.js`, `backend/src/fin/accounting/provider-cost.js`, read-only `backend/src/fin/admin/vendors/routes.js` gated on `FIN_VENDOR_OPS_ENABLED`. Advisory class `FIN_VENDOR_STATEMENT_RECON = 1021` (DL-151). Parallel `fin.*` path only. `backend/src/billing/events.js` and Stage 1 `ledger/transactions.js` / `write.js` untouched. No write routes under `/api/admin/fin/vendors/**` (Stage 12).
 
-**Decision log:** DL-151 … DL-159.
+**Decision log:** DL-151 … DL-164.
 
 **Cross-stage wiring (same `transaction(fn)` / ALS reuse):**
 - Stage 5 `rateMeteredUsage` → `maybeWriteVendorCostEstimate` when `fin.meter_vendor_map` exists; silent skip otherwise (DL-153)
@@ -1453,5 +1453,7 @@ Follow-up #3 (2026-08-20): notification.lifecycle dedupe now includes version (D
 **CI file list (must appear in the postgres job summary):**
 `vendors/registry-pg.test.js`, `vendors/usage-ingest.test.js`, `vendors/statement-recon.test.js`, `vendors/rate-effective-date.test.js`, `vendors/provider-mismatch.test.js`, `vendors/traceability.test.js`, `vendors/margin-not-conflated.test.js`, `reconciliation/r080-r083.test.js`, `reconciliation/runner-vendor-green.test.js`.
  Fast suite also runs `vendors/registry.test.js`, `vendors/margin.test.js`, `vendors/reconciliation.test.js`.
+
+Follow-up (2026-08-21): VENDOR_VARIANCE_OVERRIDE added to approval_requests enum (DL-160, migration 214). upsertVendorProduct key includes payload hash (DL-161). Rate version DEPRECATE preserves gap-filled effective_to (DL-162). rate-effective-date test seeds metered_at at INSERT (DL-163). 6-way recon coerces to BIGINT and skips empty-vs-empty (DL-164). Dispatch labels DL-158..DL-162 map to DL-160..DL-164 because the original Stage 11 commit already consumed DL-151..DL-159.
 
 

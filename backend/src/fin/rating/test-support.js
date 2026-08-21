@@ -58,6 +58,7 @@ export async function seedRatedCase(pool, world, {
   skipPriceComponent = false,
   eventDimensions,
   extraComponents = [],
+  now,
 } = {}) {
   const { holderId, billingAccountId } = await seedIsolatedHolder(pool, world, { label })
   const { meterId, meterVersionId, eventType } = await seedIsolatedMeter(pool, {
@@ -75,7 +76,7 @@ export async function seedRatedCase(pool, world, {
   const n = await countUsageByEventType(pool, eventType)
   const metered = await meterPeriod(meterInput(world, {
     meterVersionId,
-    extra: { holderId },
+    extra: { holderId, ...(now ? { now } : {}) },
   }))
 
   const price = await createPrice(priceEnv(world, {
