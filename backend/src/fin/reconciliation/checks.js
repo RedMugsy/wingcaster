@@ -800,4 +800,22 @@ export const CHECKS = [
          FROM fin.vendor_statements s
         WHERE s.status = 'FINALIZED'`,
   },
+  {
+    // Stage 13a operational check (DL-174). Spec F § R084 vendor A/B is
+    // superseded here for the cutover window; vendor A/B moves with Stage 11/13c.
+    // Synthetic entity_id is a fixed UUID (reconciliation_drift.entity_id is UUID).
+    check_code: 'R084',
+    severity: 'MEDIUM',
+    expected_delta_units: 0,
+    drift_action: 'WARN',
+    entity_type: 'cutover_dual_write_errors',
+    source_query: `SELECT '00000000-0000-4000-8000-000000000084'::uuid AS entity_id,
+         CASE
+           WHEN COUNT(*)::bigint >= 100 THEN 1
+           ELSE 0
+         END::bigint AS qty
+         FROM fin.cutover_dual_write_errors
+        WHERE occurred_at > now() - interval '24 hours'`,
+    comparison_query: `SELECT '00000000-0000-4000-8000-000000000084'::uuid AS entity_id, 0::bigint AS qty`,
+  },
 ]
