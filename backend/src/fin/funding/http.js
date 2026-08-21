@@ -3,6 +3,7 @@
  * FIN_FUNDING_ENABLED=1 AND a fin.tenants row → new flow; otherwise 501.
  */
 import { query } from '../../db.js'
+import { BusinessClock } from '../clock.js'
 import { FinError } from '../errors.js'
 import { createPurchaseIntent, submitPurchasePayment } from './purchase-intents.js'
 import { submitPayment } from './psp/index.js'
@@ -13,13 +14,14 @@ export function isFinFundingFlagOn() {
   return value === '1' || value === 'true' || value === 'yes'
 }
 
-export async function resolveFinFundingContext({ publicTenantId, environment = 'LIVE' }) {
+export async function resolveFinFundingContext({ publicTenantId, environment } = {}) {
   if (!isFinFundingFlagOn()) return null
   if (!publicTenantId) return null
+  const sessionEnv = environment === 'TEST' || environment === 'LIVE' ? environment : 'LIVE'
   const tenants = await query(
     `SELECT id, environment FROM fin.tenants
       WHERE public_tenant_id = $1 AND environment = $2 AND status = 'ACTIVE'`,
-    [publicTenantId, environment],
+    [publicTenantId, sessionEnv],
   )
   const tenant = tenants[0]
   if (!tenant) return null
@@ -53,9 +55,10 @@ function commercialUnavailable(res) {
 export async function handleCreditsTopUp(req, res, {
   publicTenantId, productId, provider = 'STRIPE', reasonCode = 'USER_TOPUP',
 }) {
+  const sessionEnv = req.user?.fin_environment || req.user?.environment || 'LIVE'
   const ctx = await resolveFinFundingContext({
     publicTenantId,
-    environment: req.body?.environment || 'LIVE',
+    environment: sessionEnv,
   })
   if (!ctx) return commercialUnavailable(res)
 
@@ -76,7 +79,7 @@ export async function handleCreditsTopUp(req, res, {
       actorId: null,
       actorEmail: req.user?.email || 'user@fin.local',
       reasonCode,
-      now: req.body?.now,
+      now: BusinessClock.now(),
       idempotencyKey: req.get?.('Idempotency-Key') || req.body?.idempotency_key,
       promo: req.body?.promo,
       currency: req.body?.currency,
@@ -90,7 +93,7 @@ export async function handleCreditsTopUp(req, res, {
       actorId: null,
       actorEmail: req.user?.email || 'user@fin.local',
       reasonCode,
-      now: req.body?.now,
+      now: BusinessClock.now(),
     })
     const psp = await submitPayment(
       { id: created.id, provider, ...created },

@@ -53,6 +53,24 @@ export function Navbar() {
   const platformAdminActive = platformAdminSubItems.some((it) =>
     location.pathname === it.path || location.pathname.startsWith(`${it.path}/`),
   )
+  const finOpsSubItems = [
+    { path: '/admin/fin/overview', label: 'Overview' },
+    { path: '/admin/fin/tenants', label: 'Tenants' },
+    { path: '/admin/fin/usage', label: 'Usage' },
+    { path: '/admin/fin/credits', label: 'Credits' },
+    { path: '/admin/fin/holds', label: 'Holds' },
+    { path: '/admin/fin/facilities', label: 'Facilities' },
+    { path: '/admin/fin/contracts', label: 'Contracts' },
+    { path: '/admin/fin/pricing', label: 'Pricing' },
+    { path: '/admin/fin/invoices', label: 'Invoices' },
+    { path: '/admin/fin/vendor-costs', label: 'Vendor costs' },
+    { path: '/admin/fin/reconciliation', label: 'Reconciliation' },
+    { path: '/admin/fin/exceptions', label: 'Exceptions' },
+    { path: '/admin/fin/approvals', label: 'Approvals' },
+    { path: '/admin/fin/audit', label: 'Audit' },
+    { path: '/admin/fin/configuration', label: 'Configuration' },
+  ]
+  const finOpsActive = location.pathname.startsWith('/admin/fin')
 
   return (
     <nav className="sticky top-0 z-50 w-full border-b bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/60">
@@ -146,6 +164,34 @@ export function Navbar() {
                       </DropdownMenuItem>
                     )
                   })}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            ) : null}
+            {isAdmin ? (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    className={`flex items-center gap-1.5 rounded-md px-3 py-2 text-sm font-medium transition-colors ${
+                      finOpsActive
+                        ? 'text-white'
+                        : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
+                    }`}
+                    style={finOpsActive ? { backgroundColor: brand.primaryColor } : undefined}
+                    aria-label="Fin ops menu"
+                  >
+                    <CreditCard className="h-4 w-4" />
+                    Fin ops
+                    <ChevronDown className="h-3.5 w-3.5" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-56">
+                  <DropdownMenuLabel>Fin operations</DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  {finOpsSubItems.map((sub) => (
+                    <DropdownMenuItem key={sub.path} asChild>
+                      <Link to={sub.path}>{sub.label}</Link>
+                    </DropdownMenuItem>
+                  ))}
                 </DropdownMenuContent>
               </DropdownMenu>
             ) : null}
@@ -272,6 +318,24 @@ export function Navbar() {
                     </Link>
                   )
                 })}
+              </div>
+            ) : null}
+            {isAdmin ? (
+              <div className="mt-2 border-t pt-3">
+                <div className="mb-1 flex items-center gap-2 px-3 text-xs font-semibold uppercase text-muted-foreground">
+                  <CreditCard className="h-3.5 w-3.5" />
+                  Fin ops
+                </div>
+                {finOpsSubItems.map((sub) => (
+                  <Link
+                    key={sub.path}
+                    to={sub.path}
+                    onClick={() => setMobileOpen(false)}
+                    className="flex items-center gap-2 rounded-md px-6 py-2 text-sm font-medium text-muted-foreground hover:bg-accent"
+                  >
+                    {sub.label}
+                  </Link>
+                ))}
               </div>
             ) : null}
             <div className="mt-2 flex flex-col gap-2 border-t pt-3">

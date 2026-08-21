@@ -1769,6 +1769,19 @@ export const api = {
     if (opts.territoryId) parts.push(`territoryId=${encodeURIComponent(opts.territoryId)}`)
     return fetchJson(`/admin/message-templates/resolve?${parts.join('&')}`)
   },
+
+  finGet: (path: string): Promise<Record<string, unknown>> =>
+    fetchJson(`/admin/fin${path}`),
+
+  finPost: (path: string, body: Record<string, unknown> = {}): Promise<Record<string, unknown>> =>
+    fetchJson(`/admin/fin${path}`, {
+      method: 'POST',
+      body: JSON.stringify({ reason_code: 'ADMIN_OPS', ...body }),
+      headers: {
+        'If-Match': '"1"',
+        'Idempotency-Key': (globalThis.crypto?.randomUUID?.() || `ops-${Date.now()}`),
+      },
+    }),
 }
 
 function buildQuery(opts: ListAdminOpts): string {

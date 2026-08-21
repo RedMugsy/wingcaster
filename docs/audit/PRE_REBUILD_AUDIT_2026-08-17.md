@@ -1426,3 +1426,50 @@ Follow-up (2026-08-20): PAID→ISSUED reversal transition allowed via migration 
 Follow-up #2 (2026-08-20): writeInvoiceStatus dedupe uses post-flip version via UPDATE ... RETURNING (DL-148). R061 outstanding sum is AR-scoped (EXISTS RECEIVABLE_CREATED) with fallback 0 — prepaid invoice cash is settlement, not AR (DL-149).
 Follow-up #3 (2026-08-20): notification.lifecycle dedupe now includes version (DL-150) — the DL-148 fix missed the sibling notify write inside writeInvoiceStatus.
 
+### Stage 12 / operations UI — 2026-08-21
+
+**Landed on `feat/stage-12-ops-ui`:** thin `/api/admin/fin/**` ops layer + 15 React pages under `/admin/fin/**`. Base is main @ `27f6ee5` (Stage 10). Parallel `fin.*` only. `commercial.*`, `billing/events.js`, `ledger/transactions.js`, and `ledger/write.js` untouched. Stage 11 branch (`feat/stage-11-vendor`) is not edited.
+
+**Migrations:** `220_fin_ledger_books_customer_unique.sql` (DL-102 / DL-162 partial UNIQUE on CUSTOMER books). **No** migration 221 — no materialized views (DL-163). Advisory-lock class unused (1030+ reserved; none allocated).
+
+**Decision log:** DL-160 … DL-169.
+
+**Backend:** `backend/src/fin/admin/{routes,context,kpis,reads,exceptions,http-support}.js` registered via `registerFinOpsAdminRoutes` in `server.js` after Stage 4 pricing. Reads are SELECT-only. Writes invoke existing Stage 1–10 commands inside their own `transaction(fn)` / claim / audit / outbox. Environment from operator session; `now` from `BusinessClock` (DL-164). Idempotency-Key header passed through. `actorType='USER'`. FinError → `error.httpStatus`. CSP `default-src 'self'`. Platform-admin + elevated + limiter + If-Match on writes (Stage 4 `writeGuards` mirror).
+
+**DL-101 / DL-102 follow-ups:** `funding/http.js` no longer accepts `environment`/`now` from `req.body` (DL-161). Migration 220 lands DL-102 (DL-162).
+
+**Spec §107 exception types — full admin flow vs deferred:**
+
+| Type | Admin flow | Notes |
+|---|---|---|
+| RECONCILIATION_DRIFT | Read + 501 resolve | `resolveDrift` missing (DL-165) |
+| USAGE_DLQ | Read only | No command (DL-165) |
+| AUTH_DENIED | Read only | No command (DL-165) |
+| HOLD_EXPIRED | Read only | No command (DL-165) |
+| LATE_USAGE | Read only | No command (DL-165) |
+| DUNNING_OPEN | Read + `advanceDunning` / `cureDunning` | Write routes landed |
+| INVOICE_OVERDUE | Read + dunning writes | Same |
+| PAYMENT_UNAPPLIED | Read + `applyPayment` | Write route landed |
+| APPROVAL_PENDING | Read + 501 approve/reject | DecideApproval missing (DL-166) |
+| RATE_NOT_CONFIGURED | Read count 0 | No command (DL-168) |
+| PERIOD_CLOSE_BLOCKED | Read + billing period close/reopen | Write routes landed |
+| ENV_ISOLATION | Read only | No command (DL-165) |
+| IDEMPOTENCY_IN_FLIGHT | Read only | No command (DL-165) |
+| TAX_MISMATCH | Read (R073) | No command (DL-169) |
+| ACCOUNTING_HARD_CLOSED | Read only | No command (DL-165) |
+| FACILITY_LIMIT | Read + facility writes | Write routes landed |
+| VENDOR_STATEMENT_DRIFT | Stub 0 | Stage 11 (DL-167) |
+| NEGATIVE_MARGIN | Stub 0 | Stage 11 (DL-167) |
+
+**Frontend:** `web/src/pages/admin/fin/**` — Overview (24 §103 tiles), Tenants (§104), Usage (§105), Credits, Holds, Facilities, Contracts, Pricing (Stage 4 simulator), Invoices, Vendor Costs (§106 empty state until Stage 11), Reconciliation, Exceptions (§107), Approvals, Audit, Configuration. React Router `/admin/fin/**`. Navbar **Fin ops** dropdown gated on `isAdmin` (platform_admin session claim). Reuses existing Table/Card/Button. No new UI framework.
+
+**Sidebar / role gate:** `Navbar.tsx` Fin ops dropdown + mobile list render only when `useAuth().isAdmin`. Each page also wraps with `FinAdminGate` (same claim). Backend `requirePlatformAdmin` + explicit `platform_role === 'platform_admin'` on writes.
+
+**Still LIVE on commercial.* until Stage 13 cutover:** commercial wallet, invoices, dunning/email. This PR does not write `commercial.*`.
+
+**CI file list (must appear in the postgres job summary):**
+`admin/routes.fast.test.js` (fast suite), `admin/overview-kpi.test.js`, `admin/routes-facilities.test.js`, `admin/routes-reconciliation.test.js`, `admin/routes-approvals.test.js`, `admin/routes-dunning.test.js`, `admin/routes-billing.test.js`, `admin/routes-payments.test.js`, `admin/routes-invoices.test.js`, `admin/routes-accounting.test.js`, `admin/routes-vendors.test.js`, `e2e/admin-fin-traversal.test.js`.
+ Fast suite also runs `phase-7f3-wiring.test.js` ops-write inventory. Web jsdom: `web/src/pages/admin/fin/pages.test.tsx`.
+
+Follow-up (2026-08-21 / PR #17): recon test Boolean-wraps the runId truthy check (no response-shape change). Billing reopen of OPEN is a Stage 12 route-level 409 `BILLING_PERIOD_ALREADY_OPEN` (DL-170) — Stage 10 already SKIP'd OPEN; the red test had closed first so reopen of `USAGE_CLOSING` returned 200. Facility activate seed now stamps `valid_from` 5s before frozen `NOW`. Invoice void test seeds an `INVOICE_VOID` approval. Domain commands and Stage 8 `transition()` untouched.
+
