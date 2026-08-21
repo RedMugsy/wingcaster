@@ -9,6 +9,13 @@ const SECRET = 'stage-12-ops-secret'
 export async function makeOpsApp(databaseUrl, { role = 'platform_admin', finEnvironment = 'LIVE' } = {}) {
   process.env.JWT_SECRET = SECRET
   process.env.VITEST = '1'
+  // Enable Stage 11 vendor read routes in the ops test harness so
+  // /api/admin/fin/vendors serves Stage 11's real router (200 + rows)
+  // instead of requireVendorOps gating with 501. Post-merge integration
+  // test wiring, no domain change.
+  if (process.env.FIN_VENDOR_OPS_ENABLED == null || process.env.FIN_VENDOR_OPS_ENABLED === '') {
+    process.env.FIN_VENDOR_OPS_ENABLED = '1'
+  }
   vi.resetModules()
   const { configure } = await import('../../db.js')
   configure({ databaseUrl, force: true })
