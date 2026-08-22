@@ -1532,3 +1532,27 @@ Follow-up (2026-08-21 / PR #17): recon test Boolean-wraps the runId truthy check
 Fast suite also runs `cutover/mode.test.js`, `cutover/mapping.test.js`.
 
 **Business gate:** no Finance sign-off required (DUAL off by default). Finance sign-off lives at Stage 13d.
+
+### Stage 13b / historical backfill + R090?R092 ? 2026-08-22
+
+**Landed on `feat/stage-13b-backfill`:** historical BACKFILL of pre-DUAL `commercial.*` into `fin.*`, plus additive contamination checks R090?R092. Base is main @ `bb2487e` (Stage 11; Stage 13a at `da7c6cf`). Does **not** flip source-of-truth (13d). Does **not** write, alter, or drop `commercial.*` rows or schema. New `fin.*` rows only. Backfill runs OUTSIDE the DUAL-write path and does not emit outbox events.
+
+**Migrations:**
+- `240_fin_cutover_backfill_progress.sql` ? APPEND_ONLY progress (start + completion INSERTs sharing `batch_id`; `last_processed_id` cursor). FORCE RLS. Advisory class `FIN_CUTOVER_BACKFILL = 1030`.
+- `241_fin_cutover_backfill_corrections.sql` ? APPEND_ONLY correction audit (10-kind CHECK; natural UNIQUE). FORCE RLS.
+- `242_fin_cutover_backfill_index.sql` ? `source_system`/`source_row_id` on `rated_usage` + `accounting_events` with partial UNIQUE; `reconciliation_resolution.action` gains `BLOCK_CUTOVER`. No new columns on `usage_events` (DL-181).
+
+**Services:** `backend/src/fin/cutover/backfill/{progress,tenant-map,usage-events,consumption,orchestrator,cli,readiness}.js`. Operator CLI is not an HTTP route and is not called from seed suites. Cutoff = `MIN(fin.usage_events.received_at)` of DUAL-originated rows (`source_system='commercial.usage_events'`); backfill writes `source_system='commercial'` so the two sets cannot collide (DL-180 / DL-181).
+
+**Reconciliation:** R090 TEST/LIVE contamination, R091 tenant contamination, R092 legal-entity contamination. Additive; clean-world runners stay GREEN. Go/no-go for 13d is R090?R092 GREEN plus R084 24h `< 100` (DL-183).
+
+**Admin:** `GET /api/admin/fin/cutover/readiness` (platform_admin, read-only, DL-184).
+
+**Decision log:** DL-180 .. DL-189 (DL-186..189 reserved).
+
+**CI file list (must appear in the postgres job summary):**
+`backfill/usage-events-backfill.test.js`, `backfill/idempotent-rerun.test.js`, `backfill/correction-missing-tenant.test.js`, `backfill/correction-orphan-consumption.test.js`, `backfill/consumption-backfill.test.js`, `reconciliation/r090-r092.test.js`, `reconciliation/runner-postbackfill-green.test.js`, `admin/routes-cutover-readiness.test.js`.
+ Fast suite also runs `backfill/progress.test.js`, `backfill/tenant-map.test.js`.
+
+**Business gate:** this PR does not flip anything. Cutover is Stage 13d. Finance sign-off still lives at 13d.
+
