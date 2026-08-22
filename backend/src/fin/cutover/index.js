@@ -9,3 +9,6 @@ export {
   ledgerConsumptionAuthorizeInput,
 } from './mapping.js'
 export { resolveFinMirrorContext } from './context.js'
+export { runParityTick } from './parity/worker.js'
+export { runHourlyTick, runDailyRollup } from './parity/orchestrator.js'
+export { computeAttestation, signAttestation } from './parity/attestation.js'

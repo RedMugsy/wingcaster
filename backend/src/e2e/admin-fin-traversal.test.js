@@ -62,7 +62,7 @@ finPostgresSuite('e2e/admin-fin-traversal', {}, ({ url, pool }) => {
     expect(result.rows).toBeTruthy()
   })
 
-  it('admin GET surfaces used by the 15 pages all 200', async () => {
+  it('admin GET surfaces used by the fin ops pages all 200', async () => {
     const { app } = await makeOpsApp(url())
     const paths = [
       '/api/admin/fin/overview',
@@ -76,6 +76,8 @@ finPostgresSuite('e2e/admin-fin-traversal', {}, ({ url, pool }) => {
       '/api/admin/fin/invoices',
       '/api/admin/fin/payments',
       '/api/admin/fin/reconciliation/runs',
+      '/api/admin/fin/cutover/readiness',
+      '/api/admin/fin/cutover/parity',
       '/api/admin/fin/exceptions',
       '/api/admin/fin/approvals',
       '/api/admin/fin/audit',

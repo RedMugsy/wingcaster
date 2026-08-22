@@ -420,6 +420,8 @@ Prefer the two-int form so classes cannot collide: `pg_try_advisory_lock(class i
 | `1012` | `FIN_IDEMPOTENCY_SWEEP` | `0` | Expires `idempotency_keys` (E) | **No** |
 | `1013` | `FIN_METERING` | `0` (tick) or `hashtext(meterVersionId:holderId:periodKey)` (`meterPeriod`) | Metering aggregator (Stage 3) | **No** per key. Tick is singleton (`key2=0`). Per-tuple keys may run in parallel across different (meter, holder, period) |
 | `1019` | `FIN_ACCOUNTING_PERIOD_CLOSE` | `hashtext(periodId)` (xact) | SoftClose / HardClose / Reopen (Stage 9, DL-116) | **No** per period. `1008` remains the SOX worker class. Do not reuse `1016` |
+| `1030` | `FIN_CUTOVER_BACKFILL` | `0` | Stage 13b historical backfill worker (DL-180) | **No** — singleton across the fleet |
+| `1031` | `FIN_CUTOVER_PARITY` | `hashtext(source)` | Stage 13c parity worker (DL-196) | **Yes, per source.** Session-scoped for the tick. Multiple sources may run in parallel |
 
 `hash(uuid)` for `key2` is `('x' || right(replace(uuid::text, '-', ''), 8))::bit(32)::int` — stable, not `hashtext` of a locale-sensitive collation.
 

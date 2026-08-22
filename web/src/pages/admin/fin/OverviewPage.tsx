@@ -15,16 +15,46 @@ const KPI_ORDER = [
 export function OverviewPage() {
   const [tiles, setTiles] = useState<Record<string, number>>({})
   const [error, setError] = useState<string | null>(null)
+  const [readiness, setReadiness] = useState<Record<string, unknown> | null>(null)
 
   useEffect(() => {
     void api.finGet('/overview').then((body) => {
       setTiles((body.tiles || {}) as Record<string, number>)
     }).catch((err: Error) => setError(err.message))
+    void api.finGet('/cutover/readiness').then((body) => {
+      setReadiness(body)
+    }).catch(() => setReadiness(null))
   }, [])
+
+  const reconCodes = ['R090', 'R091', 'R092', 'R093', 'R094', 'R095'] as const
+  const attestation = (readiness?.attestation || {}) as {
+    last_signed_at?: string | null
+    signed_by_email?: string | null
+    eligible_to_sign?: boolean
+  }
 
   return (
     <FinAdminGate title="Overview">
       {error ? <p className="text-sm text-red-600">{error}</p> : null}
+      <Card className="mb-4">
+        <CardHeader className="pb-2"><CardTitle className="text-sm">Cutover readiness</CardTitle></CardHeader>
+        <CardContent className="text-sm">
+          <div className="mb-2 flex flex-wrap gap-2">
+            {reconCodes.map((code) => (
+              <span key={code} className="rounded border px-2 py-1">
+                {code} {String(readiness?.[code] ?? '—')}
+              </span>
+            ))}
+          </div>
+          <p>
+            Attestation: {attestation.last_signed_at
+              ? `signed ${String(attestation.last_signed_at)} by ${String(attestation.signed_by_email || 'unknown')}`
+              : 'not signed'}
+            {attestation.eligible_to_sign ? ' (eligible to sign)' : ''}
+          </p>
+          <p>ready_for_cutover: {String(readiness?.ready_for_cutover ?? '—')}</p>
+        </CardContent>
+      </Card>
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         {KPI_ORDER.map((key) => (
           <Card key={key}>

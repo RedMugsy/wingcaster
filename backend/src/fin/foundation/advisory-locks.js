@@ -32,6 +32,8 @@ export const FIN_BILLING_PERIOD_CLOSE = 1020
 export const FIN_VENDOR_STATEMENT_RECON = 1021
 /** Stage 13b historical backfill mutex. Session-scoped; one batch per source at a time (DL-180). */
 export const FIN_CUTOVER_BACKFILL = 1030
+/** Stage 13c parity worker mutex. Session-scoped per tick; key2 = hashtext(source) so sources run in parallel (DL-196). */
+export const FIN_CUTOVER_PARITY = 1031
 
 export const LOCK_CLASSES = {
   FIN_CONTRACT_RENEWAL,
@@ -55,4 +57,5 @@ export const LOCK_CLASSES = {
   FIN_BILLING_PERIOD_CLOSE,
   FIN_VENDOR_STATEMENT_RECON,
   FIN_CUTOVER_BACKFILL,
+  FIN_CUTOVER_PARITY,
 }

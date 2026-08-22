@@ -24,6 +24,11 @@ finPostgresSuite('admin/routes-cutover-readiness', {}, ({ url }) => {
     expect(res.body.R090).toBe('GREEN')
     expect(res.body.R091).toBe('GREEN')
     expect(res.body.R092).toBe('GREEN')
-    expect(res.body.ready_for_cutover).toBe(true)
+    expect(res.body.parity).toEqual(expect.objectContaining({
+      burn_in_days_required: 30,
+      burn_in_met: false,
+    }))
+    expect(res.body.attestation.eligible_to_sign).toBe(false)
+    expect(res.body.ready_for_cutover).toBe(false)
   })
 })

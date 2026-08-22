@@ -6,7 +6,7 @@ import { MemoryRouter } from 'react-router-dom'
 import {
   ApprovalsPage, AuditPage, ConfigurationPage, ContractsPage, CreditsPage,
   ExceptionsPage, FacilitiesPage, HoldsPage, InvoicesPage, OverviewPage,
-  PricingPage, ReconciliationPage, TenantsPage, UsagePage, VendorCostsPage,
+  ParityPage, PricingPage, ReconciliationPage, TenantsPage, UsagePage, VendorCostsPage,
 } from './index'
 
 const apiMock = vi.hoisted(() => ({
@@ -15,6 +15,7 @@ const apiMock = vi.hoisted(() => ({
     facilities: [], contracts: [], invoices: [], runs: [], types: [],
     approvals: [], events: [], vendors: [], stage11: false,
     dunning_policies: [], simulator: { amount_minor: '0' },
+    reports: [], attestation: { eligible_to_sign: false },
   })),
   finPost: vi.fn(async () => ({})),
 }))
@@ -48,6 +49,7 @@ describe('admin/fin pages', () => {
     ['Invoices', () => <InvoicesPage />],
     ['Vendor costs', () => <VendorCostsPage />],
     ['Reconciliation', () => <ReconciliationPage />],
+    ['Parity', () => <ParityPage />],
     ['Exceptions', () => <ExceptionsPage />],
     ['Approvals', () => <ApprovalsPage />],
     ['Audit', () => <AuditPage />],
@@ -63,6 +65,11 @@ describe('admin/fin pages', () => {
     authMock.isAdmin = false
     wrap(<OverviewPage />)
     expect(screen.getByText('Platform admin required')).toBeTruthy()
+  })
+
+  it('Overview surfaces a Cutover readiness tile', async () => {
+    wrap(<OverviewPage />)
+    expect(await screen.findByText('Cutover readiness')).toBeTruthy()
   })
 
   it('Vendor costs shows Stage 11 empty state', async () => {

@@ -50,7 +50,7 @@ import {
   ApprovalsPage, AuditPage, ConfigurationPage, ContractsPage, CreditsPage,
   ExceptionsPage, FacilitiesPage, HoldsPage, InvoicesPage, OverviewPage,
   PricingPage as FinPricingPage, ReconciliationPage, TenantsPage, UsagePage,
-  VendorCostsPage,
+  VendorCostsPage, ParityPage,
 } from '@/pages/admin/fin'
 import { TerritoriesAdminPage } from '@/pages/admin/commercial-pricing/TerritoriesAdminPage'
 import { TerritoryDetailPage } from '@/pages/admin/commercial-pricing/TerritoryDetailPage'
@@ -137,6 +137,7 @@ function AppShell() {
           <Route path="/admin/fin/invoices" element={<InvoicesPage />} />
           <Route path="/admin/fin/vendor-costs" element={<VendorCostsPage />} />
           <Route path="/admin/fin/reconciliation" element={<ReconciliationPage />} />
+          <Route path="/admin/fin/parity" element={<ParityPage />} />
           <Route path="/admin/fin/exceptions" element={<ExceptionsPage />} />
           <Route path="/admin/fin/approvals" element={<ApprovalsPage />} />
           <Route path="/admin/fin/audit" element={<AuditPage />} />
