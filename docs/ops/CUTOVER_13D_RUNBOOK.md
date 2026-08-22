@@ -33,9 +33,12 @@ Those belong to Stage 13e/13f.
 
 ## Flip (T-0)
 
-5. Deploy this PR to prod (code + migrations `260`, `261`, `262`).
-   Migration `260b_fin_cutover_thaw_commercial.sql` is **not** applied by the
-   auto-migration loop — leave it on disk as rollback ammunition.
+5. Deploy this PR to prod. Only migrations `261` and `262` auto-apply on
+   startup. The freeze migration `260a_fin_cutover_freeze_commercial.sql`
+   and its rollback pair `260b_fin_cutover_thaw_commercial.sql` are both
+   **operator-only** (letter-suffix skipped by `isAutoMigration`, DL-216).
+   The freeze fires only when step 8 below is invoked. Legacy
+   `commercial.*` writes keep working through steps 5–7.
 6. Verify `GET /api/admin/fin/cutover/readiness` returns
    `ready_for_cutover: true`.
 7. Operator invokes `POST /api/admin/fin/cutover/activate` for the target
@@ -48,11 +51,25 @@ Those belong to Stage 13e/13f.
    ```
 
    Environment comes from the operator session, not the body (DL-164).
-8. Verify `GET /api/admin/fin/cutover/readiness` shows `mode: "FIN_ONLY"`.
-9. Smoke test: emit a test usage event on the un-501'd top-up path; verify
-   only `fin.*` rows exist (no new `commercial.usage_events` insert). Role
-   REVOKE from migration 260 is the write stop; `permission denied` on
-   `commercial.*` INSERT is expected for `fin_app_role`.
+   Singleton flips to `FIN_ONLY`; dual-write branch stops writing to
+   `commercial.*`. **Legacy role privileges are still intact at this
+   point** — any lingering legacy code path still succeeds.
+8. Operator invokes `POST /api/admin/fin/cutover/freeze-commercial` for the
+   target environment (platform_admin + elevated + `Idempotency-Key`).
+
+   Body:
+
+   ```json
+   { "note": "Stage 13d LIVE freeze" }
+   ```
+
+   Applies migration `260a` (REVOKE INSERT/UPDATE/DELETE/TRUNCATE on every
+   commercial.* table from every non-migrator role). Refuses if the
+   singleton is not `FIN_ONLY` (belt+suspenders with step 7). DL-216.
+9. Verify `GET /api/admin/fin/cutover/readiness` shows `mode: "FIN_ONLY"`.
+10. Smoke test: emit a test usage event on the un-501'd top-up path; verify
+    only `fin.*` rows exist. `permission denied` on `commercial.*` INSERT
+    is now expected for `fin_app_role` (the freeze from step 8 took effect).
 
 ---
 

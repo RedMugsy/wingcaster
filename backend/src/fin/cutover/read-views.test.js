@@ -7,22 +7,24 @@ import { finPostgresSuite } from '../testing/suite.js'
 import { ingestUsageEvent } from '../usage/ingest.js'
 
 finPostgresSuite('cutover/read-views', {}, ({ pool, world }) => {
-  it('does not auto-apply the 260b thaw down-migration', async () => {
-    const applied = await pool().query(
-      `SELECT filename FROM schema_migrations WHERE filename LIKE '260b%'`,
-    )
-    expect(applied.rowCount).toBe(0)
-    const freeze = await pool().query(
+  it('auto-applies 261/262 only; freeze/thaw are operator-triggered (DL-216)', async () => {
+    const skipped = await pool().query(
       `SELECT filename FROM schema_migrations
         WHERE filename IN (
-          '260_fin_cutover_freeze_commercial.sql',
+          '260a_fin_cutover_freeze_commercial.sql',
+          '260b_fin_cutover_thaw_commercial.sql'
+        )`,
+    )
+    expect(skipped.rowCount).toBe(0)
+    const applied = await pool().query(
+      `SELECT filename FROM schema_migrations
+        WHERE filename IN (
           '261_fin_cutover_read_views.sql',
           '262_fin_cutover_readiness_gate.sql'
         )
         ORDER BY filename`,
     )
-    expect(freeze.rows.map((r) => r.filename)).toEqual([
-      '260_fin_cutover_freeze_commercial.sql',
+    expect(applied.rows.map((r) => r.filename)).toEqual([
       '261_fin_cutover_read_views.sql',
       '262_fin_cutover_readiness_gate.sql',
     ])

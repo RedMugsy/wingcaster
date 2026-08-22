@@ -2,6 +2,9 @@
  * Stage 13d cutover activation / deactivation (DL-206..DL-211).
  * Infrastructure only — does not mutate commercial.* rows or fin.* domain tables.
  */
+import { readFile } from 'node:fs/promises'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { transaction } from '../../db.js'
 import { getPool } from '../../persistence/postgres-adapter.js'
 import { BusinessClock } from '../clock.js'
@@ -13,6 +16,8 @@ import { insertAudit, insertOutbox } from '../ledger/write.js'
 import { runReconciliation } from '../reconciliation/runner.js'
 import { ATTESTATION_FRESH_DAYS } from './parity/attestation.js'
 import { isAttestationFresh, readActiveEnvironment } from './mode.js'
+
+const FREEZE_MIGRATION_FILENAME = '260a_fin_cutover_freeze_commercial.sql'
 
 const REQUIRED_RECON = ['R084', 'R090', 'R091', 'R092', 'R093', 'R094', 'R096']
 
@@ -393,5 +398,124 @@ export async function deactivateFinOnly({
       })
       return body
     })
+  })
+}
+
+/**
+ * Operator-only: apply the freeze migration 260a. DL-216.
+ *
+ * The freeze REVOKEs commercial.* writes. Auto-applying it on every
+ * Railway deploy would flip production before the operator called
+ * /activate, breaking every legacy tenant still in OFF mode. Instead
+ * the migration file is renamed 260a_*.sql (skipped by the auto-loop)
+ * and this function reads it from disk and executes it on operator
+ * command AFTER /activate has flipped the singleton to FIN_ONLY.
+ *
+ * Guardrails:
+ *   - Refuses unless fin.cutover_active_environment.mode = 'FIN_ONLY'
+ *     for the target environment (belt+suspenders with the runbook).
+ *   - Idempotent: REVOKE of an already-revoked privilege is a no-op,
+ *     matching migration 260a's own idempotency claim.
+ *   - Audit + outbox in the same tx.
+ *   - Rollback path is migration 260b_thaw, applied manually.
+ */
+export async function freezeCommercialWrites({
+  environment, actor, note = null, idempotencyKey = null,
+} = {}) {
+  const env = envOf(environment)
+  if (!env) throw finError('ENV_MISMATCH', { category: CATEGORY.VALIDATION })
+  const actorType = actor?.actorType || 'USER'
+  const actorId = actor?.actorId || null
+  const actorEmail = actor?.actorEmail || null
+  if (!actorEmail) {
+    throw finError('CUTOVER_FREEZE_ACTOR_EMAIL_REQUIRED', {
+      category: CATEGORY.VALIDATION,
+      details: { hint: 'operator email is captured in audit row' },
+    })
+  }
+  const stamped = BusinessClock.now()
+  const claimKey = idempotencyKey || `CUTOVER:FREEZE:${env}:${stamped.slice(0, 10)}`
+
+  // Load the migration file from disk (source-of-truth SQL body).
+  const migrationsDir = join(
+    dirname(fileURLToPath(import.meta.url)),
+    '..', '..', 'persistence', 'migrations',
+  )
+  const freezePath = join(migrationsDir, FREEZE_MIGRATION_FILENAME)
+  const freezeSql = await readFile(freezePath, 'utf8')
+
+  return transaction(async (client) => {
+    // Belt+suspenders: refuse to freeze if not activated.
+    const singleton = await readActiveEnvironment(getPool(), env)
+    if (singleton?.mode !== 'FIN_ONLY') {
+      throw finError('CUTOVER_NOT_ACTIVATED', {
+        category: CATEGORY.PRECONDITION,
+        details: {
+          environment: env,
+          mode: singleton?.mode || 'UNKNOWN',
+          hint: 'POST /api/admin/fin/cutover/activate must run first',
+        },
+      })
+    }
+
+    const claimed = await claimIdempotency(client, {
+      environment: env,
+      tenantId: null,
+      key: claimKey,
+      fingerprint: requestFingerprint({
+        cmd: 'FreezeCommercialWrites',
+        environment: env,
+      }),
+      now: stamped,
+      actorType,
+      actorId,
+    })
+    if (claimed.kind === 'replay') return claimed.row.response_body
+
+    // Execute the migration SQL body. Contains a single DO block that is
+    // idempotent (REVOKE of an already-revoked privilege is a no-op).
+    await client.query(freezeSql)
+
+    await insertAudit(client, {
+      environment: env,
+      actorType,
+      actorId,
+      actorEmail,
+      action: 'FIN_CUTOVER_FROZEN_COMMERCIAL',
+      targetType: 'ENVIRONMENT',
+      targetId: env,
+      afterState: {
+        environment: env,
+        migration: FREEZE_MIGRATION_FILENAME,
+        note,
+      },
+      reasonCode: 'FIN_CUTOVER_FREEZE',
+      now: stamped,
+    })
+
+    await insertOutbox(client, {
+      environment: env,
+      topic: 'fin.cutover.commercial_frozen',
+      dedupeKey: `cutover:frozen:${env}:${stamped}`,
+      payload: {
+        environment: env,
+        frozen_by_email: actorEmail,
+        note,
+      },
+      now: stamped,
+    })
+
+    const body = {
+      ok: true,
+      environment: env,
+      migration: FREEZE_MIGRATION_FILENAME,
+      frozen_at: stamped,
+    }
+    await completeIdempotency(client, {
+      id: claimed.row.id,
+      now: stamped,
+      body,
+    })
+    return body
   })
 }

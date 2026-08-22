@@ -71,10 +71,14 @@ describe('isAttestationFresh', () => {
 })
 
 describe('isAutoMigration', () => {
-  it('applies 260/261/262 and skips the 260b down-migration', () => {
-    expect(isAutoMigration('260_fin_cutover_freeze_commercial.sql')).toBe(true)
+  it('auto-applies 261/262 only; freeze and thaw are operator-triggered', () => {
+    // DL-216: 260a freeze is operator-only via POST /cutover/freeze-commercial.
+    // Auto-applying the REVOKE on every Railway deploy would flip production
+    // before the operator called /activate, breaking every legacy tenant
+    // still in OFF mode.
+    expect(isAutoMigration('260a_fin_cutover_freeze_commercial.sql')).toBe(false)
+    expect(isAutoMigration('260b_fin_cutover_thaw_commercial.sql')).toBe(false)
     expect(isAutoMigration('261_fin_cutover_read_views.sql')).toBe(true)
     expect(isAutoMigration('262_fin_cutover_readiness_gate.sql')).toBe(true)
-    expect(isAutoMigration('260b_fin_cutover_thaw_commercial.sql')).toBe(false)
   })
 })
