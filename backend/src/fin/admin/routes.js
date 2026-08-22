@@ -34,7 +34,8 @@ import { approveCreditNote, draftCreditNote, issueCreditNote } from '../billing/
 import { approveDebitNote, draftDebitNote, issueDebitNote } from '../billing/debit-note.js'
 import { applyPayment, recordPayment, reversePayment } from '../billing/payment-allocation.js'
 import { hardClosePeriod, reopenPeriod, softClosePeriod } from '../accounting/periods.js'
-import { loadCutoverReadiness } from '../cutover/backfill/readiness.js'
+import { loadCutoverReadiness, loadParityReports } from '../cutover/backfill/readiness.js'
+import { signAttestation } from '../cutover/parity/attestation.js'
 
 let registerFinVendorAdminRoutes = null
 const vendorRoutesPath = join(dirname(fileURLToPath(import.meta.url)), 'vendors', 'routes.js')
@@ -257,6 +258,14 @@ export function registerFinOpsAdminRoutes(app, { authMiddleware, requirePlatform
     return res.status(200).json(payload)
   }))
 
+  app.get('/api/admin/fin/cutover/parity', readGuards, wrap(async (req, res) => {
+    const payload = await loadParityReports(getPool(), {
+      environment: sessionEnvironment(req),
+      now: req.fin.now,
+    })
+    return res.status(200).json(payload)
+  }))
+
   app.get('/api/admin/fin/dunning/cases', readGuards, wrap(async (req, res) => {
     const cases = await listDunningCases({ environment: sessionEnvironment(req) })
     return res.status(200).json({ cases })
@@ -308,6 +317,20 @@ export function registerFinOpsAdminRoutes(app, { authMiddleware, requirePlatform
     const result = await runReconciliation(getPool(), {
       environment: sessionEnvironment(req),
       scheduleKind: 'ON_DEMAND',
+      now: req.fin.now,
+    })
+    return res.status(200).json(result)
+  }))
+
+  app.post('/api/admin/fin/cutover/attest', writeGuards, wrap(async (req, res) => {
+    const actor = actorFrom(req)
+    const result = await signAttestation({
+      environment: sessionEnvironment(req),
+      actor: {
+        actorType: 'USER',
+        actorId: actor.actorId,
+        actorEmail: actor.actorEmail,
+      },
       now: req.fin.now,
     })
     return res.status(200).json(result)

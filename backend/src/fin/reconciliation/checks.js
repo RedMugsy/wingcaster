@@ -885,4 +885,100 @@ export const CHECKS = [
          JOIN fin.contracts c ON c.id = cv.contract_id
         WHERE i.legal_entity_id IS DISTINCT FROM c.seller_legal_entity_id`,
   },
+  {
+    // Stage 13c 24h parity drift rate (DL-200). Latest daily report per
+    // source in the last full day; empty tables are GREEN.
+    check_code: 'R093',
+    severity: 'HIGH',
+    expected_delta_units: 0,
+    drift_action: 'BLOCK_CUTOVER',
+    entity_type: 'cutover_parity_reports',
+    source_query: `SELECT '00000000-0000-4000-8000-000000000093'::uuid AS entity_id,
+         CASE
+           WHEN COALESCE((
+             SELECT MAX(drift_rate_bps)
+               FROM (
+                 SELECT DISTINCT ON (source) drift_rate_bps
+                   FROM fin.cutover_parity_reports
+                  WHERE window_end - window_start >= interval '23 hours'
+                    AND window_end <= :now
+                    AND window_start >= :now - interval '48 hours'
+                  ORDER BY source, generated_at DESC
+               ) latest
+           ), 0) > 50 THEN 1
+           ELSE 0
+         END::bigint AS qty`,
+    comparison_query: `SELECT '00000000-0000-4000-8000-000000000093'::uuid AS entity_id, 0::bigint AS qty`,
+  },
+  {
+    // Stage 13c burn-in continuity (DL-200). Any non-GREEN daily report or
+    // calendar gap among sources that have reports in the last 30 days is
+    // DRIFT. Empty tables are GREEN (no evidence of failure).
+    check_code: 'R094',
+    severity: 'HIGH',
+    expected_delta_units: 0,
+    drift_action: 'BLOCK_CUTOVER',
+    entity_type: 'cutover_parity_reports',
+    source_query: `SELECT '00000000-0000-4000-8000-000000000094'::uuid AS entity_id,
+         CASE
+           WHEN EXISTS (
+             SELECT 1
+               FROM fin.cutover_parity_reports
+              WHERE window_end - window_start >= interval '23 hours'
+                AND generated_at <= :now
+                AND window_start >= :now - interval '30 days'
+                AND window_end <= :now
+                AND status IS DISTINCT FROM 'GREEN'
+           )
+           OR EXISTS (
+             SELECT 1
+               FROM (
+                 SELECT source,
+                        COUNT(*)::int AS n,
+                        (MAX((window_start AT TIME ZONE 'UTC')::date)
+                       - MIN((window_start AT TIME ZONE 'UTC')::date) + 1) AS span
+                   FROM fin.cutover_parity_reports
+                  WHERE window_end - window_start >= interval '23 hours'
+                    AND generated_at <= :now
+                    AND window_start >= :now - interval '30 days'
+                    AND window_end <= :now
+                  GROUP BY source
+               ) s
+              WHERE n < span
+           ) THEN 1
+           ELSE 0
+         END::bigint AS qty`,
+    comparison_query: `SELECT '00000000-0000-4000-8000-000000000094'::uuid AS entity_id, 0::bigint AS qty`,
+  },
+  {
+    // Stage 13c outstanding corrections trending (DL-200). Informational.
+    // DRIFT when last-24h corrections > previous-24h AND a daily parity
+    // report exists (burn-in is running). Empty tables are GREEN.
+    check_code: 'R095',
+    severity: 'MEDIUM',
+    expected_delta_units: 0,
+    drift_action: 'WARN',
+    entity_type: 'cutover_backfill_corrections',
+    source_query: `SELECT '00000000-0000-4000-8000-000000000095'::uuid AS entity_id,
+         CASE
+           WHEN EXISTS (
+             SELECT 1 FROM fin.cutover_parity_reports
+              WHERE window_end - window_start >= interval '23 hours'
+                AND generated_at <= :now
+              LIMIT 1
+           )
+           AND (
+             SELECT COUNT(*) FROM fin.cutover_backfill_corrections
+              WHERE created_at > :now - interval '24 hours'
+                AND created_at <= :now
+           ) > (
+             SELECT COUNT(*) FROM fin.cutover_backfill_corrections
+              WHERE created_at > :now - interval '48 hours'
+                AND created_at <= :now - interval '24 hours'
+           )
+           THEN 1
+           ELSE 0
+         END::bigint AS qty`,
+    comparison_query: `SELECT '00000000-0000-4000-8000-000000000095'::uuid AS entity_id, 0::bigint AS qty`,
+  },
 ]

@@ -65,6 +65,7 @@ export function Navbar() {
     { path: '/admin/fin/invoices', label: 'Invoices' },
     { path: '/admin/fin/vendor-costs', label: 'Vendor costs' },
     { path: '/admin/fin/reconciliation', label: 'Reconciliation' },
+    { path: '/admin/fin/parity', label: 'Parity' },
     { path: '/admin/fin/exceptions', label: 'Exceptions' },
     { path: '/admin/fin/approvals', label: 'Approvals' },
     { path: '/admin/fin/audit', label: 'Audit' },

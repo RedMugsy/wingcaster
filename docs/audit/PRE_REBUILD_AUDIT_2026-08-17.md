@@ -1556,3 +1556,27 @@ Fast suite also runs `cutover/mode.test.js`, `cutover/mapping.test.js`.
 
 **Business gate:** this PR does not flip anything. Cutover is Stage 13d. Finance sign-off still lives at 13d.
 
+### Stage 13c / parity monitoring + reports -- 2026-08-22
+
+**Landed on `feat/stage-13c-parity`:** BURN-IN parity worker that compares legacy `commercial.*` rows against their `fin.*` mirrors, records drift, and produces the parity report Finance signs before Stage 13d. Base is main @ `10c1984` (Stage 13b). Does **not** flip source-of-truth (13d). Does **not** write, alter, or drop `commercial.*` rows or schema. `fin.*` writes are only into `cutover_parity_reports`, `cutover_parity_drift`, and `cutover_parity_attestations`.
+
+**Migrations:**
+- `250_fin_cutover_parity_reports.sql` -- APPEND_ONLY daily/hourly reports. UNIQUE `(environment, source, window_start, window_end)`. FORCE RLS. Status GREEN / AMBER / RED from drift-rate bps (DL-197 / DL-200).
+- `251_fin_cutover_parity_drift.sql` -- APPEND_ONLY observed drift (10-kind CHECK). Natural UNIQUE `(report_id, source, source_row_id, drift_kind)`. FORCE RLS.
+- `252_fin_cutover_parity_attestations.sql` -- APPEND_ONLY Finance attestation. UNIQUE `(environment, attestation_hash)` (DL-198). FORCE RLS. Platform-admin insert via `platform_admin_bypass()`.
+
+**Services:** `backend/src/fin/cutover/parity/{comparator,worker,orchestrator,attestation,cli}.js`. Worker is an offline batch (advisory class `FIN_CUTOVER_PARITY = 1031`, per-source `hashtext(source)`). Hourly last-hour window; daily UTC-day rollup feeds the 30-day burn-in count. Parity OBSERVES only; it does not reconcile.
+
+**Reconciliation:** R093 24h parity drift rate (HIGH, `BLOCK_CUTOVER`, 50 bps). R094 burn-in continuity (HIGH, `BLOCK_CUTOVER`). R095 outstanding corrections trending (MEDIUM, `WARN`). Empty parity tables are GREEN (DL-203).
+
+**Admin:** `GET /api/admin/fin/cutover/readiness` extended with `parity`, `attestation`, R093-R095, and `ready_for_cutover` (DL-201). `GET /api/admin/fin/cutover/parity` (last daily reports). `POST /api/admin/fin/cutover/attest` (platform_admin + elevated + Idempotency-Key; `actorType='USER'`).
+
+**Web:** `/admin/fin/parity` (ParityPage -- 30-day table + drift-rate chart + gated Sign attestation). Overview gains a Cutover readiness tile (R090-R095 + attestation).
+
+**Decision log:** DL-196 .. DL-205 (DL-190..195 were consumed by Stage 11 follow-up; DL-204..205 reserved).
+
+**CI file list (must appear in the postgres job summary):**
+`parity/worker-happy.test.js`, `parity/worker-missing-fin.test.js`, `parity/worker-field-mismatch.test.js`, `parity/worker-idempotent.test.js`, `parity/attestation-signing.test.js`, `reconciliation/r093-r095.test.js`, `reconciliation/runner-parity-green.test.js`, `admin/routes-cutover-parity.test.js`.
+ Fast suite also runs `parity/comparator.test.js`, `parity/attestation.test.js`. Web jsdom: `web/src/pages/admin/fin/pages.test.tsx`.
+
+**Business gate:** this PR does not flip anything. Cutover is Stage 13d. Finance sign-off happens via `POST /api/admin/fin/cutover/attest` AFTER this stage merges, produces 30 days of GREEN parity in prod, and Finance manually signs.
