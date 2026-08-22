@@ -36,6 +36,7 @@ import { applyPayment, recordPayment, reversePayment } from '../billing/payment-
 import { hardClosePeriod, reopenPeriod, softClosePeriod } from '../accounting/periods.js'
 import { loadCutoverReadiness, loadParityReports } from '../cutover/backfill/readiness.js'
 import { signAttestation } from '../cutover/parity/attestation.js'
+import { activateFinOnly, deactivateFinOnly } from '../cutover/activation.js'
 
 let registerFinVendorAdminRoutes = null
 const vendorRoutesPath = join(dirname(fileURLToPath(import.meta.url)), 'vendors', 'routes.js')
@@ -331,6 +332,38 @@ export function registerFinOpsAdminRoutes(app, { authMiddleware, requirePlatform
         actorId: actor.actorId,
         actorEmail: actor.actorEmail,
       },
+      now: req.fin.now,
+    })
+    return res.status(200).json(result)
+  }))
+
+  app.post('/api/admin/fin/cutover/activate', writeGuards, wrap(async (req, res) => {
+    const actor = actorFrom(req)
+    if (!actor.idempotencyKey) {
+      throw finError('IDEMPOTENCY_KEY_REQUIRED', { category: CATEGORY.IDEMPOTENCY, httpStatus: 400 })
+    }
+    const body = commandBody(req)
+    const result = await activateFinOnly({
+      environment: pick(body, 'environment') || sessionEnvironment(req),
+      attestationId: pick(body, 'attestation_id', 'attestationId'),
+      note: pick(body, 'note') || null,
+      actor,
+      now: req.fin.now,
+    })
+    return res.status(200).json(result)
+  }))
+
+  app.post('/api/admin/fin/cutover/deactivate', writeGuards, wrap(async (req, res) => {
+    const actor = actorFrom(req)
+    if (!actor.idempotencyKey) {
+      throw finError('IDEMPOTENCY_KEY_REQUIRED', { category: CATEGORY.IDEMPOTENCY, httpStatus: 400 })
+    }
+    const body = commandBody(req)
+    const result = await deactivateFinOnly({
+      environment: pick(body, 'environment') || sessionEnvironment(req),
+      reasonCode: pick(body, 'reason_code', 'reasonCode'),
+      note: pick(body, 'note'),
+      actor,
       now: req.fin.now,
     })
     return res.status(200).json(result)

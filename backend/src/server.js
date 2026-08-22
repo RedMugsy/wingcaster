@@ -12,6 +12,7 @@ import { v4 as uuidv4 } from 'uuid'
 import multer from 'multer'
 import { loadDb, getDb, findAll, findOne, insert, remove, update, transaction } from './db.js'
 import { getPool, query } from './persistence/postgres-adapter.js'
+import { assertCutoverAttestationGate } from './fin/cutover/startup-gate.js'
 import { seedData } from './seed.js'
 import { signToken, authMiddleware, requireElevated } from './auth.js'
 import { registerTwoFactorRoutes, startSigninChallengeIfRequired } from './auth-2fa.js'
@@ -7948,6 +7949,10 @@ app.use((err, req, res, _next) => {
 
 // ==================== START ====================
 const startServer = async () => {
+  await assertCutoverAttestationGate({
+    pool: getPool(),
+    log: (msg, extra) => logger.info(extra || {}, msg),
+  })
   const port = await resolveServerPort()
   warnUnavailablePublishChannels(logger)
   const unverifiableWebhookChannels = [

@@ -34,6 +34,8 @@ export const FIN_VENDOR_STATEMENT_RECON = 1021
 export const FIN_CUTOVER_BACKFILL = 1030
 /** Stage 13c parity worker mutex. Session-scoped per tick; key2 = hashtext(source) so sources run in parallel (DL-196). */
 export const FIN_CUTOVER_PARITY = 1031
+/** Stage 13d cutover activate/deactivate mutex. Session-scoped; key2 = hashtext(environment) (DL-206). */
+export const FIN_CUTOVER_ACTIVATION = 1032
 
 export const LOCK_CLASSES = {
   FIN_CONTRACT_RENEWAL,
@@ -58,4 +60,5 @@ export const LOCK_CLASSES = {
   FIN_VENDOR_STATEMENT_RECON,
   FIN_CUTOVER_BACKFILL,
   FIN_CUTOVER_PARITY,
+  FIN_CUTOVER_ACTIVATION,
 }

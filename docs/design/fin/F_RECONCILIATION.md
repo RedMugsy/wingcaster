@@ -1265,6 +1265,19 @@ Same-tenant walk is required for `rated_usage`, `payments`, `lots`, `holds` (run
 
 Stage 13 **adds** a detective query (not a `fin.*` write) that `wa_listings.ai_credit_transactions` created after cutover have a matching `fin.usage_events` row with `source_system = 'wa_listings'`. Residual rows without a match are A-4 drift. The live `credits.js` path is **not** patched in Stage 0 (DL-011).
 
+### R096 — attestation freshness (Stage 13d / DL-208)
+
+| Field | Value |
+|---|---|
+| check_code | `R096` |
+| severity | `CRITICAL` |
+| expected_delta_units | `0` |
+| drift_action | `BLOCK_NEW_ISSUANCE` |
+| source_query | `SELECT 1 AS qty` where `fin.cutover_active_environment.mode='FIN_ONLY'` AND (`attestation_id` IS NULL OR referenced `signed_at < :now - 7 days`) |
+| comparison_query | `0` |
+
+DRIFT if the active env is FIN_ONLY without a fresh attestation. Empty / OFF / DUAL worlds are GREEN. Wired into `resolveGlobalCutoverMode` as defense-in-depth.
+
 ---
 
 ## 15. Historical backfill reconciliation (A-3, D-1, D-4)
@@ -1379,7 +1392,7 @@ Live remediations that stay **out** of Stage 0: `NOT NULL` + `CHECK` on `google_
 | 9 | `R060_*.js` … `R069_*.js` | `R060`–`R069` |
 | 10 | `R070_*.js` … `R079_*.js` | `R070`–`R079` |
 | 11 | `R080_*.js` … `R089_*.js` | `R080`–`R089` |
-| 13 | `R090_*.js` + `BF_A3.js` / `BF_D1.js` / `BF_D4.js` | `R090`–`R092`, `BF-A3`, `BF-D1`, `BF-D4` |
+| 13 | `R090_*.js` + `BF_A3.js` / `BF_D1.js` / `BF_D4.js` | `R090`–`R096`, `BF-A3`, `BF-D1`, `BF-D4` |
 
 ---
 

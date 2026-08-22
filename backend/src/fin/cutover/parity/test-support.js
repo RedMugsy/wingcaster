@@ -82,6 +82,33 @@ export function utcDayRange(dayIso) {
   return { windowStart: start, windowEnd: end }
 }
 
+export async function insertAttestationRow(pool, {
+  environment = 'LIVE',
+  signedAt = NOW,
+  hash = `hash-${randomUUID()}`,
+  email = 'finance@example.test',
+  burnInDays = 30,
+} = {}) {
+  const id = randomUUID()
+  await pool.query(
+    `INSERT INTO fin.cutover_parity_attestations (
+       id, environment, burn_in_days, first_green_at, last_green_at,
+       reports_included_from, reports_included_to,
+       total_rows_checked, total_rows_drifted, outstanding_corrections,
+       attestation_hash, signed_by_actor_type, signed_by_actor_id,
+       signed_by_email, signed_at, created_at
+     ) VALUES (
+       $1,$2,$3,$4::timestamptz,$4::timestamptz,
+       NULL,NULL,
+       0,0,0,
+       $5,'USER',NULL,
+       $6,$4::timestamptz,$4::timestamptz
+     )`,
+    [id, environment, burnInDays, signedAt, hash, email],
+  )
+  return id
+}
+
 export async function seedConsecutiveGreenDays(pool, {
   source = SOURCE_USAGE,
   endDay = null,

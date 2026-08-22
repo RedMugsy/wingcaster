@@ -20,6 +20,8 @@ finPostgresSuite('admin/routes-cutover-parity', {}, ({ url, pool }) => {
       R093: expect.stringMatching(/^(GREEN|AMBER|DRIFT)$/),
       R094: expect.stringMatching(/^(GREEN|DRIFT)$/),
       R095: expect.stringMatching(/^(GREEN|DRIFT|WARN)$/),
+      R096: 'GREEN',
+      mode: 'OFF',
       parity: expect.objectContaining({
         last_report_at: null,
         last_drift_rate_bps: expect.any(Number),
