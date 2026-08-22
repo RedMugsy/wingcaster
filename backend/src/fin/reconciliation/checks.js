@@ -981,4 +981,31 @@ export const CHECKS = [
          END::bigint AS qty`,
     comparison_query: `SELECT '00000000-0000-4000-8000-000000000095'::uuid AS entity_id, 0::bigint AS qty`,
   },
+  {
+    // Stage 13d attestation freshness (DL-208). DRIFT when an environment
+    // is FIN_ONLY without a referenced attestation signed within 7 days.
+    // Empty / OFF / DUAL worlds are GREEN.
+    check_code: 'R096',
+    severity: 'CRITICAL',
+    expected_delta_units: 0,
+    drift_action: 'BLOCK_NEW_ISSUANCE',
+    entity_type: 'cutover_active_environment',
+    source_query: `SELECT '00000000-0000-4000-8000-000000000096'::uuid AS entity_id,
+         CASE
+           WHEN EXISTS (
+             SELECT 1
+               FROM fin.cutover_active_environment e
+               LEFT JOIN fin.cutover_parity_attestations a
+                 ON a.id = e.attestation_id
+              WHERE e.mode = 'FIN_ONLY'
+                AND (
+                  e.attestation_id IS NULL
+                  OR a.signed_at IS NULL
+                  OR a.signed_at < :now - interval '7 days'
+                )
+           ) THEN 1
+           ELSE 0
+         END::bigint AS qty`,
+    comparison_query: `SELECT '00000000-0000-4000-8000-000000000096'::uuid AS entity_id, 0::bigint AS qty`,
+  },
 ]

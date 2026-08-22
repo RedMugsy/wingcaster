@@ -10,6 +10,7 @@ import {
   latestAttestation,
   listDailyParityReports,
 } from '../parity/attestation.js'
+import { readActiveEnvironment } from '../mode.js'
 
 function qtyMap(rows) {
   const map = new Map()
@@ -74,7 +75,7 @@ export async function loadCutoverReadiness(pool, {
   const dualWriteErrorCount24h = errors.rows[0]?.n || 0
 
   const recon = {}
-  for (const code of ['R090', 'R091', 'R092', 'R093', 'R094', 'R095']) {
+  for (const code of ['R090', 'R091', 'R092', 'R093', 'R094', 'R095', 'R096']) {
     recon[code] = await evalCheck(pool, code, stamped)
   }
 
@@ -134,12 +135,15 @@ export async function loadCutoverReadiness(pool, {
   const r093 = r093Display(recon.R093, lastDriftRateBps)
   const r094 = recon.R094
   const r095 = r095Display(recon.R095)
+  const r096 = recon.R096
+  const active = await readActiveEnvironment(pool, env)
 
   const readyForCutover = recon.R090 === 'GREEN'
     && recon.R091 === 'GREEN'
     && recon.R092 === 'GREEN'
     && recon.R093 === 'GREEN'
     && recon.R094 === 'GREEN'
+    && recon.R096 === 'GREEN'
     && dualWriteErrorCount24h < 100
     && attestationFresh
 
@@ -151,6 +155,8 @@ export async function loadCutoverReadiness(pool, {
     R093: r093,
     R094: r094,
     R095: r095,
+    R096: r096,
+    mode: active?.mode || 'OFF',
     backfill_status: progress.rows,
     corrections_total: corrections.rows[0]?.n || 0,
     parity: {

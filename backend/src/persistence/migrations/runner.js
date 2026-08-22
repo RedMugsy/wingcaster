@@ -19,6 +19,15 @@ function migrationSort(a, b) {
   return na - nb
 }
 
+/**
+ * Auto-applied SQL only. `NNN[letter]_*.sql` (e.g. 260b_*.sql) is a
+ * paired down-migration for operators and is never wired into the loop.
+ */
+export function isAutoMigration(filename) {
+  return extname(filename).toLowerCase() === '.sql'
+    && !/^\d+[a-zA-Z]_/.test(basename(filename))
+}
+
 function quoteIdentifier(identifier) {
   return `"${String(identifier).replaceAll('"', '""')}"`
 }
@@ -69,7 +78,7 @@ export async function runMigrations(options = {}) {
     const applied = new Set(rows.map((row) => row.filename))
 
     const files = (await readdir(__dirname))
-      .filter((f) => extname(f).toLowerCase() === '.sql')
+      .filter((f) => isAutoMigration(f))
       .sort(migrationSort)
 
     for (const file of files) {

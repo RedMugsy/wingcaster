@@ -1506,19 +1506,19 @@ Follow-up #2 (2026-08-21): provider-cost joins billing_account via the rated_usa
 Follow-up (2026-08-21 / PR #17): recon test Boolean-wraps the runId truthy check (no response-shape change). Billing reopen of OPEN is a Stage 12 route-level 409 `BILLING_PERIOD_ALREADY_OPEN` (DL-170) â€” Stage 10 already SKIP'd OPEN; the red test had closed first so reopen of `USAGE_CLOSING` returned 200. Facility activate seed now stamps `valid_from` 5s before frozen `NOW`. Invoice void test seeds an `INVOICE_VOID` approval. Domain commands and Stage 8 `transition()` untouched.
 
 
-### Stage 13a / dual-write infrastructure — 2026-08-21
+### Stage 13a / dual-write infrastructure ï¿½ 2026-08-21
 
 **Landed on `feat/stage-13a-dual-write`:** dual-write infrastructure only. Base is main @ `35f1e1e` (Stage 12). Does **not** flip source-of-truth (13d). Does **not** add R090-R092 or backfill (13b). Does **not** drop/alter `commercial.*` schemas or touch the commercial recon path.
 
 **Migrations:**
-- `230_fin_cutover_dual_write.sql` — append-only `fin.cutover_dual_write_errors` (FORCE RLS; app INSERT; admin/recon SELECT).
-- `231_fin_cutover_tenant_allowlist.sql` — `fin.cutover_tenant_allowlist` keyed by `(environment, public tenant_id)` with mode `OFF|DUAL`; seeded empty.
+- `230_fin_cutover_dual_write.sql` ï¿½ append-only `fin.cutover_dual_write_errors` (FORCE RLS; app INSERT; admin/recon SELECT).
+- `231_fin_cutover_tenant_allowlist.sql` ï¿½ `fin.cutover_tenant_allowlist` keyed by `(environment, public tenant_id)` with mode `OFF|DUAL`; seeded empty.
 
 **Services:** `backend/src/fin/cutover/{mode,dual-writer,mapping,context}.js` + `attachFinCutoverMiddleware` for `req.finCutover`.
 
 **Boundary (un-frozen for dual-write only):**
-- `billing/events.js` `emitUsageEvent` — DUAL/FIN_ONLY tenants: legacy `commercial.usage_events` + `ingestUsageEventWithClient` in one `transaction(fn)` (DL-171).
-- `billing/ledger.js` `recordConsumption` / consumption `writeLedgerEntry` — dual-write to `authorizeUsage` via DL-179 mapping; failures to DLQ.
+- `billing/events.js` `emitUsageEvent` ï¿½ DUAL/FIN_ONLY tenants: legacy `commercial.usage_events` + `ingestUsageEventWithClient` in one `transaction(fn)` (DL-171).
+- `billing/ledger.js` `recordConsumption` / consumption `writeLedgerEntry` ï¿½ dual-write to `authorizeUsage` via DL-179 mapping; failures to DLQ.
 - No `commercial.holds` / commercial capture / commercial `refundPurchase` writers found; translators DL-176..178 land for later wiring.
 
 **Reconciliation:** R084 only (dual-write error rate WARN). R085-R089 reserved. R090-R092 deferred to 13b/13c.
@@ -1580,3 +1580,27 @@ Fast suite also runs `cutover/mode.test.js`, `cutover/mapping.test.js`.
  Fast suite also runs `parity/comparator.test.js`, `parity/attestation.test.js`. Web jsdom: `web/src/pages/admin/fin/pages.test.tsx`.
 
 **Business gate:** this PR does not flip anything. Cutover is Stage 13d. Finance sign-off happens via `POST /api/admin/fin/cutover/attest` AFTER this stage merges, produces 30 days of GREEN parity in prod, and Finance manually signs.
+
+### Stage 13d / cutover flip -- 2026-08-22
+
+**Landed on `feat/stage-13d-cutover`:** source-of-truth flip infrastructure. Base is main @ `818154c` (Stage 13c). `fin.*` becomes the operator-flippable source of truth; `commercial.*` schema stays intact but writes are REVOKE'd. Reads can start migrating via `fin_public.*` views. Does **not** drop, ALTER, or mutate any `commercial.*` row. Does **not** edit `fin.*` domain command code. Merge does **not** flip production -- `fin.cutover_active_environment.mode` stays `OFF` until `POST /api/admin/fin/cutover/activate`.
+
+**Migrations:**
+- `260a_fin_cutover_freeze_commercial.sql` -- DO block discovers `pg_tables` in `commercial` and REVOKEs INSERT/UPDATE/DELETE/TRUNCATE from every non-migrator role (DL-206). SELECT kept. Idempotent. **Operator-only**: `NNN[letter]_*.sql` skipped by `isAutoMigration`. Applied via `POST /api/admin/fin/cutover/freeze-commercial` after `/activate` (DL-216). Railway auto-deploys merges â€” auto-applying an unconditional REVOKE on startup would flip production before the operator was ready.
+- `260b_fin_cutover_thaw_commercial.sql` -- paired down-migration. MANUAL APPLY ONLY; `runMigrations` skips `NNN[letter]_*.sql`.
+- `261_fin_cutover_read_views.sql` -- `fin_public.usage_events` and `fin_public.ledger_entries` with `security_invoker=true` so FORCE RLS continues to apply (DL-210). Commercial-only tables get a NOTICE, not a view.
+- `262_fin_cutover_readiness_gate.sql` -- `fin.cutover_active_environment` singleton, seeded `OFF` per env. BEFORE INSERT/UPDATE trigger requires a 7-day-fresh attestation when `mode='FIN_ONLY'`. GRANT INSERT/UPDATE/DELETE under `platform_admin_bypass()`.
+
+**Services:** `backend/src/fin/cutover/{activation,startup-gate}.js`; `mode.js` gains `resolveGlobalCutoverMode` (DB row takes precedence when `FIN_ONLY`, DL-207). Startup gate in `server.js#startServer` runs after DB setup and before `app.listen` (DL-209). Admin: `POST /api/admin/fin/cutover/activate` and `/deactivate` (platform_admin + elevated + Idempotency-Key). Advisory class `FIN_CUTOVER_ACTIVATION = 1032`.
+
+**Reconciliation:** R096 attestation freshness (CRITICAL, `BLOCK_NEW_ISSUANCE`). Empty/OFF worlds stay GREEN (DL-208). Wired into the mode resolver as fail-closed defense.
+
+**Runbook:** `docs/ops/CUTOVER_13D_RUNBOOK.md` -- T-24h pre-flight, T-0 flip, T+24h monitor, rollback (deactivate + manual 260b).
+
+**Decision log:** DL-206 .. DL-215 (DL-212..215 reserved).
+
+**CI file list (must appear in the postgres job summary):**
+`cutover/activation-happy.test.js`, `cutover/activation-stale-attestation.test.js`, `cutover/activation-missing-attestation.test.js`, `cutover/deactivation.test.js`, `cutover/startup-gate.test.js`, `cutover/read-views.test.js`, `reconciliation/r096.test.js`, `admin/routes-cutover-activate.test.js`.
+ Fast suite also runs `cutover/activation.test.js`.
+
+**Business gate:** this PR does not flip anything in production on merge. Activation is a coordinated operator action per the runbook and requires a signed attestation within 7 days.

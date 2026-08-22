@@ -1,4 +1,12 @@
-export { resolveCutoverMode, resolveCutoverModeFromParts, attachFinCutoverMiddleware, CUTOVER_MODES } from './mode.js'
+export {
+  resolveCutoverMode,
+  resolveCutoverModeFromParts,
+  resolveGlobalCutoverMode,
+  attachFinCutoverMiddleware,
+  CUTOVER_MODES,
+} from './mode.js'
+export { activateFinOnly, deactivateFinOnly } from './activation.js'
+export { assertCutoverAttestationGate } from './startup-gate.js'
 export { dualWrite } from './dual-writer.js'
 export {
   usageEventInput,
