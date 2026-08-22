@@ -8,7 +8,7 @@ import { NOW } from '../testing/seed.js'
 import { finPostgresSuite } from '../testing/suite.js'
 import { ingestUsageEvent } from '../usage/ingest.js'
 import { insertAccountingEvent } from '../accounting/events.js'
-import { runReconciliation } from '../runner.js'
+import { runReconciliation } from './runner.js'
 
 async function dropUsageEnvCheck(pool) {
   const { rows } = await pool.query(
